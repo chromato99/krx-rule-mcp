@@ -23,7 +23,7 @@ func TestRealDataVectorSearchEvaluation(t *testing.T) {
 	}
 	indexPath = resolveDataTestPath(indexPath)
 	vectorPath = resolveDataTestPath(vectorPath)
-	dataRoot := filepath.Join("..", "..", "data")
+	dataRoot := dataTestRoot()
 	repo, err := LoadRepository(dataRoot, indexPath, vectorPath)
 	if err != nil {
 		t.Fatalf("load vector repository: %v", err)

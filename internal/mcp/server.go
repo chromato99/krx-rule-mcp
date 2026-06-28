@@ -12,9 +12,10 @@ import (
 )
 
 type Service struct {
-	Repo     *searchindex.Repository
-	Embedder searchindex.Embedder
-	Logger   *slog.Logger
+	Repo          *searchindex.Repository
+	Embedder      searchindex.Embedder
+	DomainLexicon []searchindex.DomainLexiconEntry
+	Logger        *slog.Logger
 }
 
 type SearchRulesInput struct {
@@ -28,8 +29,10 @@ type SearchRulesInput struct {
 }
 
 type SearchRulesOutput struct {
-	Mode    string                     `json:"mode"`
-	Results []searchindex.SearchResult `json:"results"`
+	Mode           string                            `json:"mode"`
+	ScoreNote      string                            `json:"score_note"`
+	QueryExpansion *searchindex.DomainQueryExpansion `json:"query_expansion,omitempty"`
+	Results        []searchindex.SearchResult        `json:"results"`
 }
 
 type GetRuleInput struct {
@@ -40,6 +43,20 @@ type GetRuleInput struct {
 type RuleOutput struct {
 	Document model.Document `json:"document"`
 	Content  string         `json:"content"`
+}
+
+type GetContextInput struct {
+	ChunkID      string `json:"chunk_id" jsonschema:"Chunk id returned by search_rules as matched_chunk_id or attachment_matches[].chunk_id."`
+	BeforeChunks int    `json:"before_chunks,omitempty" jsonschema:"Number of previous chunks from the same document body or attachment, default 1, max 5."`
+	AfterChunks  int    `json:"after_chunks,omitempty" jsonschema:"Number of following chunks from the same document body or attachment, default 1, max 5."`
+	MaxChars     int    `json:"max_chars,omitempty" jsonschema:"Optional maximum combined context characters."`
+}
+
+type ContextOutput struct {
+	Document      model.Document             `json:"document"`
+	Chunks        []searchindex.ChunkContext `json:"chunks"`
+	Content       string                     `json:"content"`
+	FormulaNotice *model.FormulaNotice       `json:"formula_notice,omitempty"`
 }
 
 type ListRulesInput struct {
@@ -93,6 +110,11 @@ func NewServer(service *Service, version string) *mcpsdk.Server {
 		Description: "Read a collected KRX rule or amendment notice by id.",
 	}, service.getRule)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name:        "get_context",
+		Title:       "Get matched KRX context",
+		Description: "Read the matched search chunk and nearby chunks from the same rule body or attachment. Use matched_chunk_id or attachment_matches[].chunk_id from search_rules.",
+	}, service.getContext)
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
 		Name:        "list_rules",
 		Title:       "List KRX rules",
 		Description: "List collected KRX rules or notices with metadata filters.",
@@ -136,6 +158,13 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	if strings.TrimSpace(in.Query) == "" && s.Embedder == nil {
 		return nil, SearchRulesOutput{}, fmt.Errorf("query is required")
 	}
+	expansion := searchindex.ExpandDomainQueryWithLexicon(in.Query, s.DomainLexicon)
+	searchQuery := in.Query
+	var queryExpansion *searchindex.DomainQueryExpansion
+	if expansion.Applied() {
+		searchQuery = expansion.ExpandedQuery
+		queryExpansion = &expansion
+	}
 	filter := searchindex.Filter{
 		DocumentType:  parseDocumentType(in.DocumentType),
 		Language:      parseLanguage(in.Language),
@@ -145,8 +174,11 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	}
 	var queryVector []float64
 	mode := "bm25"
-	if s.Embedder != nil && s.Repo.Engine.HasVectors() && strings.TrimSpace(in.Query) != "" {
-		vectors, err := s.Embedder.Embed(ctx, []string{in.Query})
+	if queryExpansion != nil {
+		mode = "bm25+domain-expansion"
+	}
+	if s.Embedder != nil && s.Repo.Engine.HasVectors() && strings.TrimSpace(searchQuery) != "" {
+		vectors, err := s.Embedder.Embed(ctx, []string{searchQuery})
 		if err != nil {
 			if s.Logger != nil {
 				s.Logger.Warn("embedding query failed; falling back to BM25", "error", err)
@@ -154,16 +186,45 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 		} else if len(vectors) == 1 {
 			queryVector = vectors[0]
 			mode = "bm25+vector-rrf"
+			if queryExpansion != nil {
+				mode = "bm25+vector-rrf+domain-expansion"
+			}
 		}
 	}
 	results := s.Repo.Engine.Search(searchindex.SearchOptions{
-		Query:       in.Query,
+		Query:       searchQuery,
 		Limit:       in.Limit,
 		Filter:      filter,
 		QueryVector: queryVector,
 	})
+	mode = refineSearchMode(mode, queryExpansion != nil, queryVector, results)
 	s.addFormulaNotices(results)
-	return nil, SearchRulesOutput{Mode: mode, Results: results}, nil
+	return nil, SearchRulesOutput{
+		Mode:           mode,
+		ScoreNote:      "Scores are ranking signals for ordering results; they are not confidence probabilities.",
+		QueryExpansion: queryExpansion,
+		Results:        results,
+	}, nil
+}
+
+func refineSearchMode(mode string, expanded bool, queryVector []float64, results []searchindex.SearchResult) string {
+	if len(queryVector) == 0 || len(results) == 0 {
+		return mode
+	}
+	vectorOnly := true
+	for _, result := range results {
+		if result.BM25Score > 0 {
+			vectorOnly = false
+			break
+		}
+	}
+	if !vectorOnly {
+		return mode
+	}
+	if expanded {
+		return "vector+domain-expansion"
+	}
+	return "vector"
 }
 
 func (s *Service) getRule(_ context.Context, _ *mcpsdk.CallToolRequest, in GetRuleInput) (*mcpsdk.CallToolResult, RuleOutput, error) {
@@ -175,6 +236,38 @@ func (s *Service) getRule(_ context.Context, _ *mcpsdk.CallToolRequest, in GetRu
 	meta := doc
 	meta.Body = ""
 	return nil, RuleOutput{Document: meta, Content: content}, nil
+}
+
+func (s *Service) getContext(_ context.Context, _ *mcpsdk.CallToolRequest, in GetContextInput) (*mcpsdk.CallToolResult, ContextOutput, error) {
+	chunkID := strings.TrimSpace(in.ChunkID)
+	if chunkID == "" {
+		return nil, ContextOutput{}, fmt.Errorf("chunk_id is required")
+	}
+	before := boundedContextWindow(in.BeforeChunks, 1)
+	after := boundedContextWindow(in.AfterChunks, 1)
+	doc, chunks, ok := s.Repo.Engine.ContextAround(chunkID, before, after)
+	if !ok {
+		return nil, ContextOutput{}, fmt.Errorf("chunk %q not found", chunkID)
+	}
+	meta := doc
+	meta.Body = ""
+	content := contextContent(chunks)
+	content = limitRunes(content, in.MaxChars)
+	var notice *model.FormulaNotice
+	for _, chunk := range chunks {
+		if chunk.AttachmentID == "" {
+			continue
+		}
+		att, ok := s.Repo.Attachments[chunk.AttachmentID]
+		if !ok {
+			continue
+		}
+		if candidate := formulaNoticeForAttachment(att); candidate != nil {
+			notice = candidate
+			break
+		}
+	}
+	return nil, ContextOutput{Document: meta, Chunks: chunks, Content: content, FormulaNotice: notice}, nil
 }
 
 func (s *Service) listRules(_ context.Context, _ *mcpsdk.CallToolRequest, in ListRulesInput) (*mcpsdk.CallToolResult, ListRulesOutput, error) {
@@ -272,6 +365,16 @@ func formulaNoticeForAttachment(att searchindex.AttachmentDocument) *model.Formu
 	if count == 0 && !sourceAvailable && !latexAvailable {
 		return nil
 	}
+	if !sourceAvailable && !latexAvailable {
+		return &model.FormulaNotice{
+			Severity:                "info",
+			Code:                    "formula_text_detected",
+			Message:                 "This result contains formula-like converted text, but no preserved HWP EqEdit block or generated LaTeX block was detected. Use it as retrieval context and verify exact formulas against the original attachment when precision matters.",
+			SourceEquationAvailable: false,
+			GeneratedLatexAvailable: false,
+			FormulaCount:            count,
+		}
+	}
 	return &model.FormulaNotice{
 		Severity:                "info",
 		Code:                    "hwp_formula_latex_best_effort",
@@ -280,6 +383,39 @@ func formulaNoticeForAttachment(att searchindex.AttachmentDocument) *model.Formu
 		GeneratedLatexAvailable: latexAvailable,
 		FormulaCount:            count,
 	}
+}
+
+func boundedContextWindow(value, fallback int) int {
+	if value == 0 {
+		value = fallback
+	}
+	if value < 0 {
+		return 0
+	}
+	if value > 5 {
+		return 5
+	}
+	return value
+}
+
+func contextContent(chunks []searchindex.ChunkContext) string {
+	var b strings.Builder
+	for i, chunk := range chunks {
+		if i > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("<!-- chunk_id: ")
+		b.WriteString(chunk.ID)
+		b.WriteString(" source: ")
+		b.WriteString(chunk.Source)
+		if chunk.AttachmentID != "" {
+			b.WriteString(" attachment_id: ")
+			b.WriteString(chunk.AttachmentID)
+		}
+		b.WriteString(" -->\n")
+		b.WriteString(chunk.Text)
+	}
+	return b.String()
 }
 
 func parseDocumentType(value string) model.DocumentType {

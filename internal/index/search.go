@@ -41,6 +41,8 @@ type SearchResult struct {
 	VectorScore       float64              `json:"vector_score,omitempty"`
 	Snippet           string               `json:"snippet,omitempty"`
 	MatchedSource     string               `json:"matched_source,omitempty"`
+	MatchedChunkID    string               `json:"matched_chunk_id,omitempty"`
+	MatchedChunkIndex int                  `json:"matched_chunk_index,omitempty"`
 	AttachmentMatches []AttachmentMatch    `json:"attachment_matches,omitempty"`
 	FormulaNotice     *model.FormulaNotice `json:"formula_notice,omitempty"`
 	URI               string               `json:"uri"`
@@ -52,14 +54,31 @@ type AttachmentMatch struct {
 	FileName      string                 `json:"file_name,omitempty"`
 	URI           string                 `json:"uri"`
 	Status        model.AttachmentStatus `json:"status,omitempty"`
+	ChunkID       string                 `json:"chunk_id,omitempty"`
+	ChunkIndex    int                    `json:"chunk_index,omitempty"`
 	Score         float64                `json:"score,omitempty"`
 	Snippet       string                 `json:"snippet,omitempty"`
 	FormulaNotice *model.FormulaNotice   `json:"formula_notice,omitempty"`
 }
 
+type ChunkContext struct {
+	ID               string                 `json:"id"`
+	DocumentID       string                 `json:"document_id"`
+	Index            int                    `json:"index"`
+	Source           string                 `json:"source"`
+	URI              string                 `json:"uri"`
+	AttachmentID     string                 `json:"attachment_id,omitempty"`
+	AttachmentTitle  string                 `json:"attachment_title,omitempty"`
+	AttachmentFile   string                 `json:"attachment_file,omitempty"`
+	AttachmentStatus model.AttachmentStatus `json:"attachment_status,omitempty"`
+	Text             string                 `json:"text"`
+}
+
 type Engine struct {
 	docs         map[string]model.Document
 	chunks       []chunk
+	chunkByID    map[string]int
+	chunkGroups  map[string][]int
 	df           map[string]int
 	avgDocLength float64
 }
@@ -85,8 +104,10 @@ func Build(docs []model.Document, vectors map[string][]float64) *Engine {
 
 func BuildWithAttachments(docs []model.Document, attachments map[string]AttachmentDocument, vectors map[string][]float64) *Engine {
 	e := &Engine{
-		docs: make(map[string]model.Document, len(docs)),
-		df:   map[string]int{},
+		docs:        make(map[string]model.Document, len(docs)),
+		chunkByID:   map[string]int{},
+		chunkGroups: map[string][]int{},
+		df:          map[string]int{},
 	}
 	var totalLen int
 	for _, doc := range docs {
@@ -138,7 +159,7 @@ func BuildWithAttachments(docs []model.Document, attachments map[string]Attachme
 }
 
 func (e *Engine) addChunk(c chunk, tokenText string) int {
-	tokens := Tokenize(tokenText)
+	tokens := indexTokenize(tokenText)
 	c.Tokens = tokens
 	c.tokenMap = countTokens(tokens)
 	seen := map[string]struct{}{}
@@ -149,8 +170,19 @@ func (e *Engine) addChunk(c chunk, tokenText string) int {
 		seen[tok] = struct{}{}
 		e.df[tok]++
 	}
+	index := len(e.chunks)
 	e.chunks = append(e.chunks, c)
+	e.chunkByID[c.ID] = index
+	key := chunkGroupKey(c)
+	e.chunkGroups[key] = append(e.chunkGroups[key], index)
 	return len(tokens)
+}
+
+func chunkGroupKey(c chunk) string {
+	if c.Source == "attachment" {
+		return c.DocID + "\x00" + c.Source + "\x00" + c.AttachmentID
+	}
+	return c.DocID + "\x00" + c.Source
 }
 
 func firstNonEmpty(values ...string) string {
@@ -173,7 +205,7 @@ func (e *Engine) Search(opts SearchOptions) []SearchResult {
 	if len(vector) > 0 && len(bm25) > 0 {
 		return e.rrf(opts, bm25, vector)
 	}
-	if len(vector) > 0 && len(queryTokens) == 0 {
+	if len(vector) > 0 {
 		return e.rankVector(opts, vector)
 	}
 	return e.rankBM25(opts, bm25)
@@ -182,6 +214,9 @@ func (e *Engine) Search(opts SearchOptions) []SearchResult {
 func (e *Engine) Documents(filter Filter, limit, offset int) []model.Document {
 	if limit <= 0 || limit > 200 {
 		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	var docs []model.Document
 	for _, doc := range e.docs {
@@ -209,6 +244,49 @@ func (e *Engine) Recent(limit int, typ model.DocumentType, language string) []mo
 func (e *Engine) Document(id string) (model.Document, bool) {
 	doc, ok := e.docs[id]
 	return doc, ok
+}
+
+func (e *Engine) ContextAround(chunkID string, before, after int) (model.Document, []ChunkContext, bool) {
+	if before < 0 {
+		before = 0
+	}
+	if after < 0 {
+		after = 0
+	}
+	targetIndex, found := e.chunkByID[chunkID]
+	if !found || targetIndex < 0 || targetIndex >= len(e.chunks) {
+		return model.Document{}, nil, false
+	}
+	target := e.chunks[targetIndex]
+	doc, ok := e.docs[target.DocID]
+	if !ok {
+		return model.Document{}, nil, false
+	}
+	group := append([]int(nil), e.chunkGroups[chunkGroupKey(target)]...)
+	sort.Slice(group, func(i, j int) bool { return e.chunks[group[i]].Index < e.chunks[group[j]].Index })
+	pos := -1
+	for i, index := range group {
+		if e.chunks[index].ID == chunkID {
+			pos = i
+			break
+		}
+	}
+	if pos < 0 {
+		return model.Document{}, nil, false
+	}
+	start := pos - before
+	if start < 0 {
+		start = 0
+	}
+	end := pos + after + 1
+	if end > len(group) {
+		end = len(group)
+	}
+	contexts := make([]ChunkContext, 0, end-start)
+	for _, index := range group[start:end] {
+		contexts = append(contexts, chunkContext(doc, e.chunks[index]))
+	}
+	return doc, contexts, true
 }
 
 func (e *Engine) Chunks() []chunk {
@@ -264,6 +342,8 @@ func (e *Engine) bm25Scores(queryTokens []string, filter Filter) map[string]Sear
 		res.BM25Score = score
 		res.Snippet = Snippet(c.Text, strings.Join(queryTokens, " "), 300)
 		res.MatchedSource = c.Source
+		res.MatchedChunkID = c.ID
+		res.MatchedChunkIndex = c.Index
 		if c.Source == "attachment" {
 			res.Snippet = "첨부 " + c.AttachmentTitle + ": " + res.Snippet
 			res.AttachmentMatches = []AttachmentMatch{attachmentMatch(c, score, res.Snippet)}
@@ -303,6 +383,8 @@ func (e *Engine) vectorScores(queryVector []float64, filter Filter) map[string]S
 		res.VectorScore = score
 		res.Snippet = Snippet(c.Text, doc.Title, 300)
 		res.MatchedSource = c.Source
+		res.MatchedChunkID = c.ID
+		res.MatchedChunkIndex = c.Index
 		if c.Source == "attachment" {
 			res.Snippet = "첨부 " + c.AttachmentTitle + ": " + res.Snippet
 			res.AttachmentMatches = []AttachmentMatch{attachmentMatch(c, score, res.Snippet)}
@@ -361,7 +443,7 @@ func (e *Engine) rrf(opts SearchOptions, bm25, vector map[string]SearchResult) [
 				}
 			}
 			existing.AttachmentMatches = mergeAttachmentMatches(existing.AttachmentMatches, res.AttachmentMatches)
-			if existing.MatchedSource == "" || existing.MatchedSource == "body" && res.MatchedSource == "attachment" {
+			if existing.MatchedSource == "" {
 				existing.MatchedSource = res.MatchedSource
 			}
 			combined[res.ID] = existing
@@ -376,13 +458,34 @@ func (e *Engine) rrf(opts SearchOptions, bm25, vector map[string]SearchResult) [
 
 func attachmentMatch(c chunk, score float64, snippet string) AttachmentMatch {
 	return AttachmentMatch{
-		ID:       c.AttachmentID,
-		Title:    c.AttachmentTitle,
-		FileName: c.AttachmentFile,
-		URI:      "krx-rule://attachments/" + c.AttachmentID,
-		Status:   c.AttachmentStatus,
-		Score:    score,
-		Snippet:  snippet,
+		ID:         c.AttachmentID,
+		Title:      c.AttachmentTitle,
+		FileName:   c.AttachmentFile,
+		URI:        "krx-rule://attachments/" + c.AttachmentID,
+		Status:     c.AttachmentStatus,
+		ChunkID:    c.ID,
+		ChunkIndex: c.Index,
+		Score:      score,
+		Snippet:    snippet,
+	}
+}
+
+func chunkContext(doc model.Document, c chunk) ChunkContext {
+	uri := doc.URI()
+	if c.Source == "attachment" && c.AttachmentID != "" {
+		uri = "krx-rule://attachments/" + c.AttachmentID
+	}
+	return ChunkContext{
+		ID:               c.ID,
+		DocumentID:       c.DocID,
+		Index:            c.Index,
+		Source:           c.Source,
+		URI:              uri,
+		AttachmentID:     c.AttachmentID,
+		AttachmentTitle:  c.AttachmentTitle,
+		AttachmentFile:   c.AttachmentFile,
+		AttachmentStatus: c.AttachmentStatus,
+		Text:             c.Text,
 	}
 }
 

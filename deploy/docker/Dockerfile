@@ -13,10 +13,12 @@ FROM gcr.io/distroless/static-debian12:nonroot AS server
 WORKDIR /app
 COPY --from=go-build /out/krx-rule-mcp /usr/local/bin/krx-rule-mcp
 COPY --from=go-build /out/krx-rule-index /usr/local/bin/krx-rule-index
+COPY --from=go-build /src/config /app/config
 USER nonroot:nonroot
 EXPOSE 8080
 ENV KRX_MCP_MODE=http
 ENV KRX_RULE_DATA_DIR=/app/data
 ENV KRX_INDEX_PATH=/app/data/index/bm25.krxidx
 ENV KRX_VECTOR_INDEX_PATH=/app/data/index/vectors.krxvec
+ENV KRX_DOMAIN_LEXICON_PATH=/app/config/domain-lexicon.yaml
 ENTRYPOINT ["/usr/local/bin/krx-rule-mcp"]

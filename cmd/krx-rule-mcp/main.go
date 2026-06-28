@@ -27,6 +27,7 @@ func main() {
 		dataDir      = flag.String("data-dir", envDataDir(), "data directory")
 		indexPath    = flag.String("index", "", "BM25/core index snapshot path")
 		vectorIndex  = flag.String("vector-index", os.Getenv("KRX_VECTOR_INDEX_PATH"), "optional vector snapshot path")
+		lexiconPath  = flag.String("domain-lexicon", env("KRX_DOMAIN_LEXICON_PATH", searchindex.DefaultDomainLexiconPath), "domain lexicon YAML path for query expansion")
 		token        = flag.String("token", os.Getenv("KRX_MCP_BEARER_TOKEN"), "required bearer token for HTTP mode")
 		origins      = flag.String("allowed-origins", os.Getenv("KRX_MCP_ALLOWED_ORIGINS"), "comma-separated Origin allowlist for HTTP mode")
 		requestLimit = flag.Int64("request-size-limit", 1<<20, "maximum HTTP request body size in bytes")
@@ -44,6 +45,13 @@ func main() {
 	}
 	logger.Info("repository loaded", "documents", len(repo.Documents), "attachments", len(repo.Attachments))
 
+	lexicon, err := searchindex.LoadDomainLexicon(*lexiconPath)
+	if err != nil {
+		logger.Error("load domain lexicon failed", "path", *lexiconPath, "error", err)
+		os.Exit(1)
+	}
+	logger.Info("domain lexicon loaded", "path", *lexiconPath, "entries", len(lexicon))
+
 	embedder, enabled, err := searchindex.NewEmbedderFromEnv()
 	var activeEmbedder searchindex.Embedder
 	if enabled && err != nil {
@@ -57,7 +65,7 @@ func main() {
 		logger.Info("vector search disabled; BM25-only mode")
 	}
 
-	service := &mcpserver.Service{Repo: repo, Embedder: activeEmbedder, Logger: logger}
+	service := &mcpserver.Service{Repo: repo, Embedder: activeEmbedder, DomainLexicon: lexicon, Logger: logger}
 	server := mcpserver.NewServer(service, version)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

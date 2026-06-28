@@ -21,6 +21,59 @@ Useful flags:
 The tokenizer extracts Korean, Latin, and numeric tokens, and adds Korean 2-gram/3-gram tokens so partial Korean phrases can match without a morphological analyzer.
 
 Converted attachments are indexed as chunks attached to their parent rule or notice. If an attachment chunk is the best match, the result returns the parent document and includes `matched_source: "attachment"` plus `attachment_matches`.
+Each search result also includes `matched_chunk_id` and `matched_chunk_index`. Attachment matches include their own `chunk_id` and `chunk_index`. Use these ids with `get_context` to fetch the exact matched chunk and neighboring chunks before writing an answer.
+
+`score`, `bm25_score`, and `vector_score` are ranking signals. They are useful for ordering and debugging retrieval, but they are not confidence probabilities.
+
+## Domain Query Expansion
+
+Before BM25/vector search, `search_rules` applies the KRX domain lexicon loaded at server startup. The default file is `config/domain-lexicon.yaml`. It is based on KRX official pages and corpus-derived rule terminology, and is meant to bridge user wording to official terms.
+
+Example: `동적상하한가` is expanded with terms such as `실시간가격제한제도`, `실시간 가격제한의 가격변동폭`, `가격변동폭`, `파생상품시장 업무규정 시행세칙`, and `별표25`.
+
+When expansion is applied, the response includes `query_expansion`:
+
+```json
+{
+  "mode": "bm25+domain-expansion",
+  "query_expansion": {
+    "original_query": "동적상하한가",
+    "expanded_query": "동적상하한가 실시간가격제한제도 ...",
+    "applied_terms": [
+      {
+        "id": "derivatives_realtime_price_limit",
+        "canonical": "실시간가격제한제도",
+        "matched_terms": ["동적상하한가"],
+        "confidence": "high",
+        "review_status": "curated",
+        "source_urls": ["https://regulation.krx.co.kr/contents/RGL/03/03050600/RGL03050600.jsp"]
+      }
+    ]
+  }
+}
+```
+
+The lexicon improves recall only. RAG answers should cite the actual rule, attachment, or context returned by MCP tools. See `docs/domain-lexicon.md` for source policy, current source URLs, and the YAML schema.
+
+## Matched Context
+
+RAG clients should use `search_rules` for recall and then call `get_context` for evidence:
+
+```json
+{
+  "chunk_id": "210205830#att-210205830-210107342-hwp-3",
+  "before_chunks": 1,
+  "after_chunks": 1,
+  "max_chars": 6000
+}
+```
+
+`get_context` keeps context within the same source:
+
+- body matches return nearby chunks from the same rule or notice body.
+- attachment matches return nearby chunks from the same converted attachment.
+
+The response includes `document`, `chunks`, and combined `content`. The combined content marks each chunk with an HTML comment containing `chunk_id`, `source`, and, for attachments, `attachment_id`.
 
 ## Formula-Aware Retrieval
 
@@ -53,6 +106,22 @@ When a matched attachment contains HWP formulas, `search_rules` adds `formula_no
 ```
 
 The notice is intentionally informational rather than fatal. It tells RAG clients that the result is usable, but exact formula claims should be verified against the adjacent `hwp-equation` source or the original HWP attachment.
+
+If converted text looks formula-like but no preserved EqEdit block or generated LaTeX block is available, the server returns a weaker notice:
+
+```json
+{
+  "formula_notice": {
+    "severity": "info",
+    "code": "formula_text_detected",
+    "source_equation_available": false,
+    "generated_latex_available": false,
+    "formula_count": 2
+  }
+}
+```
+
+Treat `formula_text_detected` as a retrieval hint, not as confirmation that the original HWP equation was structurally preserved.
 
 After formula conversion code or converted attachment Markdown changes, rebuild indexes. `krx-rule-index --check` will report stale snapshots because corpus hashes include attachment metadata and content hashes.
 

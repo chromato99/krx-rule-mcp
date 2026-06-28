@@ -85,6 +85,7 @@ MCP serving behavior:
 
 - `get_attachment` returns the converted Markdown unchanged, including the formula notice, original `hwp-equation`, and generated `math` block.
 - `get_attachment` also returns a structured `formula_notice` JSON field when the attachment contains HWP formulas.
+- If search hits an attachment chunk, `search_rules` returns `attachment_matches[].chunk_id`; clients can pass it to `get_context` to read the exact formula neighborhood.
 - `krx-rule://attachments/{id}` resources expose the same converted Markdown.
 - The indexer chunks this content with the rest of the attachment text, so formula text can match both BM25 and vector search.
 - The LaTeX block is best-effort. Clients should keep the adjacent HWP EqEdit source available when exact formulas matter.
@@ -101,6 +102,8 @@ MCP serving behavior:
   "formula_count": 1
 }
 ```
+
+If only formula-like converted text is detected and no `hwp-equation`/`math` block is available, the server uses `code: "formula_text_detected"` with both availability flags set to `false`. That weaker notice means the text can help retrieval, but clients should verify precise formulas against the original attachment.
 
 Converted attachment quality fields are optional but recommended:
 

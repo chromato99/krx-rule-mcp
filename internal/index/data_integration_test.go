@@ -13,7 +13,7 @@ func TestRealDataSearchEvaluation(t *testing.T) {
 		t.Skip("set KRX_DATA_TEST=1 to run collected-data search evaluation")
 	}
 
-	dataRoot := filepath.Join("..", "..", "data")
+	dataRoot := dataTestRoot()
 	repo, err := LoadRepository(dataRoot, filepath.Join(dataRoot, "index", "bm25.krxidx"))
 	if err != nil {
 		t.Fatalf("load repository: %v", err)
@@ -70,6 +70,13 @@ func TestRealDataSearchEvaluation(t *testing.T) {
 		})
 		requireResult(t, results, "210217080", true)
 	})
+}
+
+func dataTestRoot() string {
+	if dataRoot := os.Getenv("KRX_RULE_DATA_DIR"); dataRoot != "" {
+		return dataRoot
+	}
+	return filepath.Join("..", "..", "data")
 }
 
 func requireResult(t *testing.T, results []SearchResult, id string, wantAttachment bool) {

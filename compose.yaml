@@ -17,6 +17,7 @@ services:
       KRX_RULE_DATA_DIR: /app/data
       KRX_INDEX_PATH: "${KRX_INDEX_PATH:-/app/data/index/bm25.krxidx}"
       KRX_VECTOR_INDEX_PATH: "${KRX_VECTOR_INDEX_PATH:-/app/data/index/vectors.krxvec}"
+      KRX_DOMAIN_LEXICON_PATH: "${KRX_DOMAIN_LEXICON_PATH:-/app/config/domain-lexicon.yaml}"
       KRX_VECTOR_SEARCH_ENABLED: "${KRX_VECTOR_SEARCH_ENABLED:-true}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-local}"
       KRX_EMBEDDING_BASE_URL: "${KRX_EMBEDDING_BASE_URL:-http://krx-rule-embeddings:80/v1}"

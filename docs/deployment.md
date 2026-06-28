@@ -16,7 +16,7 @@ docker compose up -d --build
 curl http://localhost:8080/healthz
 ```
 
-`KRX_RULE_DATA_DIR` is mounted read-only at `/app/data`. The server image does not contain corpus files.
+`KRX_RULE_DATA_DIR` is mounted read-only at `/app/data`. The server image does not contain corpus files, but it does include the default domain lexicon at `/app/config/domain-lexicon.yaml`.
 The host directory must be readable by the non-root container user. For local smoke tests with a temporary directory, run `chmod -R a+rX "$KRX_RULE_DATA_DIR"` after creating the corpus.
 
 ## Manual Index Jobs
@@ -67,7 +67,7 @@ The vector command builds the full corpus by default. For a cheap smoke test, ad
 
 `deploy/docker/Dockerfile` has one runtime target:
 
-- `server`: distroless Go image containing `krx-rule-mcp` and `krx-rule-index`.
+- `server`: distroless Go image containing `krx-rule-mcp`, `krx-rule-index`, and `config/domain-lexicon.yaml`.
 
 The image is non-root and can run with a read-only filesystem. Corpus data is provided by a read-only volume for serving, and by a writable volume only when running `krx-rule-index`.
 

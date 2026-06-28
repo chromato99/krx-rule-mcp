@@ -47,13 +47,25 @@ func WithBearerToken(token string, next http.Handler) http.Handler {
 			http.Error(w, "server bearer token is not configured", http.StatusInternalServerError)
 			return
 		}
-		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		got, ok := bearerToken(r.Header.Get("Authorization"))
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func bearerToken(header string) (string, bool) {
+	fields := strings.Fields(header)
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") || fields[1] == "" {
+		return "", false
+	}
+	return fields[1], true
 }
 
 func WithOriginAllowlist(allowlist []string, next http.Handler) http.Handler {
@@ -98,6 +110,7 @@ func WithRateLimit(limit int, window time.Duration, next http.Handler) http.Hand
 	}
 	var mu sync.Mutex
 	buckets := map[string]bucket{}
+	lastCleanup := time.Now()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
@@ -105,6 +118,14 @@ func WithRateLimit(limit int, window time.Duration, next http.Handler) http.Hand
 		}
 		now := time.Now()
 		mu.Lock()
+		if now.Sub(lastCleanup) >= window {
+			for key, item := range buckets {
+				if now.After(item.reset) {
+					delete(buckets, key)
+				}
+			}
+			lastCleanup = now
+		}
 		b := buckets[host]
 		if b.reset.IsZero() || now.After(b.reset) {
 			b = bucket{reset: now.Add(window)}

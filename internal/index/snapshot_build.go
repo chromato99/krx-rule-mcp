@@ -14,7 +14,10 @@ import (
 	"github.com/chromato99/krx-rule-mcp/internal/model"
 )
 
-const snapshotFormatVersion uint16 = 1
+const (
+	indexSnapshotFormatVersion  uint16 = 2
+	vectorSnapshotFormatVersion uint16 = 1
+)
 
 type VectorMetadata struct {
 	Version        int    `json:"version"`
@@ -50,7 +53,7 @@ func BuildSnapshot(dataRoot string) (Snapshot, []model.Document, error) {
 		})
 	}
 	return Snapshot{
-		Version:      snapshotFormatVersion,
+		Version:      indexSnapshotFormatVersion,
 		GeneratedAt:  nowRFC3339(),
 		CorpusHash:   corpusHashFromDocuments(documents),
 		Documents:    documents,
@@ -62,7 +65,7 @@ func BuildSnapshot(dataRoot string) (Snapshot, []model.Document, error) {
 
 func WriteSnapshot(path string, snap Snapshot) error {
 	var payload bytes.Buffer
-	writeU16(&payload, snapshotFormatVersion)
+	writeU16(&payload, indexSnapshotFormatVersion)
 	writeString(&payload, snap.GeneratedAt)
 	writeString(&payload, snap.CorpusHash)
 	writeU32(&payload, uint32(len(snap.Documents)))
@@ -103,7 +106,7 @@ func WriteSnapshot(path string, snap Snapshot) error {
 
 func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float64, model string, dimensions int) error {
 	var payload bytes.Buffer
-	writeU16(&payload, snapshotFormatVersion)
+	writeU16(&payload, vectorSnapshotFormatVersion)
 	writeString(&payload, nowRFC3339())
 	writeString(&payload, snap.CorpusHash)
 	writeString(&payload, model)

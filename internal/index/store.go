@@ -154,6 +154,9 @@ func LoadSnapshot(path string) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if snap.Version != indexSnapshotFormatVersion {
+		return Snapshot{}, fmt.Errorf("read index snapshot: unsupported snapshot version %d", snap.Version)
+	}
 	snap.GeneratedAt, err = readString(r)
 	if err != nil {
 		return Snapshot{}, err
@@ -227,6 +230,9 @@ func LoadVectorSnapshot(path string) (VectorSnapshot, error) {
 	snap.Version, err = readU16(r)
 	if err != nil {
 		return VectorSnapshot{}, err
+	}
+	if snap.Version != vectorSnapshotFormatVersion {
+		return VectorSnapshot{}, fmt.Errorf("read vector snapshot: unsupported snapshot version %d", snap.Version)
 	}
 	snap.GeneratedAt, err = readString(r)
 	if err != nil {
@@ -323,6 +329,8 @@ func vectorMetadataMatches(metadata VectorMetadata, snap VectorSnapshot) bool {
 func engineFromSnapshot(docs []model.Document, snap Snapshot, vectors map[string][]float64) *Engine {
 	e := &Engine{
 		docs:         make(map[string]model.Document, len(docs)),
+		chunkByID:    map[string]int{},
+		chunkGroups:  map[string][]int{},
 		df:           make(map[string]int, len(snap.DF)),
 		avgDocLength: snap.AvgDocLength,
 	}
@@ -347,7 +355,11 @@ func engineFromSnapshot(docs []model.Document, snap Snapshot, vectors map[string
 			tokenMap:         countTokens(item.Tokens),
 			Vector:           vectors[item.ID],
 		}
+		index := len(e.chunks)
 		e.chunks = append(e.chunks, c)
+		e.chunkByID[c.ID] = index
+		key := chunkGroupKey(c)
+		e.chunkGroups[key] = append(e.chunkGroups[key], index)
 	}
 	if e.avgDocLength == 0 && len(e.chunks) > 0 {
 		var total int

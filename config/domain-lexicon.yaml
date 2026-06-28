@@ -1,0 +1,252 @@
+entries:
+  - id: derivatives_realtime_price_limit
+    canonical: 실시간가격제한제도
+    aliases:
+      - 동적상하한가
+      - 동적 상하한가
+      - 실시간상하한가
+      - 실시간 상하한가
+      - 실시간 상·하한가
+      - dynamic price limit
+      - realtime price limit
+      - real-time price limit
+    expansions:
+      - 실시간 가격제한
+      - 실시간 상한가
+      - 실시간 하한가
+      - 실시간 가격제한의 가격변동폭
+      - 가격변동폭
+      - 가격제한폭
+      - 파생상품시장 업무규정 시행세칙
+      - 별표25
+    source_urls:
+      - https://regulation.krx.co.kr/contents/RGL/03/03050600/RGL03050600.jsp
+      - https://rule.krx.co.kr/out/index.do
+      - https://global.krx.co.kr/contents/GLB/02/0201/0201040201/GLB0201040201.jsp
+    confidence: high
+    review_status: curated
+    note: KRX explains the derivatives real-time price limit system with real-time upper/lower prices; dynamic price limit is treated as a curated user alias.
+
+  - id: price_limit
+    canonical: 가격제한폭
+    aliases:
+      - 상하한가
+      - 상·하한가
+      - 상한가 하한가
+      - 가격 제한폭
+      - price limit
+      - daily price limit
+    expansions:
+      - 기준가격
+      - 상한가
+      - 하한가
+    source_urls:
+      - https://regulation.krx.co.kr/contents/RGL/03/03020201/RGL03020201.jsp
+      - https://regulation.krx.co.kr/contents/RGL/03/03050600/RGL03050600.jsp
+      - https://global.krx.co.kr/contents/GLB/02/0201/0201040201/GLB0201040201.jsp
+    confidence: high
+    review_status: official-source
+
+  - id: derivatives_products
+    canonical: 파생상품시장
+    aliases:
+      - derivatives
+      - futures
+      - options
+      - stock index futures
+      - kospi 200 futures
+      - kospi 200 options
+      - 코스피200 선물
+      - 코스피200 옵션
+    expansions:
+      - 선물거래
+      - 옵션거래
+      - 코스피200선물
+      - 코스피200옵션
+      - 파생상품시장 업무규정
+      - 파생상품시장 업무규정 시행세칙
+    source_urls:
+      - https://open.krx.co.kr/contents/OPN/01/01040201/OPN01040201.jsp
+      - https://global.krx.co.kr/contents/GLB/02/0201/0201040201/GLB0201040201.jsp
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: official-source
+
+  - id: margin_collateral
+    canonical: 증거금
+    aliases:
+      - margin
+      - collateral
+      - 위탁증거금
+      - 거래증거금
+      - 청산증거금
+      - 담보
+    expansions:
+      - 위탁증거금
+      - 거래증거금
+      - 청산증거금
+      - 담보
+      - 파생상품시장 업무규정
+    source_urls:
+      - https://global.krx.co.kr/contents/GLB/06/0608/0608030101/GLB0608030101.jsp
+      - https://rule.krx.co.kr/out/index.do
+    confidence: medium
+    review_status: official-source
+
+  - id: clearing_settlement
+    canonical: 청산결제
+    aliases:
+      - clearing
+      - settlement
+      - 청산
+      - 결제
+      - settlement of futures
+      - settlement of options
+    expansions:
+      - 청산
+      - 결제
+      - 결제가격
+      - 최종결제가격
+      - 청산업무규정
+    source_urls:
+      - https://global.krx.co.kr/contents/GLB/06/0608/0608050101/GLB0608050101.jsp
+      - https://rule.krx.co.kr/out/index.do
+    confidence: medium
+    review_status: official-source
+
+  - id: listing_review
+    canonical: 상장심사
+    aliases:
+      - listing review
+      - preliminary listing review
+      - 상장 심사
+      - 신규상장심사
+      - 상장예비심사
+    expansions:
+      - 신규상장
+      - 상장규정
+      - 유가증권시장 상장규정
+      - 코스닥시장 상장규정
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: medium
+    review_status: corpus-derived
+
+  - id: disclosure
+    canonical: 공시
+    aliases:
+      - disclosure
+      - 공시규정
+      - 상장공시
+    expansions:
+      - 공시규정
+      - 수시공시
+      - 공정공시
+      - 상장공시
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: medium
+    review_status: corpus-derived
+
+  - id: etf_liquidity_provider
+    canonical: 유동성공급자
+    aliases:
+      - LP
+      - liquidity provider
+      - 유동성 공급자
+    expansions:
+      - ETF
+      - 유동성공급자
+      - 유동성 공급
+    source_urls:
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500.jsp
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
+    confidence: high
+    review_status: official-glossary
+
+  - id: etf_authorized_participant
+    canonical: 지정참가회사
+    aliases:
+      - AP
+      - authorized participant
+      - 지정 참가회사
+    expansions:
+      - ETF
+      - 지정참가회사
+      - 설정
+      - 환매
+    source_urls:
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500.jsp
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
+    confidence: high
+    review_status: official-glossary
+
+  - id: etf_nav
+    canonical: 순자산가치
+    aliases:
+      - NAV
+      - net asset value
+      - 순자산 가치
+    expansions:
+      - ETF
+      - 순자산가치
+      - 기준가격
+    source_urls:
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500.jsp
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
+    confidence: high
+    review_status: official-glossary
+
+  - id: etf_pdf
+    canonical: 납부자산구성내역
+    aliases:
+      - portfolio deposit file
+      - 납부자산 구성내역
+      - 납부 자산 구성 내역
+      - ETF PDF
+    expansions:
+      - PDF
+      - ETF
+      - 납부자산구성내역
+      - 설정
+      - 환매
+    source_urls:
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500.jsp
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
+    confidence: high
+    review_status: official-glossary
+    note: The bare acronym PDF is not used as an alias to avoid confusing ETF terminology with attachment file format searches.
+
+  - id: etf_premium_discount
+    canonical: 괴리율
+    aliases:
+      - premium discount
+      - premium/discount
+      - 시장가격 순자산가치 차이
+      - 시장가격과 순자산가치
+    expansions:
+      - ETF
+      - 괴리율
+      - 시장가격
+      - 순자산가치
+    source_urls:
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500.jsp
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
+    confidence: high
+    review_status: official-glossary
+
+  - id: etf_tracking_error
+    canonical: 추적오차율
+    aliases:
+      - tracking error
+      - 추적오차
+      - 추적 오차
+    expansions:
+      - ETF
+      - 추적오차율
+      - 기초지수
+    source_urls:
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500.jsp
+      - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
+    confidence: high
+    review_status: official-glossary
