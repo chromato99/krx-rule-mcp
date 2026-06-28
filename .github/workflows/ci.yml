@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Go tests
+        run: go test ./...
+
+      - name: Indexer and server smoke test
+        run: |
+          set -eu
+          export KRX_RULE_DATA_DIR="$RUNNER_TEMP/krx-rule-data"
+          mkdir -p "$KRX_RULE_DATA_DIR/rules"
+          cat > "$KRX_RULE_DATA_DIR/rules/sample.md" <<'EOF'
+          ---
+          id: "sample-rule"
+          title: "샘플 상장규정"
+          source_url: "https://example.test/rule"
+          collected_at: "2026-06-22T00:00:00Z"
+          content_hash: "sample-content-hash"
+          document_type: "rule"
+          ---
+
+          # 제1조
+
+          신규상장 심사와 공시 의무에 관한 샘플 규정입니다.
+          EOF
+          go run ./cmd/krx-rule-index \
+            --data-dir "$KRX_RULE_DATA_DIR" \
+            --index "$KRX_RULE_DATA_DIR/index/bm25.krxidx"
+          go run ./cmd/krx-rule-index \
+            --data-dir "$KRX_RULE_DATA_DIR" \
+            --index "$KRX_RULE_DATA_DIR/index/bm25.krxidx" \
+            --check
+          timeout 30s go run ./cmd/krx-rule-mcp \
+            --mode http \
+            --addr 127.0.0.1:18080 \
+            --token ci-token \
+            --data-dir "$KRX_RULE_DATA_DIR" \
+            --index "$KRX_RULE_DATA_DIR/index/bm25.krxidx" &
+          pid=$!
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/healthz; then
+              kill "$pid"
+              wait "$pid" || true
+              exit 0
+            fi
+            sleep 0.5
+          done
+          kill "$pid" || true
+          wait "$pid" || true
+          exit 1
+
+      - name: Docker Compose config
+        env:
+          KRX_RULE_DATA_DIR: /opt/krx-rule-data
+        run: docker compose config
+
+      - name: Docker build
+        run: docker build -f deploy/docker/Dockerfile --target server -t krx-rule-mcp:ci .

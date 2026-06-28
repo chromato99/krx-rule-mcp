@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: krx-rule-mcp-config
+data:
+  KRX_MCP_MODE: "http"
+  KRX_MCP_ADDR: ":8080"
+  KRX_RULE_DATA_DIR: "/app/data"
+  KRX_INDEX_PATH: "/app/data/index/bm25.krxidx"
+  KRX_VECTOR_INDEX_PATH: "/app/data/index/vectors.krxvec"
+  KRX_MCP_ALLOWED_ORIGINS: "https://chat.openai.com,https://chatgpt.com"
+  KRX_VECTOR_SEARCH_ENABLED: "true"
+  KRX_EMBEDDING_BASE_URL: "http://127.0.0.1:80/v1"
+  KRX_EMBEDDING_MODEL: "intfloat/multilingual-e5-small"
+  KRX_EMBEDDING_DIMENSIONS: "384"
+  KRX_EMBEDDING_QUERY_PREFIX: "query: "
+  KRX_EMBEDDING_DOCUMENT_PREFIX: "passage: "

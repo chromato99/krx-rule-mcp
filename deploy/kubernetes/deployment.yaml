@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: krx-rule-mcp
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: krx-rule-mcp
+  template:
+    metadata:
+      labels:
+        app: krx-rule-mcp
+    spec:
+      containers:
+        - name: server
+          image: ghcr.io/chromato99/krx-rule-mcp:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: krx-rule-mcp-config
+            - secretRef:
+                name: krx-rule-mcp-secret
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: rule-data
+              mountPath: /app/data
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+        - name: embeddings
+          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+          imagePullPolicy: IfNotPresent
+          args:
+            - --model-id
+            - intfloat/multilingual-e5-small
+          ports:
+            - name: embeddings
+              containerPort: 80
+          volumeMounts:
+            - name: embeddings-cache
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: rule-data
+          persistentVolumeClaim:
+            claimName: krx-rule-data
+        - name: embeddings-cache
+          emptyDir: {}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault

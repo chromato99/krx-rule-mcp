@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.env.*
+data
+docs
+deploy/kubernetes
+compose.yaml
+coverage.*
+*.coverprofile
+*.out
+*.test

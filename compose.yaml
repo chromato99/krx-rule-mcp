@@ -1,0 +1,48 @@
+services:
+  krx-rule-mcp:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      target: server
+    image: krx-rule-mcp:local
+    depends_on:
+      - krx-rule-embeddings
+    ports:
+      - "${KRX_MCP_PORT:-8080}:8080"
+    environment:
+      KRX_MCP_MODE: http
+      KRX_MCP_ADDR: ":8080"
+      KRX_MCP_BEARER_TOKEN: "${KRX_MCP_BEARER_TOKEN:-change-me}"
+      KRX_MCP_ALLOWED_ORIGINS: "${KRX_MCP_ALLOWED_ORIGINS:-}"
+      KRX_RULE_DATA_DIR: /app/data
+      KRX_INDEX_PATH: "${KRX_INDEX_PATH:-/app/data/index/bm25.krxidx}"
+      KRX_VECTOR_INDEX_PATH: "${KRX_VECTOR_INDEX_PATH:-/app/data/index/vectors.krxvec}"
+      KRX_VECTOR_SEARCH_ENABLED: "${KRX_VECTOR_SEARCH_ENABLED:-true}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-local}"
+      KRX_EMBEDDING_BASE_URL: "${KRX_EMBEDDING_BASE_URL:-http://krx-rule-embeddings:80/v1}"
+      KRX_EMBEDDING_MODEL: "${KRX_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}"
+      KRX_EMBEDDING_DIMENSIONS: "${KRX_EMBEDDING_DIMENSIONS:-384}"
+      KRX_EMBEDDING_QUERY_PREFIX: "${KRX_EMBEDDING_QUERY_PREFIX:-query: }"
+      KRX_EMBEDDING_DOCUMENT_PREFIX: "${KRX_EMBEDDING_DOCUMENT_PREFIX:-passage: }"
+    volumes:
+      - "${KRX_RULE_DATA_DIR:?Set KRX_RULE_DATA_DIR to a generated krx-rule-markdown data directory}:/app/data:ro"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  krx-rule-embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    command:
+      - --model-id
+      - "${KRX_TEI_MODEL_ID:-intfloat/multilingual-e5-small}"
+    volumes:
+      - embeddings-cache:/data
+    ports:
+      - "127.0.0.1:${KRX_TEI_PORT:-18081}:80"
+    restart: unless-stopped
+
+volumes:
+  embeddings-cache:
