@@ -189,8 +189,11 @@ entries:
       - 순자산 가치
     expansions:
       - ETF
+      - 상장지수펀드
+      - 상장지수펀드증권
       - 순자산가치
       - 기준가격
+      - 상장규정
     source_urls:
       - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500.jsp
       - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
@@ -226,9 +229,12 @@ entries:
       - 시장가격과 순자산가치
     expansions:
       - ETF
+      - 상장지수펀드
+      - 상장지수펀드증권
       - 괴리율
       - 시장가격
       - 순자산가치
+      - 상장규정
     source_urls:
       - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500.jsp
       - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
