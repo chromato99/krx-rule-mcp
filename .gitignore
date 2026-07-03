@@ -27,8 +27,7 @@ go.work.sum
 # env file
 .env
 
-# External corpus mount/cache
-/data/
+# Local generated search index
 /index/
 
 # Editor/IDE

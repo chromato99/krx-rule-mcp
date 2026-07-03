@@ -7,11 +7,15 @@ The root `compose.yaml` is the recommended Docker-only runtime. It starts:
 - `krx-rule-mcp`: Go HTTP MCP server.
 - `krx-rule-embeddings`: Hugging Face Text Embeddings Inference sidecar.
 
-Prepare a corpus with `krx-rule-markdown`, copy it to a host path, and point Compose at that path.
+Prepare a corpus with `krx-rule-markdown`, copy it to a host path, generate indexes, and point Compose at those paths.
+This repository does not contain a generated corpus, and the server image does not contain corpus or index files. Keep the corpus in an external host path such as `KRX_RULE_DATA_DIR`; local root-level `index/` is ignored by git because it is a generated serving artifact.
+Do not start the server until `$KRX_RULE_INDEX_DIR/bm25.krxidx` exists and matches the corpus; otherwise startup fails while loading the repository.
 
 ```bash
 cp .env.compose.example .env
 vi .env  # set KRX_RULE_DATA_DIR, KRX_RULE_INDEX_DIR, and KRX_MCP_BEARER_TOKEN
+# Build at least the required BM25 snapshot before starting the server.
+# See "Manual Index Jobs" below for local and container commands.
 docker compose up -d --build
 curl http://localhost:8080/healthz
 ```

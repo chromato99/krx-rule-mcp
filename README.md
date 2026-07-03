@@ -50,6 +50,9 @@ rsync -a krx-rule-markdown/data/ "$KRX_RULE_DATA_DIR"/
 ## Index 생성
 
 BM25 index는 필수입니다.
+이 저장소의 로컬 `index/` 디렉터리는 `.gitignore` 대상이므로 git commit이나 서버 이미지에 포함되지 않습니다.
+새 checkout, 새 배포 환경, 또는 corpus 재생성 후에는 서버를 올리기 전에 반드시 `krx-rule-index`로 BM25 snapshot을 생성하거나 미리 생성된 `KRX_RULE_INDEX_DIR`를 mount해야 합니다.
+BM25 snapshot이 없거나 현재 corpus와 맞지 않으면 서버는 시작 중 `BM25 index snapshot ... not found` 또는 `does not match Markdown corpus` 오류로 종료합니다.
 
 ```bash
 go run ./cmd/krx-rule-index \
@@ -138,6 +141,8 @@ LaTeX 변환은 자동 생성 결과이므로, 정확한 산식이 중요한 답
 변환 품질 metadata에는 산식처럼 보이는 텍스트 힌트와 보존된 수식 블록 수가 분리되어 있습니다. 사용자-facing `formula_notice`는 보존된 EqEdit/LaTeX 블록이 있는 경우에만 반환되어 체크박스나 날짜 같은 서식 문자가 수식 공지로 오탐되지 않도록 합니다.
 
 ## 서버 실행
+
+서버 실행은 위의 `Index 생성` 단계가 끝난 뒤에 수행합니다. `krx-rule-mcp`는 기동 시 `$KRX_RULE_INDEX_DIR/bm25.krxidx`를 로드하며, 이 파일은 저장소에 커밋되지 않습니다.
 
 stdio:
 
