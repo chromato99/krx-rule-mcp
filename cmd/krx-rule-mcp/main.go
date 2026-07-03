@@ -63,7 +63,17 @@ func main() {
 		logger.Info("vector search enabled", "model", embedder.Model, "base_url", embedder.BaseURL)
 		activeEmbedder = embedder
 	} else if enabled {
-		logger.Warn("vector search disabled; vector snapshot has no stored vectors")
+		loggedVectorReason := false
+		for _, status := range repo.VectorIndexes {
+			if status.RejectedReason == "" {
+				continue
+			}
+			logger.Warn("vector search disabled; vector snapshot rejected", "path", status.Path, "reason", status.RejectedReason)
+			loggedVectorReason = true
+		}
+		if !loggedVectorReason {
+			logger.Warn("vector search disabled; vector snapshot has no stored vectors")
+		}
 	} else {
 		logger.Info("vector search disabled; BM25-only mode")
 	}
@@ -85,7 +95,7 @@ func main() {
 			logger.Error("HTTP mode requires KRX_MCP_BEARER_TOKEN or -token")
 			os.Exit(1)
 		}
-		if err := runHTTP(ctx, *addr, *token, splitCSV(*origins), *requestLimit, server, logger); err != nil {
+		if err := runHTTP(ctx, *addr, *token, splitCSV(*origins), *requestLimit, server, repo, logger); err != nil {
 			logger.Error("HTTP server failed", "error", err)
 			os.Exit(1)
 		}
@@ -95,7 +105,7 @@ func main() {
 	}
 }
 
-func runHTTP(ctx context.Context, addr, token string, origins []string, requestLimit int64, server *mcpsdk.Server, logger *slog.Logger) error {
+func runHTTP(ctx context.Context, addr, token string, origins []string, requestLimit int64, server *mcpsdk.Server, repo *searchindex.Repository, logger *slog.Logger) error {
 	mcpHandler := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server {
 		return server
 	}, &mcpsdk.StreamableHTTPOptions{
@@ -112,7 +122,13 @@ func runHTTP(ctx context.Context, addr, token string, origins []string, requestL
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", protected)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ready\n")) })
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		if repo == nil || len(repo.Documents) == 0 {
+			http.Error(w, "repository not ready", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte("ready\n"))
+	})
 	mux.Handle("/metrics", metrics)
 
 	httpServer := &http.Server{

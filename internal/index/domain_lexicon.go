@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	defaultconfig "github.com/chromato99/krx-rule-mcp/config"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,10 +45,37 @@ func (e DomainQueryExpansion) Applied() bool {
 	return len(e.AppliedTerms) > 0
 }
 
+func (e DomainQueryExpansion) TokenWeights(expansionWeight float64) map[string]float64 {
+	if expansionWeight <= 0 || expansionWeight > 1 {
+		expansionWeight = 0.4
+	}
+	weights := map[string]float64{}
+	for _, token := range Tokenize(e.OriginalQuery) {
+		weights[token] = 1
+	}
+	for _, term := range e.AppliedTerms {
+		for _, added := range term.AddedTerms {
+			for _, token := range Tokenize(added) {
+				if _, ok := weights[token]; ok {
+					continue
+				}
+				weights[token] = expansionWeight
+			}
+		}
+	}
+	if len(weights) == 0 {
+		return nil
+	}
+	return weights
+}
+
 func LoadDomainLexicon(path string) ([]DomainLexiconEntry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read domain lexicon %q: %w", path, err)
+		if strings.TrimSpace(path) != "" && path != DefaultDomainLexiconPath {
+			return nil, fmt.Errorf("read domain lexicon %q: %w", path, err)
+		}
+		data = defaultconfig.DomainLexiconYAML
 	}
 	var doc struct {
 		Entries []DomainLexiconEntry `yaml:"entries"`

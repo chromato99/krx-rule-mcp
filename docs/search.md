@@ -25,7 +25,7 @@ Useful flags:
 The tokenizer extracts Korean, Latin, and numeric tokens, and adds Korean 2-gram/3-gram tokens so partial Korean phrases can match without a morphological analyzer.
 
 Converted attachments are indexed as chunks attached to their parent rule or notice. If an attachment chunk is the best match, the result returns the parent document and includes `matched_source: "attachment"` plus `attachment_matches`.
-Each search result also includes `matched_chunk_id` and `matched_chunk_index`. Attachment matches include their own `chunk_id` and `chunk_index`. Use these ids with `get_context` to fetch the exact matched chunk and neighboring chunks before writing an answer.
+Each search result also includes `matched_chunk_id`, `matched_chunk_index`, and, when detected for body chunks, `article_range`. Attachment matches include their own `chunk_id` and `chunk_index`. Domain lexicon expansion terms are scored with lower BM25 weight than the original query terms. Use these ids with `get_context` to fetch the exact matched chunk and neighboring chunks before writing an answer.
 
 `score`, `bm25_score`, and `vector_score` are ranking signals. They are useful for ordering and debugging retrieval, but they are not confidence probabilities.
 
@@ -78,6 +78,8 @@ RAG clients should use `search_rules` for recall and then call `get_context` for
 - attachment matches return nearby chunks from the same converted attachment.
 
 The response includes `document`, `chunks`, and combined `content`. The combined content marks each chunk with an HTML comment containing `chunk_id`, `source`, and, for attachments, `attachment_id`.
+
+Set `before_chunks` or `after_chunks` to `0` when only the target chunk is needed. `get_rule` and `get_attachment` default to a 20,000 character response cap and include `total_chars` plus `truncated`; pass `max_chars` to request more. Use `list_categories` to discover exact category strings before applying the `category` filter.
 
 ## Formula-Aware Retrieval
 

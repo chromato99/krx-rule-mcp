@@ -1,7 +1,6 @@
 package corpus
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -42,49 +41,6 @@ func ParseMarkdown(data []byte) (model.Document, error) {
 	}
 	doc.Language = model.NormalizeLanguage(doc.Language)
 	return doc, nil
-}
-
-func RenderMarkdown(doc model.Document) ([]byte, error) {
-	meta := doc
-	meta.Body = ""
-	meta.Path = ""
-	meta.Language = model.NormalizeLanguage(meta.Language)
-	if meta.ContentHash == "" {
-		meta.ContentHash = model.HashText(doc.Body)
-	}
-	if meta.CollectedAt.IsZero() {
-		return nil, fmt.Errorf("collected_at is required")
-	}
-	buf := bytes.NewBuffer(nil)
-	buf.WriteString("---\n")
-	enc := yaml.NewEncoder(buf)
-	enc.SetIndent(2)
-	if err := enc.Encode(meta); err != nil {
-		return nil, err
-	}
-	if err := enc.Close(); err != nil {
-		return nil, err
-	}
-	buf.WriteString("---\n\n")
-	buf.WriteString(strings.TrimSpace(doc.Body))
-	buf.WriteString("\n")
-	return buf.Bytes(), nil
-}
-
-func WriteDocument(root string, doc model.Document) (string, error) {
-	dir := documentBundleDir(root, doc)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	path := filepath.Join(dir, "index.md")
-	data, err := RenderMarkdown(doc)
-	if err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
 }
 
 func LoadDocuments(root string) ([]model.Document, error) {
@@ -128,27 +84,8 @@ func LoadDocuments(root string) ([]model.Document, error) {
 	return docs, nil
 }
 
-func documentBundleDir(root string, doc model.Document) string {
-	folder := "rules"
-	if doc.DocumentType == model.DocumentTypeNotice {
-		folder = "notices"
-	}
-	return filepath.Join(root, model.NormalizeLanguage(doc.Language), folder, model.Slug(doc.Title))
-}
-
 func documentPaths(base string) ([]string, error) {
-	var out []string
-	flat, err := filepath.Glob(filepath.Join(base, "*.md"))
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, flat...)
-	bundles, err := filepath.Glob(filepath.Join(base, "*", "index.md"))
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, bundles...)
-	return out, nil
+	return filepath.Glob(filepath.Join(base, "*", "index.md"))
 }
 
 type documentRoot struct {
@@ -162,7 +99,5 @@ func documentRoots(root string) []documentRoot {
 		{language: model.LanguageKorean, path: filepath.Join(root, model.LanguageKorean, "notices")},
 		{language: model.LanguageEnglish, path: filepath.Join(root, model.LanguageEnglish, "rules")},
 		{language: model.LanguageEnglish, path: filepath.Join(root, model.LanguageEnglish, "notices")},
-		{language: model.LanguageKorean, path: filepath.Join(root, "rules")},
-		{language: model.LanguageKorean, path: filepath.Join(root, "notices")},
 	}
 }

@@ -32,7 +32,7 @@ func TestBM25KoreanSearchAndFilter(t *testing.T) {
 			Body:          "외환거래 도입에 따른 조문 정비",
 		},
 	}
-	engine := Build(docs, nil)
+	engine := BuildWithAttachments(docs, nil, nil)
 	results := engine.Search(SearchOptions{
 		Query:  "상장 신청",
 		Limit:  5,
@@ -66,7 +66,7 @@ func TestSearchLanguageFilter(t *testing.T) {
 			Body:         "listing review",
 		},
 	}
-	engine := Build(docs, nil)
+	engine := BuildWithAttachments(docs, nil, nil)
 	results := engine.Search(SearchOptions{Query: "listing", Filter: Filter{Language: "en"}, Limit: 5})
 	if len(results) != 1 || results[0].ID != "rule-1-en" || results[0].Language != "en" || results[0].SourceID != "rule-1" {
 		t.Fatalf("unexpected English results: %#v", results)
@@ -82,7 +82,7 @@ func TestVectorRRF(t *testing.T) {
 		{ID: "a", Title: "상장규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "상장 심사"},
 		{ID: "b", Title: "청산규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "청산 결제"},
 	}
-	engine := Build(docs, map[string][]float64{
+	engine := BuildWithAttachments(docs, nil, map[string][]float64{
 		"a#0": {1, 0},
 		"b#0": {0, 1},
 	})
@@ -104,7 +104,7 @@ func TestVectorFallbackWhenBM25HasNoHits(t *testing.T) {
 		{ID: "a", Title: "상장규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "상장 심사"},
 		{ID: "b", Title: "청산규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "청산 결제"},
 	}
-	engine := Build(docs, map[string][]float64{
+	engine := BuildWithAttachments(docs, nil, map[string][]float64{
 		"a#0": {1, 0},
 		"b#0": {0, 1},
 	})
@@ -126,7 +126,7 @@ func TestBM25UsesTermFrequencyForIndexedDocuments(t *testing.T) {
 		{ID: "repeated", Title: "반복 문서", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "증거금 증거금 증거금"},
 		{ID: "single", Title: "단일 문서", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "증거금"},
 	}
-	engine := Build(docs, nil)
+	engine := BuildWithAttachments(docs, nil, nil)
 	results := engine.Search(SearchOptions{Query: "증거금", Limit: 2})
 	if len(results) != 2 {
 		t.Fatalf("results = %#v, want two documents", results)
@@ -138,10 +138,113 @@ func TestBM25UsesTermFrequencyForIndexedDocuments(t *testing.T) {
 
 func TestDocumentsTreatsNegativeOffsetAsZero(t *testing.T) {
 	doc := model.Document{ID: "rule-1", Title: "규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "본문"}
-	engine := Build([]model.Document{doc}, nil)
+	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
 	results := engine.Documents(Filter{}, 10, -10)
 	if len(results) != 1 || results[0].ID != doc.ID {
 		t.Fatalf("negative offset results = %#v", results)
+	}
+}
+
+func TestSearchLimitClampsToMax(t *testing.T) {
+	var docs []model.Document
+	for i := 0; i < 60; i++ {
+		docs = append(docs, model.Document{
+			ID:           "rule-" + itoa(i),
+			Title:        "상장 규정",
+			CollectedAt:  time.Now(),
+			DocumentType: model.DocumentTypeRule,
+			Body:         "상장 심사",
+		})
+	}
+	engine := BuildWithAttachments(docs, nil, nil)
+	results := engine.Search(SearchOptions{Query: "상장", Limit: 100})
+	if len(results) != 50 {
+		t.Fatalf("len(results) = %d, want clamp to 50", len(results))
+	}
+}
+
+func TestDocumentsLimitClampsAndSortsDeterministically(t *testing.T) {
+	date := time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC)
+	var docs []model.Document
+	for i := 249; i >= 0; i-- {
+		docs = append(docs, model.Document{
+			ID:           "rule-" + itoa(i),
+			Title:        "규정",
+			CollectedAt:  date,
+			DocumentType: model.DocumentTypeRule,
+			Body:         "본문",
+		})
+	}
+	engine := BuildWithAttachments(docs, nil, nil)
+	results, total := engine.DocumentsPage(Filter{}, 500, 0)
+	if total != 250 {
+		t.Fatalf("total = %d, want 250", total)
+	}
+	if len(results) != 200 {
+		t.Fatalf("len(results) = %d, want clamp to 200", len(results))
+	}
+	if results[0].ID != "rule-0" || results[1].ID != "rule-1" {
+		t.Fatalf("same-date documents should be ordered by id: %#v", results[:2])
+	}
+}
+
+func TestChunkTextSplitsMarkdownTablesOnRowsAndRepeatsHeader(t *testing.T) {
+	table := strings.Join([]string{
+		"| 구분 | 값 |",
+		"| --- | --- |",
+		"| A | " + strings.Repeat("가", 20) + " |",
+		"| B | " + strings.Repeat("나", 20) + " |",
+		"| C | " + strings.Repeat("다", 20) + " |",
+	}, "\n")
+	chunks := ChunkText(table, 65)
+	if len(chunks) < 2 {
+		t.Fatalf("expected table to split by rows: %#v", chunks)
+	}
+	for _, chunk := range chunks {
+		if !strings.Contains(chunk, "| 구분 | 값 |") || !strings.Contains(chunk, "| --- | --- |") {
+			t.Fatalf("chunk missing repeated header: %q", chunk)
+		}
+	}
+}
+
+func TestChunkTextSplitsHTMLTablesOnRowsAndRepeatsHeader(t *testing.T) {
+	table := strings.Join([]string{
+		`<table>`,
+		`  <tr><th rowspan="2">구분</th><th>값</th></tr>`,
+		`  <tr><td>A</td><td>` + strings.Repeat("가", 30) + `</td></tr>`,
+		`  <tr><td>B</td><td>` + strings.Repeat("나", 30) + `</td></tr>`,
+		`  <tr><td>C</td><td>` + strings.Repeat("다", 30) + `</td></tr>`,
+		`</table>`,
+	}, "\n")
+	chunks := ChunkText(table, 120)
+	if len(chunks) < 2 {
+		t.Fatalf("expected HTML table to split by rows: %#v", chunks)
+	}
+	for _, chunk := range chunks {
+		if !strings.HasPrefix(chunk, "<table>") || !strings.HasSuffix(chunk, "</table>") {
+			t.Fatalf("chunk should preserve table wrapper: %q", chunk)
+		}
+		if !strings.Contains(chunk, `<tr><th rowspan="2">구분</th><th>값</th></tr>`) {
+			t.Fatalf("chunk missing repeated header row: %q", chunk)
+		}
+		if strings.Count(chunk, "<tr") != strings.Count(chunk, "</tr>") {
+			t.Fatalf("chunk split a table row: %q", chunk)
+		}
+	}
+}
+
+func TestSearchResultIncludesArticleRange(t *testing.T) {
+	doc := model.Document{
+		ID:           "rule-article",
+		Title:        "상장규정",
+		CollectedAt:  time.Now(),
+		DocumentType: model.DocumentTypeRule,
+		Body:         "제1조(목적) 상장 심사\n\n제2조(정의) 신규상장",
+	}
+	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
+	results := engine.Search(SearchOptions{Query: "신규상장", Limit: 1})
+	if len(results) != 1 || results[0].ArticleRange != "제1조(목적)~제2조(정의)" {
+		t.Fatalf("unexpected article range: %#v", results)
 	}
 }
 
@@ -221,7 +324,7 @@ func TestContextAroundReturnsNeighboringChunksFromSameSource(t *testing.T) {
 			"세 번째 문맥 " + strings.Repeat("다", 900),
 		}, "\n\n"),
 	}
-	engine := Build([]model.Document{doc}, nil)
+	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
 	gotDoc, chunks, ok := engine.ContextAround("rule-context#1", 1, 1)
 	if !ok {
 		t.Fatal("ContextAround returned false")
@@ -271,6 +374,43 @@ func TestExpandDomainQueryDoesNotTreatBarePDFAsETFPortfolioFile(t *testing.T) {
 	}
 }
 
+func TestDomainExpansionTokenWeightsPreferOriginalQuery(t *testing.T) {
+	engine := BuildWithAttachments([]model.Document{
+		{
+			ID:           "original",
+			Title:        "Original",
+			DocumentType: model.DocumentTypeRule,
+			Language:     model.LanguageKorean,
+			Body:         "동적상하한가",
+		},
+		{
+			ID:           "expanded",
+			Title:        "Expanded",
+			DocumentType: model.DocumentTypeRule,
+			Language:     model.LanguageKorean,
+			Body:         "실시간가격제한제도",
+		},
+	}, nil, nil)
+	expansion := DomainQueryExpansion{
+		OriginalQuery: "동적상하한가",
+		ExpandedQuery: "동적상하한가 실시간가격제한제도",
+		AppliedTerms: []DomainLexiconMatch{{
+			AddedTerms: []string{"실시간가격제한제도"},
+		}},
+	}
+	results := engine.Search(SearchOptions{
+		Query:        expansion.ExpandedQuery,
+		Limit:        2,
+		TokenWeights: expansion.TokenWeights(0.4),
+	})
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want 2: %#v", len(results), results)
+	}
+	if results[0].ID != "original" {
+		t.Fatalf("weighted expansion should prefer original query match, got %#v", results)
+	}
+}
+
 func TestLoadDomainLexiconFromYAML(t *testing.T) {
 	entries := loadTestDomainLexicon(t)
 	if len(entries) == 0 {
@@ -287,6 +427,16 @@ func TestLoadDomainLexiconFromYAML(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("missing realtime price limit entry: %#v", entries)
+	}
+}
+
+func TestLoadDomainLexiconFromEmbeddedDefault(t *testing.T) {
+	entries, err := LoadDomainLexicon("")
+	if err != nil {
+		t.Fatalf("load embedded domain lexicon: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("loaded no embedded domain lexicon entries")
 	}
 }
 

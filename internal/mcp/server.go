@@ -41,14 +41,16 @@ type GetRuleInput struct {
 }
 
 type RuleOutput struct {
-	Document model.Document `json:"document"`
-	Content  string         `json:"content"`
+	Document   model.Document `json:"document"`
+	Content    string         `json:"content"`
+	TotalChars int            `json:"total_chars"`
+	Truncated  bool           `json:"truncated"`
 }
 
 type GetContextInput struct {
 	ChunkID      string `json:"chunk_id" jsonschema:"Chunk id returned by search_rules as matched_chunk_id or attachment_matches[].chunk_id."`
-	BeforeChunks int    `json:"before_chunks,omitempty" jsonschema:"Number of previous chunks from the same document body or attachment, default 1, max 5."`
-	AfterChunks  int    `json:"after_chunks,omitempty" jsonschema:"Number of following chunks from the same document body or attachment, default 1, max 5."`
+	BeforeChunks *int   `json:"before_chunks,omitempty" jsonschema:"Number of previous chunks from the same document body or attachment, default 1, max 5. Set 0 for no previous chunks."`
+	AfterChunks  *int   `json:"after_chunks,omitempty" jsonschema:"Number of following chunks from the same document body or attachment, default 1, max 5. Set 0 for no following chunks."`
 	MaxChars     int    `json:"max_chars,omitempty" jsonschema:"Optional maximum combined context characters."`
 }
 
@@ -69,6 +71,7 @@ type ListRulesInput struct {
 
 type ListRulesOutput struct {
 	Documents []model.Document `json:"documents"`
+	Total     int              `json:"total"`
 }
 
 type GetAttachmentInput struct {
@@ -79,7 +82,18 @@ type GetAttachmentInput struct {
 type AttachmentOutput struct {
 	Attachment    model.Attachment     `json:"attachment"`
 	Content       string               `json:"content,omitempty"`
+	TotalChars    int                  `json:"total_chars"`
+	Truncated     bool                 `json:"truncated"`
 	FormulaNotice *model.FormulaNotice `json:"formula_notice,omitempty"`
+}
+
+type ListCategoriesInput struct {
+	Language string `json:"language,omitempty" jsonschema:"Optional language filter: ko or en."`
+}
+
+type ListCategoriesOutput struct {
+	Categories []string `json:"categories"`
+	Total      int      `json:"total"`
 }
 
 type RecentChangesInput struct {
@@ -129,6 +143,11 @@ func NewServer(service *Service, version string) *mcpsdk.Server {
 		Title:       "List recent KRX changes",
 		Description: "List most recent collected rules or amendment notices.",
 	}, service.listRecentChanges)
+	mcpsdk.AddTool(server, &mcpsdk.Tool{
+		Name:        "list_categories",
+		Title:       "List KRX categories",
+		Description: "List collected KRX rule categories usable as exact category filters.",
+	}, service.listCategories)
 
 	server.AddResourceTemplate(&mcpsdk.ResourceTemplate{
 		Name:        "krx-rules",
@@ -158,16 +177,22 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	if strings.TrimSpace(in.Query) == "" && s.Embedder == nil {
 		return nil, SearchRulesOutput{}, fmt.Errorf("query is required")
 	}
+	language, err := parseLanguage(in.Language)
+	if err != nil {
+		return nil, SearchRulesOutput{}, err
+	}
 	expansion := searchindex.ExpandDomainQueryWithLexicon(in.Query, s.DomainLexicon)
 	searchQuery := in.Query
 	var queryExpansion *searchindex.DomainQueryExpansion
+	var tokenWeights map[string]float64
 	if expansion.Applied() {
 		searchQuery = expansion.ExpandedQuery
+		tokenWeights = expansion.TokenWeights(0.4)
 		queryExpansion = &expansion
 	}
 	filter := searchindex.Filter{
 		DocumentType:  parseDocumentType(in.DocumentType),
-		Language:      parseLanguage(in.Language),
+		Language:      language,
 		Category:      in.Category,
 		EffectiveFrom: in.EffectiveFrom,
 		EffectiveTo:   in.EffectiveTo,
@@ -192,10 +217,11 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 		}
 	}
 	results := s.Repo.Engine.Search(searchindex.SearchOptions{
-		Query:       searchQuery,
-		Limit:       in.Limit,
-		Filter:      filter,
-		QueryVector: queryVector,
+		Query:        searchQuery,
+		Limit:        in.Limit,
+		Filter:       filter,
+		QueryVector:  queryVector,
+		TokenWeights: tokenWeights,
 	})
 	mode = refineSearchMode(mode, queryExpansion != nil, queryVector, results)
 	s.addFormulaNotices(results)
@@ -232,10 +258,10 @@ func (s *Service) getRule(_ context.Context, _ *mcpsdk.CallToolRequest, in GetRu
 	if !ok {
 		return nil, RuleOutput{}, fmt.Errorf("document %q not found", in.ID)
 	}
-	content := limitRunes(doc.Body, in.MaxChars)
+	content, total, truncated := limitRunesDefault(doc.Body, in.MaxChars)
 	meta := doc
 	meta.Body = ""
-	return nil, RuleOutput{Document: meta, Content: content}, nil
+	return nil, RuleOutput{Document: meta, Content: content, TotalChars: total, Truncated: truncated}, nil
 }
 
 func (s *Service) getContext(_ context.Context, _ *mcpsdk.CallToolRequest, in GetContextInput) (*mcpsdk.CallToolResult, ContextOutput, error) {
@@ -271,15 +297,19 @@ func (s *Service) getContext(_ context.Context, _ *mcpsdk.CallToolRequest, in Ge
 }
 
 func (s *Service) listRules(_ context.Context, _ *mcpsdk.CallToolRequest, in ListRulesInput) (*mcpsdk.CallToolResult, ListRulesOutput, error) {
-	docs := s.Repo.Engine.Documents(searchindex.Filter{
+	language, err := parseLanguage(in.Language)
+	if err != nil {
+		return nil, ListRulesOutput{}, err
+	}
+	docs, total := s.Repo.Engine.DocumentsPage(searchindex.Filter{
 		DocumentType: parseDocumentType(in.DocumentType),
-		Language:     parseLanguage(in.Language),
+		Language:     language,
 		Category:     in.Category,
 	}, in.Limit, in.Offset)
 	for i := range docs {
 		docs[i].Body = ""
 	}
-	return nil, ListRulesOutput{Documents: docs}, nil
+	return nil, ListRulesOutput{Documents: docs, Total: total}, nil
 }
 
 func (s *Service) getAttachment(_ context.Context, _ *mcpsdk.CallToolRequest, in GetAttachmentInput) (*mcpsdk.CallToolResult, AttachmentOutput, error) {
@@ -287,19 +317,35 @@ func (s *Service) getAttachment(_ context.Context, _ *mcpsdk.CallToolRequest, in
 	if !ok {
 		return nil, AttachmentOutput{}, fmt.Errorf("attachment %q not found", in.ID)
 	}
+	content, total, truncated := limitRunesDefault(att.Text, in.MaxChars)
 	return nil, AttachmentOutput{
 		Attachment:    att.Attachment,
-		Content:       limitRunes(att.Text, in.MaxChars),
+		Content:       content,
+		TotalChars:    total,
+		Truncated:     truncated,
 		FormulaNotice: formulaNoticeForAttachment(att),
 	}, nil
 }
 
+func (s *Service) listCategories(_ context.Context, _ *mcpsdk.CallToolRequest, in ListCategoriesInput) (*mcpsdk.CallToolResult, ListCategoriesOutput, error) {
+	language, err := parseLanguage(in.Language)
+	if err != nil {
+		return nil, ListCategoriesOutput{}, err
+	}
+	categories := s.Repo.Engine.Categories(language)
+	return nil, ListCategoriesOutput{Categories: categories, Total: len(categories)}, nil
+}
+
 func (s *Service) listRecentChanges(_ context.Context, _ *mcpsdk.CallToolRequest, in RecentChangesInput) (*mcpsdk.CallToolResult, ListRulesOutput, error) {
-	docs := s.Repo.Engine.Recent(in.Limit, parseDocumentType(in.DocumentType), parseLanguage(in.Language))
+	language, err := parseLanguage(in.Language)
+	if err != nil {
+		return nil, ListRulesOutput{}, err
+	}
+	docs := s.Repo.Engine.Recent(in.Limit, parseDocumentType(in.DocumentType), language)
 	for i := range docs {
 		docs[i].Body = ""
 	}
-	return nil, ListRulesOutput{Documents: docs}, nil
+	return nil, ListRulesOutput{Documents: docs, Total: len(docs)}, nil
 }
 
 func (s *Service) readResource(_ context.Context, req *mcpsdk.ReadResourceRequest) (*mcpsdk.ReadResourceResult, error) {
@@ -356,24 +402,22 @@ func (s *Service) addFormulaNotices(results []searchindex.SearchResult) {
 }
 
 func formulaNoticeForAttachment(att searchindex.AttachmentDocument) *model.FormulaNotice {
-	sourceAvailable := strings.Contains(att.Text, "```hwp-equation")
-	latexAvailable := strings.Contains(att.Text, "```math") || strings.Contains(att.Text, "LaTeX(best-effort)")
-	count := att.Attachment.FormulaHintCount
+	sourceCount := int64(strings.Count(att.Text, "```hwp-equation"))
+	latexCount := int64(strings.Count(att.Text, "```math"))
+	sourceAvailable := sourceCount > 0
+	latexAvailable := latexCount > 0 || strings.Contains(att.Text, "LaTeX(best-effort)")
+	count := att.Attachment.FormulaBlockCount
 	if count == 0 {
-		count = int64(strings.Count(att.Text, "```hwp-equation"))
+		count = sourceCount
+	}
+	if count == 0 {
+		count = latexCount
 	}
 	if count == 0 && !sourceAvailable && !latexAvailable {
 		return nil
 	}
 	if !sourceAvailable && !latexAvailable {
-		return &model.FormulaNotice{
-			Severity:                "info",
-			Code:                    "formula_text_detected",
-			Message:                 "This result contains formula-like converted text, but no preserved HWP EqEdit block or generated LaTeX block was detected. Use it as retrieval context and verify exact formulas against the original attachment when precision matters.",
-			SourceEquationAvailable: false,
-			GeneratedLatexAvailable: false,
-			FormulaCount:            count,
-		}
+		return nil
 	}
 	return &model.FormulaNotice{
 		Severity:                "info",
@@ -385,17 +429,18 @@ func formulaNoticeForAttachment(att searchindex.AttachmentDocument) *model.Formu
 	}
 }
 
-func boundedContextWindow(value, fallback int) int {
-	if value == 0 {
-		value = fallback
+func boundedContextWindow(value *int, fallback int) int {
+	actual := fallback
+	if value != nil {
+		actual = *value
 	}
-	if value < 0 {
+	if actual < 0 {
 		return 0
 	}
-	if value > 5 {
+	if actual > 5 {
 		return 5
 	}
-	return value
+	return actual
 }
 
 func contextContent(chunks []searchindex.ChunkContext) string {
@@ -429,19 +474,28 @@ func parseDocumentType(value string) model.DocumentType {
 	}
 }
 
-func parseLanguage(value string) string {
+func parseLanguage(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(strings.ReplaceAll(value, "_", "-")))
 	if value == "" {
-		return ""
+		return "", nil
 	}
 	switch value {
 	case "ko", "kor", "korean", "ko-kr":
-		return model.LanguageKorean
+		return model.LanguageKorean, nil
 	case "en", "eng", "english", "en-us", "en-gb":
-		return model.LanguageEnglish
+		return model.LanguageEnglish, nil
 	default:
-		return value
+		return "", fmt.Errorf("unsupported language %q; expected ko or en", value)
 	}
+}
+
+func limitRunesDefault(text string, max int) (string, int, bool) {
+	if max <= 0 {
+		max = 20000
+	}
+	content := limitRunes(text, max)
+	total := len([]rune(text))
+	return content, total, total > max
 }
 
 func limitRunes(text string, max int) string {

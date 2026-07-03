@@ -1,13 +1,15 @@
 package index
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/chromato99/krx-rule-mcp/internal/corpus"
 	"github.com/chromato99/krx-rule-mcp/internal/model"
+	"gopkg.in/yaml.v3"
 )
 
 func TestGoGeneratedSnapshotLoadsIntoRepository(t *testing.T) {
@@ -21,9 +23,7 @@ func TestGoGeneratedSnapshotLoadsIntoRepository(t *testing.T) {
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장신청인은 신규상장 심사를 신청할 수 있다.",
 	}
-	if _, err := corpus.WriteDocument(root, doc); err != nil {
-		t.Fatalf("write document: %v", err)
-	}
+	writeIndexTestDocument(t, root, doc)
 	writeTestIndexSnapshot(t, root)
 	repo, err := LoadRepository(root, filepath.Join(root, "index", "bm25.krxidx"))
 	if err != nil {
@@ -58,9 +58,7 @@ func TestVectorSnapshotLoadsIntoRepository(t *testing.T) {
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장 심사",
 	}
-	if _, err := corpus.WriteDocument(root, doc); err != nil {
-		t.Fatalf("write document: %v", err)
-	}
+	writeIndexTestDocument(t, root, doc)
 	writeTestIndexSnapshot(t, root)
 	vectorPath := filepath.Join(root, "index", "vectors.krxvec")
 	writeTestVectorSnapshot(t, root, vectorPath, map[string][]float64{"rule-1#0": {1, 0}})
@@ -90,22 +88,19 @@ func TestVectorSnapshotIgnoresStaleCorpus(t *testing.T) {
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장 심사",
 	}
-	if _, err := corpus.WriteDocument(root, doc); err != nil {
-		t.Fatalf("write document: %v", err)
-	}
+	writeIndexTestDocument(t, root, doc)
 	stale := doc
 	stale.ContentHash = "hash-stale"
 	vectorPath := filepath.Join(root, "index", "vectors.krxvec")
-	if _, err := corpus.WriteDocument(root, stale); err != nil {
-		t.Fatalf("write stale document: %v", err)
-	}
+	writeIndexTestDocument(t, root, stale)
 	writeTestVectorSnapshot(t, root, vectorPath, map[string][]float64{"rule-1#0": {1, 0}})
-	if _, err := corpus.WriteDocument(root, doc); err != nil {
-		t.Fatalf("restore document: %v", err)
-	}
-	vectors, err := LoadVectorMap(vectorPath, []model.Document{doc}, loadAttachments(root, []model.Document{doc}))
+	writeIndexTestDocument(t, root, doc)
+	vectors, reason, err := LoadVectorMap(vectorPath, []model.Document{doc}, loadAttachments(root, []model.Document{doc}))
 	if err != nil {
 		t.Fatalf("load vector map: %v", err)
+	}
+	if reason != "corpus_hash_mismatch" && reason != "document_hash_mismatch" {
+		t.Fatalf("reason = %q, want corpus or document mismatch", reason)
 	}
 	if len(vectors) != 0 {
 		t.Fatalf("loaded stale vectors: %#v", vectors)
@@ -125,9 +120,7 @@ func TestVectorSnapshotIgnoresEmbeddingConfigMismatch(t *testing.T) {
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장 심사",
 	}
-	if _, err := corpus.WriteDocument(root, doc); err != nil {
-		t.Fatalf("write document: %v", err)
-	}
+	writeIndexTestDocument(t, root, doc)
 	writeTestIndexSnapshot(t, root)
 	vectorPath := filepath.Join(root, "index", "vectors.krxvec")
 	writeTestVectorSnapshot(t, root, vectorPath, map[string][]float64{"rule-1#0": {1, 0}})
@@ -138,6 +131,50 @@ func TestVectorSnapshotIgnoresEmbeddingConfigMismatch(t *testing.T) {
 	if repo.Engine.HasVectors() {
 		t.Fatal("repository loaded vectors with mismatched embedding model")
 	}
+	if len(repo.VectorIndexes) != 1 || repo.VectorIndexes[0].RejectedReason != "embedding_model_mismatch" {
+		t.Fatalf("unexpected vector status: %#v", repo.VectorIndexes)
+	}
+}
+
+func writeIndexTestDocument(t *testing.T, root string, doc model.Document) string {
+	t.Helper()
+	folder := "rules"
+	if doc.DocumentType == model.DocumentTypeNotice {
+		folder = "notices"
+	}
+	path := filepath.Join(root, model.NormalizeLanguage(doc.Language), folder, model.Slug(doc.Title), "index.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, renderIndexTestMarkdown(t, doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func renderIndexTestMarkdown(t *testing.T, doc model.Document) []byte {
+	t.Helper()
+	meta := doc
+	meta.Body = ""
+	meta.Path = ""
+	meta.Language = model.NormalizeLanguage(meta.Language)
+	if meta.ContentHash == "" {
+		meta.ContentHash = model.HashText(doc.Body)
+	}
+	var buf bytes.Buffer
+	buf.WriteString("---\n")
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	buf.WriteString("---\n\n")
+	buf.WriteString(strings.TrimSpace(doc.Body))
+	buf.WriteString("\n")
+	return buf.Bytes()
 }
 
 func writeTestIndexSnapshot(t *testing.T, root string) Snapshot {

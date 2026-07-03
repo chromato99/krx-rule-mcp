@@ -128,15 +128,6 @@ func (e *OpenAIEmbedder) EmbeddingInfo() (string, int) {
 	return e.Model, e.Dimensions
 }
 
-func EmbedChunks(chunks []chunk, embedder Embedder) (map[string][]float64, error) {
-	ctx := context.Background()
-	snapshotChunks := make([]SnapshotChunk, 0, len(chunks))
-	for _, c := range chunks {
-		snapshotChunks = append(snapshotChunks, SnapshotChunk{ID: c.ID, Text: c.Text})
-	}
-	return EmbedSnapshotChunks(ctx, snapshotChunks, embedder)
-}
-
 func EmbedSnapshotChunks(ctx context.Context, chunks []SnapshotChunk, embedder Embedder) (map[string][]float64, error) {
 	out := map[string][]float64{}
 	const batchSize = 32

@@ -15,7 +15,8 @@ import (
 )
 
 const (
-	indexSnapshotFormatVersion  uint16 = 2
+	indexSnapshotFormatVersion  uint16 = 4
+	indexerVersion                     = "tokenizer-ko-2gram-3gram-chunk1600-md-html-table-article-bm25-k1-1.4-b-0.75"
 	vectorSnapshotFormatVersion uint16 = 1
 )
 
@@ -49,17 +50,19 @@ func BuildSnapshot(dataRoot string) (Snapshot, []model.Document, error) {
 			AttachmentTitle:  c.AttachmentTitle,
 			AttachmentFile:   c.AttachmentFile,
 			AttachmentStatus: c.AttachmentStatus,
+			ArticleRange:     c.ArticleRange,
 			Tokens:           c.Tokens,
 		})
 	}
 	return Snapshot{
-		Version:      indexSnapshotFormatVersion,
-		GeneratedAt:  nowRFC3339(),
-		CorpusHash:   corpusHashFromDocuments(documents),
-		Documents:    documents,
-		AvgDocLength: engine.avgDocLength,
-		DF:           engine.df,
-		Chunks:       chunks,
+		Version:        indexSnapshotFormatVersion,
+		IndexerVersion: indexerVersion,
+		GeneratedAt:    nowRFC3339(),
+		CorpusHash:     corpusHashFromDocuments(documents),
+		Documents:      documents,
+		AvgDocLength:   engine.avgDocLength,
+		DF:             engine.df,
+		Chunks:         chunks,
 	}, docs, nil
 }
 
@@ -68,6 +71,7 @@ func WriteSnapshot(path string, snap Snapshot) error {
 	writeU16(&payload, indexSnapshotFormatVersion)
 	writeString(&payload, snap.GeneratedAt)
 	writeString(&payload, snap.CorpusHash)
+	writeString(&payload, firstNonEmpty(snap.IndexerVersion, indexerVersion))
 	writeU32(&payload, uint32(len(snap.Documents)))
 	for _, doc := range snap.Documents {
 		writeString(&payload, doc.ID)
@@ -96,6 +100,7 @@ func WriteSnapshot(path string, snap Snapshot) error {
 		writeString(&payload, chunk.AttachmentTitle)
 		writeString(&payload, chunk.AttachmentFile)
 		writeString(&payload, string(chunk.AttachmentStatus))
+		writeString(&payload, chunk.ArticleRange)
 		writeU32(&payload, uint32(len(chunk.Tokens)))
 		for _, token := range chunk.Tokens {
 			writeString(&payload, token)

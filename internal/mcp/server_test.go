@@ -26,7 +26,7 @@ func TestServiceTools(t *testing.T) {
 		Attachments: map[string]searchindex.AttachmentDocument{
 			"att-1": {Attachment: model.Attachment{ID: "att-1", Title: "별표", Status: model.AttachmentConverted}, Text: "첨부 본문"},
 		},
-		Engine: searchindex.Build([]model.Document{doc}, nil),
+		Engine: searchindex.BuildWithAttachments([]model.Document{doc}, nil, nil),
 	}
 	service := &Service{Repo: repo, DomainLexicon: testDomainLexicon(t)}
 	_, searchOut, err := service.searchRules(context.Background(), &mcpsdk.CallToolRequest{}, SearchRulesInput{Query: "상장", Limit: 5})
@@ -55,6 +55,24 @@ func TestServiceTools(t *testing.T) {
 	}
 }
 
+func TestGetRuleDefaultsToBoundedContent(t *testing.T) {
+	doc := model.Document{
+		ID:           "rule-long",
+		Title:        "긴 규정",
+		CollectedAt:  time.Now(),
+		DocumentType: model.DocumentTypeRule,
+		Body:         strings.Repeat("가", 20050),
+	}
+	service := &Service{Repo: testRepository(doc, nil), DomainLexicon: testDomainLexicon(t)}
+	_, out, err := service.getRule(context.Background(), &mcpsdk.CallToolRequest{}, GetRuleInput{ID: doc.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Truncated || out.TotalChars != 20050 || len([]rune(out.Content)) <= 20000 {
+		t.Fatalf("expected bounded content metadata: %#v", out)
+	}
+}
+
 func TestServiceSearchRulesLanguageFilter(t *testing.T) {
 	ko := model.Document{
 		ID:           "rule-1",
@@ -76,7 +94,7 @@ func TestServiceSearchRulesLanguageFilter(t *testing.T) {
 	repo := &searchindex.Repository{
 		Documents:   map[string]model.Document{ko.ID: ko, en.ID: en},
 		Attachments: map[string]searchindex.AttachmentDocument{},
-		Engine:      searchindex.Build([]model.Document{ko, en}, nil),
+		Engine:      searchindex.BuildWithAttachments([]model.Document{ko, en}, nil, nil),
 	}
 	service := &Service{Repo: repo, DomainLexicon: testDomainLexicon(t)}
 	_, out, err := service.searchRules(context.Background(), &mcpsdk.CallToolRequest{}, SearchRulesInput{Query: "listing", Language: "en", Limit: 5})
@@ -85,6 +103,45 @@ func TestServiceSearchRulesLanguageFilter(t *testing.T) {
 	}
 	if len(out.Results) != 1 || out.Results[0].ID != "rule-1-en" || out.Results[0].Language != "en" {
 		t.Fatalf("bad language-filtered results: %#v", out.Results)
+	}
+}
+
+func TestServiceRejectsUnsupportedLanguage(t *testing.T) {
+	doc := model.Document{
+		ID:           "rule-1",
+		Title:        "코스닥시장 상장규정",
+		CollectedAt:  time.Now(),
+		DocumentType: model.DocumentTypeRule,
+		Language:     model.LanguageKorean,
+		Body:         "상장 심사",
+	}
+	service := &Service{Repo: testRepository(doc, nil), DomainLexicon: testDomainLexicon(t)}
+	_, _, err := service.searchRules(context.Background(), &mcpsdk.CallToolRequest{}, SearchRulesInput{Query: "상장", Language: "jp", Limit: 5})
+	if err == nil || !strings.Contains(err.Error(), "unsupported language") {
+		t.Fatalf("expected unsupported language error, got %v", err)
+	}
+}
+
+func TestListRulesReturnsTotal(t *testing.T) {
+	docs := []model.Document{
+		{ID: "rule-2", Title: "규정 2", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Language: model.LanguageKorean, Body: "본문"},
+		{ID: "rule-1", Title: "규정 1", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Language: model.LanguageKorean, Body: "본문"},
+	}
+	repo := &searchindex.Repository{
+		Documents:   map[string]model.Document{docs[0].ID: docs[0], docs[1].ID: docs[1]},
+		Attachments: map[string]searchindex.AttachmentDocument{},
+		Engine:      searchindex.BuildWithAttachments(docs, nil, nil),
+	}
+	service := &Service{Repo: repo, DomainLexicon: testDomainLexicon(t)}
+	_, out, err := service.listRules(context.Background(), &mcpsdk.CallToolRequest{}, ListRulesInput{Language: "ko", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Total != 2 || len(out.Documents) != 1 {
+		t.Fatalf("bad list output: %#v", out)
+	}
+	if out.Documents[0].Body != "" {
+		t.Fatalf("list output should strip body: %#v", out.Documents[0])
 	}
 }
 
@@ -172,7 +229,7 @@ func TestSearchRulesExpandsDomainTerms(t *testing.T) {
 	repo := &searchindex.Repository{
 		Documents:   map[string]model.Document{doc.ID: doc},
 		Attachments: map[string]searchindex.AttachmentDocument{},
-		Engine:      searchindex.Build([]model.Document{doc}, nil),
+		Engine:      searchindex.BuildWithAttachments([]model.Document{doc}, nil, nil),
 	}
 	service := &Service{Repo: repo, DomainLexicon: testDomainLexicon(t)}
 
@@ -269,12 +326,12 @@ func TestGetContextReturnsMatchedChunkAndNeighbors(t *testing.T) {
 	service := &Service{Repo: &searchindex.Repository{
 		Documents:   map[string]model.Document{doc.ID: doc},
 		Attachments: map[string]searchindex.AttachmentDocument{},
-		Engine:      searchindex.Build([]model.Document{doc}, nil),
+		Engine:      searchindex.BuildWithAttachments([]model.Document{doc}, nil, nil),
 	}}
 	_, out, err := service.getContext(context.Background(), &mcpsdk.CallToolRequest{}, GetContextInput{
 		ChunkID:      "rule-context#1",
-		BeforeChunks: 1,
-		AfterChunks:  1,
+		BeforeChunks: intPtr(1),
+		AfterChunks:  intPtr(1),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -287,6 +344,52 @@ func TestGetContextReturnsMatchedChunkAndNeighbors(t *testing.T) {
 	}
 	if out.Document.Body != "" {
 		t.Fatalf("document body should be stripped: %#v", out.Document)
+	}
+}
+
+func TestGetContextAllowsZeroBeforeChunks(t *testing.T) {
+	doc := model.Document{
+		ID:           "rule-context-zero",
+		Title:        "문맥 규정",
+		CollectedAt:  time.Now(),
+		DocumentType: model.DocumentTypeRule,
+		Body:         strings.Repeat("이전 ", 600) + "\n\n목표 증거금\n\n" + strings.Repeat("다음 ", 600),
+	}
+	service := &Service{Repo: testRepository(doc, nil), DomainLexicon: testDomainLexicon(t)}
+	results := service.Repo.Engine.Search(searchindex.SearchOptions{Query: "증거금", Limit: 1})
+	if len(results) != 1 {
+		t.Fatalf("missing search result: %#v", results)
+	}
+	_, out, err := service.getContext(context.Background(), &mcpsdk.CallToolRequest{}, GetContextInput{
+		ChunkID:      results[0].MatchedChunkID,
+		BeforeChunks: intPtr(0),
+		AfterChunks:  intPtr(0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Chunks) != 1 {
+		t.Fatalf("expected only target chunk, got %#v", out.Chunks)
+	}
+}
+
+func TestListCategories(t *testing.T) {
+	docs := []model.Document{
+		{ID: "rule-1", Title: "규정 1", Category: "업무규정 / 유가증권시장규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Language: model.LanguageKorean, Body: "본문"},
+		{ID: "rule-2", Title: "규정 2", Category: "상장규정 / 코스닥시장규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Language: model.LanguageKorean, Body: "본문"},
+	}
+	repo := &searchindex.Repository{
+		Documents:   map[string]model.Document{docs[0].ID: docs[0], docs[1].ID: docs[1]},
+		Attachments: map[string]searchindex.AttachmentDocument{},
+		Engine:      searchindex.BuildWithAttachments(docs, nil, nil),
+	}
+	service := &Service{Repo: repo, DomainLexicon: testDomainLexicon(t)}
+	_, out, err := service.listCategories(context.Background(), &mcpsdk.CallToolRequest{}, ListCategoriesInput{Language: "ko"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Total != 2 || out.Categories[0] != "상장규정 / 코스닥시장규정" {
+		t.Fatalf("bad categories: %#v", out)
 	}
 }
 
@@ -345,7 +448,7 @@ func TestGetAttachmentAddsFormulaNotice(t *testing.T) {
 	service := &Service{Repo: &searchindex.Repository{
 		Documents:   map[string]model.Document{},
 		Attachments: map[string]searchindex.AttachmentDocument{att.Attachment.ID: att},
-		Engine:      searchindex.Build(nil, nil),
+		Engine:      searchindex.BuildWithAttachments(nil, nil, nil),
 	}}
 
 	_, out, err := service.getAttachment(context.Background(), &mcpsdk.CallToolRequest{}, GetAttachmentInput{ID: "att-formula"})
@@ -368,18 +471,15 @@ func TestGetAttachmentDistinguishesFormulaTextWithoutEquationBlocks(t *testing.T
 	service := &Service{Repo: &searchindex.Repository{
 		Documents:   map[string]model.Document{},
 		Attachments: map[string]searchindex.AttachmentDocument{att.Attachment.ID: att},
-		Engine:      searchindex.Build(nil, nil),
+		Engine:      searchindex.BuildWithAttachments(nil, nil, nil),
 	}}
 
 	_, out, err := service.getAttachment(context.Background(), &mcpsdk.CallToolRequest{}, GetAttachmentInput{ID: "att-formula-text"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.FormulaNotice == nil || out.FormulaNotice.Code != "formula_text_detected" {
-		t.Fatalf("bad formula text notice: %#v", out.FormulaNotice)
-	}
-	if out.FormulaNotice.SourceEquationAvailable || out.FormulaNotice.GeneratedLatexAvailable {
-		t.Fatalf("formula text notice should not claim equation blocks: %#v", out.FormulaNotice)
+	if out.FormulaNotice != nil {
+		t.Fatalf("formula-like text without preserved blocks should not emit user-facing notice: %#v", out.FormulaNotice)
 	}
 }
 
@@ -401,8 +501,12 @@ func testRepository(doc model.Document, vectors map[string][]float64) *searchind
 		Attachments: map[string]searchindex.AttachmentDocument{
 			"att-1": {Attachment: model.Attachment{ID: "att-1", Title: "별표", Status: model.AttachmentConverted}, Text: "첨부 본문"},
 		},
-		Engine: searchindex.Build([]model.Document{doc}, vectors),
+		Engine: searchindex.BuildWithAttachments([]model.Document{doc}, nil, vectors),
 	}
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func testDomainLexicon(t *testing.T) []searchindex.DomainLexiconEntry {

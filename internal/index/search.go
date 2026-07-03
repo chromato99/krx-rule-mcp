@@ -2,6 +2,7 @@ package index
 
 import (
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -20,10 +21,11 @@ type Filter struct {
 }
 
 type SearchOptions struct {
-	Query       string
-	Limit       int
-	Filter      Filter
-	QueryVector []float64
+	Query        string
+	Limit        int
+	Filter       Filter
+	QueryVector  []float64
+	TokenWeights map[string]float64
 }
 
 type SearchResult struct {
@@ -43,6 +45,7 @@ type SearchResult struct {
 	MatchedSource     string               `json:"matched_source,omitempty"`
 	MatchedChunkID    string               `json:"matched_chunk_id,omitempty"`
 	MatchedChunkIndex int                  `json:"matched_chunk_index,omitempty"`
+	ArticleRange      string               `json:"article_range,omitempty"`
 	AttachmentMatches []AttachmentMatch    `json:"attachment_matches,omitempty"`
 	FormulaNotice     *model.FormulaNotice `json:"formula_notice,omitempty"`
 	URI               string               `json:"uri"`
@@ -71,6 +74,7 @@ type ChunkContext struct {
 	AttachmentTitle  string                 `json:"attachment_title,omitempty"`
 	AttachmentFile   string                 `json:"attachment_file,omitempty"`
 	AttachmentStatus model.AttachmentStatus `json:"attachment_status,omitempty"`
+	ArticleRange     string                 `json:"article_range,omitempty"`
 	Text             string                 `json:"text"`
 }
 
@@ -93,13 +97,10 @@ type chunk struct {
 	AttachmentTitle  string                 `json:"attachment_title,omitempty"`
 	AttachmentFile   string                 `json:"attachment_file,omitempty"`
 	AttachmentStatus model.AttachmentStatus `json:"attachment_status,omitempty"`
+	ArticleRange     string                 `json:"article_range,omitempty"`
 	Tokens           []string               `json:"tokens"`
 	Vector           []float64              `json:"vector,omitempty"`
 	tokenMap         map[string]int
-}
-
-func Build(docs []model.Document, vectors map[string][]float64) *Engine {
-	return BuildWithAttachments(docs, nil, vectors)
 }
 
 func BuildWithAttachments(docs []model.Document, attachments map[string]AttachmentDocument, vectors map[string][]float64) *Engine {
@@ -119,12 +120,13 @@ func BuildWithAttachments(docs []model.Document, attachments map[string]Attachme
 		for i, part := range parts {
 			id := doc.ID + "#" + itoa(i)
 			c := chunk{
-				ID:     id,
-				DocID:  doc.ID,
-				Index:  i,
-				Source: "body",
-				Text:   part,
-				Vector: vectors[id],
+				ID:           id,
+				DocID:        doc.ID,
+				Index:        i,
+				Source:       "body",
+				Text:         part,
+				Vector:       vectors[id],
+				ArticleRange: articleRange(part),
 			}
 			totalLen += e.addChunk(c, doc.Title+" "+doc.Category+" "+part)
 		}
@@ -196,11 +198,13 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (e *Engine) Search(opts SearchOptions) []SearchResult {
-	if opts.Limit <= 0 || opts.Limit > 50 {
+	if opts.Limit <= 0 {
 		opts.Limit = 10
+	} else if opts.Limit > 50 {
+		opts.Limit = 50
 	}
 	queryTokens := Tokenize(opts.Query)
-	bm25 := e.bm25Scores(queryTokens, opts.Filter)
+	bm25 := e.bm25Scores(queryTokens, opts.Filter, opts.TokenWeights)
 	vector := e.vectorScores(opts.QueryVector, opts.Filter)
 	if len(vector) > 0 && len(bm25) > 0 {
 		return e.rrf(opts, bm25, vector)
@@ -212,8 +216,15 @@ func (e *Engine) Search(opts SearchOptions) []SearchResult {
 }
 
 func (e *Engine) Documents(filter Filter, limit, offset int) []model.Document {
-	if limit <= 0 || limit > 200 {
+	docs, _ := e.DocumentsPage(filter, limit, offset)
+	return docs
+}
+
+func (e *Engine) DocumentsPage(filter Filter, limit, offset int) ([]model.Document, int) {
+	if limit <= 0 {
 		limit = 50
+	} else if limit > 200 {
+		limit = 200
 	}
 	if offset < 0 {
 		offset = 0
@@ -224,21 +235,43 @@ func (e *Engine) Documents(filter Filter, limit, offset int) []model.Document {
 			docs = append(docs, doc)
 		}
 	}
-	sort.Slice(docs, func(i, j int) bool {
-		return docSortDate(docs[i]).After(docSortDate(docs[j]))
-	})
+	sort.SliceStable(docs, func(i, j int) bool { return docLess(docs[i], docs[j]) })
+	total := len(docs)
 	if offset >= len(docs) {
-		return nil
+		return nil, total
 	}
 	end := offset + limit
 	if end > len(docs) {
 		end = len(docs)
 	}
-	return docs[offset:end]
+	return docs[offset:end], total
 }
 
 func (e *Engine) Recent(limit int, typ model.DocumentType, language string) []model.Document {
 	return e.Documents(Filter{DocumentType: typ, Language: language}, limit, 0)
+}
+
+func (e *Engine) Categories(language string) []string {
+	seen := map[string]struct{}{}
+	for _, doc := range e.docs {
+		if language != "" {
+			normalized, ok := normalizeFilterLanguage(language)
+			if !ok || model.NormalizeLanguage(doc.Language) != normalized {
+				continue
+			}
+		}
+		category := strings.TrimSpace(doc.Category)
+		if category == "" {
+			continue
+		}
+		seen[category] = struct{}{}
+	}
+	categories := make([]string, 0, len(seen))
+	for category := range seen {
+		categories = append(categories, category)
+	}
+	sort.Strings(categories)
+	return categories
 }
 
 func (e *Engine) Document(id string) (model.Document, bool) {
@@ -312,7 +345,7 @@ func (e *Engine) HasVectors() bool {
 	return false
 }
 
-func (e *Engine) bm25Scores(queryTokens []string, filter Filter) map[string]SearchResult {
+func (e *Engine) bm25Scores(queryTokens []string, filter Filter, tokenWeights map[string]float64) map[string]SearchResult {
 	out := map[string]SearchResult{}
 	if len(queryTokens) == 0 || len(e.chunks) == 0 {
 		return out
@@ -330,9 +363,13 @@ func (e *Engine) bm25Scores(queryTokens []string, filter Filter) map[string]Sear
 			if tf == 0 {
 				continue
 			}
+			weight := tokenWeights[tok]
+			if weight <= 0 {
+				weight = 1
+			}
 			idf := math.Log(1 + (float64(len(e.chunks))-float64(e.df[tok])+0.5)/(float64(e.df[tok])+0.5))
 			denom := tf + k1*(1-b+b*float64(len(c.Tokens))/e.avgDocLength)
-			score += idf * (tf * (k1 + 1) / denom)
+			score += weight * idf * (tf * (k1 + 1) / denom)
 		}
 		if score <= 0 {
 			continue
@@ -344,6 +381,7 @@ func (e *Engine) bm25Scores(queryTokens []string, filter Filter) map[string]Sear
 		res.MatchedSource = c.Source
 		res.MatchedChunkID = c.ID
 		res.MatchedChunkIndex = c.Index
+		res.ArticleRange = c.ArticleRange
 		if c.Source == "attachment" {
 			res.Snippet = "첨부 " + c.AttachmentTitle + ": " + res.Snippet
 			res.AttachmentMatches = []AttachmentMatch{attachmentMatch(c, score, res.Snippet)}
@@ -385,6 +423,7 @@ func (e *Engine) vectorScores(queryVector []float64, filter Filter) map[string]S
 		res.MatchedSource = c.Source
 		res.MatchedChunkID = c.ID
 		res.MatchedChunkIndex = c.Index
+		res.ArticleRange = c.ArticleRange
 		if c.Source == "attachment" {
 			res.Snippet = "첨부 " + c.AttachmentTitle + ": " + res.Snippet
 			res.AttachmentMatches = []AttachmentMatch{attachmentMatch(c, score, res.Snippet)}
@@ -406,7 +445,7 @@ func (e *Engine) rankBM25(opts SearchOptions, scores map[string]SearchResult) []
 	results := mapValues(scores)
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].Score == results[j].Score {
-			return docSortDate(e.docs[results[i].ID]).After(docSortDate(e.docs[results[j].ID]))
+			return docLess(e.docs[results[i].ID], e.docs[results[j].ID])
 		}
 		return results[i].Score > results[j].Score
 	})
@@ -485,8 +524,28 @@ func chunkContext(doc model.Document, c chunk) ChunkContext {
 		AttachmentTitle:  c.AttachmentTitle,
 		AttachmentFile:   c.AttachmentFile,
 		AttachmentStatus: c.AttachmentStatus,
+		ArticleRange:     c.ArticleRange,
 		Text:             c.Text,
 	}
+}
+
+var articlePattern = regexp.MustCompile(`제\s*\d+(?:의\d+)?\s*조(?:\([^)]*\))?`)
+
+func articleRange(text string) string {
+	matches := articlePattern.FindAllString(text, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	first := normalizeArticleLabel(matches[0])
+	last := normalizeArticleLabel(matches[len(matches)-1])
+	if first == last {
+		return first
+	}
+	return first + "~" + last
+}
+
+func normalizeArticleLabel(value string) string {
+	return strings.Join(strings.Fields(value), "")
 }
 
 func mergeAttachmentMatches(existing, incoming []AttachmentMatch) []AttachmentMatch {
@@ -588,6 +647,15 @@ func docSortDate(doc model.Document) time.Time {
 		}
 	}
 	return doc.CollectedAt
+}
+
+func docLess(a, b model.Document) bool {
+	aDate := docSortDate(a)
+	bDate := docSortDate(b)
+	if !aDate.Equal(bDate) {
+		return aDate.After(bDate)
+	}
+	return a.ID < b.ID
 }
 
 func countTokens(tokens []string) map[string]int {

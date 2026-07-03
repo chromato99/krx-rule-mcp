@@ -11,6 +11,8 @@ var (
 	singleASCIIAlnum      = regexp.MustCompile(`[0-9A-Za-z]`)
 	paragraphSplitPattern = regexp.MustCompile(`\n{2,}`)
 	whitespacePattern     = regexp.MustCompile(`\s+`)
+	htmlTableOpenPattern  = regexp.MustCompile(`(?is)<table\b[^>]*>`)
+	htmlTableRowPattern   = regexp.MustCompile(`(?is)<tr\b[^>]*>.*?</tr>`)
 )
 
 func Tokenize(text string) []string {
@@ -106,6 +108,28 @@ func ChunkText(text string, maxRunes int) []string {
 			current.Reset()
 			currentLen = 0
 		}
+		if paraLen > maxRunes && isMarkdownTable(para) {
+			for _, part := range splitMarkdownTable(para, maxRunes) {
+				if currentLen > 0 {
+					chunks = append(chunks, strings.TrimSpace(current.String()))
+					current.Reset()
+					currentLen = 0
+				}
+				chunks = append(chunks, part)
+			}
+			continue
+		}
+		if paraLen > maxRunes && isHTMLTable(para) {
+			for _, part := range splitHTMLTable(para, maxRunes) {
+				if currentLen > 0 {
+					chunks = append(chunks, strings.TrimSpace(current.String()))
+					current.Reset()
+					currentLen = 0
+				}
+				chunks = append(chunks, part)
+			}
+			continue
+		}
 		if paraLen > maxRunes {
 			for _, part := range splitRunes(para, maxRunes) {
 				if currentLen > 0 {
@@ -128,6 +152,110 @@ func ChunkText(text string, maxRunes int) []string {
 		chunks = append(chunks, strings.TrimSpace(current.String()))
 	}
 	return chunks
+}
+
+func isMarkdownTable(text string) bool {
+	lines := nonEmptyLines(text)
+	if len(lines) < 3 {
+		return false
+	}
+	return strings.Contains(lines[0], "|") && tableSeparatorLine(lines[1])
+}
+
+func splitMarkdownTable(text string, maxRunes int) []string {
+	lines := nonEmptyLines(text)
+	if len(lines) < 3 {
+		return splitRunes(text, maxRunes)
+	}
+	header := []string{lines[0], lines[1]}
+	var parts []string
+	current := append([]string{}, header...)
+	currentLen := runeLen(strings.Join(current, "\n"))
+	for _, row := range lines[2:] {
+		rowLen := runeLen(row) + 1
+		if len(current) > len(header) && currentLen+rowLen > maxRunes {
+			parts = append(parts, strings.Join(current, "\n"))
+			current = append([]string{}, header...)
+			currentLen = runeLen(strings.Join(current, "\n"))
+		}
+		current = append(current, row)
+		currentLen += rowLen
+	}
+	if len(current) > len(header) {
+		parts = append(parts, strings.Join(current, "\n"))
+	}
+	return parts
+}
+
+func isHTMLTable(text string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(text))
+	return strings.HasPrefix(trimmed, "<table") && strings.Contains(trimmed, "</table>")
+}
+
+func splitHTMLTable(text string, maxRunes int) []string {
+	open := htmlTableOpenPattern.FindString(text)
+	rows := htmlTableRowPattern.FindAllString(text, -1)
+	if open == "" || len(rows) < 2 {
+		return splitRunes(text, maxRunes)
+	}
+	header := []string{strings.TrimSpace(rows[0])}
+	body := rows[1:]
+	var parts []string
+	current := append([]string{}, header...)
+	currentLen := htmlTableLen(open, current)
+	for _, rawRow := range body {
+		row := strings.TrimSpace(rawRow)
+		rowLen := runeLen(row) + 1
+		if len(current) > len(header) && currentLen+rowLen > maxRunes {
+			parts = append(parts, renderHTMLTableChunk(open, current))
+			current = append([]string{}, header...)
+			currentLen = htmlTableLen(open, current)
+		}
+		current = append(current, row)
+		currentLen += rowLen
+	}
+	if len(current) > len(header) {
+		parts = append(parts, renderHTMLTableChunk(open, current))
+	}
+	return parts
+}
+
+func htmlTableLen(open string, rows []string) int {
+	return runeLen(open) + runeLen("</table>") + runeLen(strings.Join(rows, "\n")) + len(rows) + 2
+}
+
+func renderHTMLTableChunk(open string, rows []string) string {
+	return strings.Join(append(append([]string{open}, rows...), "</table>"), "\n")
+}
+
+func nonEmptyLines(text string) []string {
+	var lines []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func tableSeparatorLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.Contains(trimmed, "|") {
+		return false
+	}
+	trimmed = strings.Trim(trimmed, "| ")
+	for _, cell := range strings.Split(trimmed, "|") {
+		cell = strings.TrimSpace(cell)
+		if cell == "" || strings.Trim(cell, "-:") != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func runeLen(text string) int {
+	return utf8.RuneCountInString(text)
 }
 
 func splitRunes(text string, maxRunes int) []string {

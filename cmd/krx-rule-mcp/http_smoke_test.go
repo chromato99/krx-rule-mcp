@@ -29,7 +29,6 @@ func TestHTTPMCPManualSmoke(t *testing.T) {
 			token: token,
 			base:  http.DefaultTransport,
 		}},
-		DisableStandaloneSSE: true,
 	}, nil)
 	if err != nil {
 		t.Fatalf("connect HTTP MCP: %v", err)

@@ -3,7 +3,6 @@ package model
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -50,6 +49,7 @@ type Attachment struct {
 	ConvertedTextChars     int64            `json:"converted_text_chars,omitempty" yaml:"converted_text_chars,omitempty"`
 	ConvertedNonSpaceChars int64            `json:"converted_non_space_chars,omitempty" yaml:"converted_non_space_chars,omitempty"`
 	TableRowCount          int64            `json:"table_row_count,omitempty" yaml:"table_row_count,omitempty"`
+	FormulaBlockCount      int64            `json:"formula_block_count,omitempty" yaml:"formula_block_count,omitempty"`
 	FormulaHintCount       int64            `json:"formula_hint_count,omitempty" yaml:"formula_hint_count,omitempty"`
 	ReplacementCharCount   int64            `json:"replacement_char_count,omitempty" yaml:"replacement_char_count,omitempty"`
 }
@@ -84,14 +84,6 @@ type Document struct {
 	Path          string       `json:"path,omitempty" yaml:"-"`
 }
 
-type Manifest struct {
-	Version       string       `json:"version" yaml:"version"`
-	GeneratedAt   time.Time    `json:"generated_at" yaml:"generated_at"`
-	Source        string       `json:"source" yaml:"source"`
-	Documents     []Document   `json:"documents" yaml:"documents"`
-	AttachmentLog []Attachment `json:"attachment_log,omitempty" yaml:"attachment_log,omitempty"`
-}
-
 func (d Document) URI() string {
 	switch d.DocumentType {
 	case DocumentTypeNotice:
@@ -122,18 +114,6 @@ func Slug(text string) string {
 		return "untitled"
 	}
 	return text
-}
-
-func SafeFileName(title string) string {
-	return Slug(title) + ".md"
-}
-
-func PathID(path string) string {
-	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	if idx := strings.Index(base, "-"); idx > 0 {
-		return base[:idx]
-	}
-	return base
 }
 
 func NormalizeLanguage(value string) string {

@@ -114,7 +114,7 @@ func bm25Current(path string, snap searchindex.Snapshot) bool {
 	if err != nil {
 		return false
 	}
-	return current.CorpusHash == snap.CorpusHash
+	return current.CorpusHash == snap.CorpusHash && current.IndexerVersion == snap.IndexerVersion
 }
 
 func vectorFresh(path string, snap searchindex.Snapshot, embedder *searchindex.OpenAIEmbedder) bool {

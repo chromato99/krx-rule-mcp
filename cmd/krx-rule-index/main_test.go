@@ -1,14 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/chromato99/krx-rule-mcp/internal/corpus"
 	searchindex "github.com/chromato99/krx-rule-mcp/internal/index"
 	"github.com/chromato99/krx-rule-mcp/internal/model"
+	"gopkg.in/yaml.v3"
 )
 
 func TestSelectVectorChunksSamplesByQuery(t *testing.T) {
@@ -49,6 +51,22 @@ func TestBM25CurrentUsesCorpusHash(t *testing.T) {
 	}
 }
 
+func TestBM25CurrentUsesIndexerVersion(t *testing.T) {
+	root := writeCommandTestCorpus(t)
+	snap, _, err := searchindex.BuildSnapshot(root)
+	if err != nil {
+		t.Fatalf("build snapshot: %v", err)
+	}
+	path := filepath.Join(root, "index", "bm25.krxidx")
+	if err := searchindex.WriteSnapshot(path, snap); err != nil {
+		t.Fatalf("write snapshot: %v", err)
+	}
+	snap.IndexerVersion = "future-indexer"
+	if bm25Current(path, snap) {
+		t.Fatal("expected BM25 index to be stale after indexer version change")
+	}
+}
+
 func TestBM25CurrentDetectsConvertedAttachmentTextChange(t *testing.T) {
 	root := t.TempDir()
 	attachmentTextPath := filepath.Join("ko", "rules", "상장규정", "attachments", "별표.md")
@@ -69,9 +87,7 @@ func TestBM25CurrentDetectsConvertedAttachmentTextChange(t *testing.T) {
 			ContentHash: "raw-hash",
 		}},
 	}
-	if _, err := corpus.WriteDocument(root, doc); err != nil {
-		t.Fatalf("write document: %v", err)
-	}
+	writeMainTestDocument(t, root, doc)
 	fullTextPath := filepath.Join(root, attachmentTextPath)
 	if err := os.MkdirAll(filepath.Dir(fullTextPath), 0o755); err != nil {
 		t.Fatalf("mkdir attachment dir: %v", err)
@@ -140,8 +156,47 @@ func writeCommandTestCorpus(t *testing.T) string {
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장 심사와 공시 의무",
 	}
-	if _, err := corpus.WriteDocument(root, doc); err != nil {
-		t.Fatalf("write document: %v", err)
-	}
+	writeMainTestDocument(t, root, doc)
 	return root
+}
+
+func writeMainTestDocument(t *testing.T, root string, doc model.Document) string {
+	t.Helper()
+	folder := "rules"
+	if doc.DocumentType == model.DocumentTypeNotice {
+		folder = "notices"
+	}
+	path := filepath.Join(root, model.NormalizeLanguage(doc.Language), folder, model.Slug(doc.Title), "index.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, renderMainTestMarkdown(t, doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func renderMainTestMarkdown(t *testing.T, doc model.Document) []byte {
+	t.Helper()
+	meta := doc
+	meta.Body = ""
+	meta.Path = ""
+	meta.Language = model.NormalizeLanguage(meta.Language)
+	if meta.ContentHash == "" {
+		meta.ContentHash = model.HashText(doc.Body)
+	}
+	var buf bytes.Buffer
+	buf.WriteString("---\n")
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(meta); err != nil {
+		t.Fatal(err)
+	}
+	if err := enc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	buf.WriteString("---\n\n")
+	buf.WriteString(strings.TrimSpace(doc.Body))
+	buf.WriteString("\n")
+	return buf.Bytes()
 }

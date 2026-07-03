@@ -98,3 +98,41 @@ func TestRateLimitWindowReset(t *testing.T) {
 		t.Fatalf("request after window reset status = %d", rec.Code)
 	}
 }
+
+func TestMetricsRecorderPreservesFlusher(t *testing.T) {
+	metrics := NewMetrics()
+	base := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
+	handler := WithMetrics(metrics, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("wrapped ResponseWriter does not expose http.Flusher")
+		}
+		flusher.Flush()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+
+	handler.ServeHTTP(base, httptest.NewRequest(http.MethodGet, "/mcp", nil))
+	if !base.flushed {
+		t.Fatal("Flush was not delegated to underlying writer")
+	}
+	if base.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", base.Code, http.StatusAccepted)
+	}
+}
+
+func TestStatusRecorderUnwrapsUnderlyingWriter(t *testing.T) {
+	base := httptest.NewRecorder()
+	rec := &statusRecorder{ResponseWriter: base}
+	if rec.Unwrap() != base {
+		t.Fatalf("Unwrap() = %#v, want underlying writer", rec.Unwrap())
+	}
+}
+
+type flushRecorder struct {
+	*httptest.ResponseRecorder
+	flushed bool
+}
+
+func (r *flushRecorder) Flush() {
+	r.flushed = true
+}

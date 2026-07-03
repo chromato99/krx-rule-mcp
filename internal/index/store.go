@@ -18,13 +18,14 @@ import (
 )
 
 type Snapshot struct {
-	Version      uint16
-	GeneratedAt  string
-	CorpusHash   string
-	Documents    []SnapshotDocument
-	AvgDocLength float64
-	DF           map[string]int
-	Chunks       []SnapshotChunk
+	Version        uint16
+	IndexerVersion string
+	GeneratedAt    string
+	CorpusHash     string
+	Documents      []SnapshotDocument
+	AvgDocLength   float64
+	DF             map[string]int
+	Chunks         []SnapshotChunk
 }
 
 type SnapshotDocument struct {
@@ -43,6 +44,7 @@ type SnapshotChunk struct {
 	AttachmentTitle  string
 	AttachmentFile   string
 	AttachmentStatus model.AttachmentStatus
+	ArticleRange     string
 	Tokens           []string
 	Vector           []float64
 }
@@ -63,17 +65,24 @@ type SnapshotVector struct {
 }
 
 type Repository struct {
-	DataRoot    string
-	IndexPath   string
-	VectorPath  string
-	Documents   map[string]model.Document
-	Attachments map[string]AttachmentDocument
-	Engine      *Engine
+	DataRoot      string
+	IndexPath     string
+	VectorPath    string
+	VectorIndexes []VectorIndexStatus
+	Documents     map[string]model.Document
+	Attachments   map[string]AttachmentDocument
+	Engine        *Engine
 }
 
 type AttachmentDocument struct {
 	Attachment model.Attachment
 	Text       string
+}
+
+type VectorIndexStatus struct {
+	Path           string
+	LoadedVectors  int
+	RejectedReason string
 }
 
 var (
@@ -99,18 +108,25 @@ func LoadRepository(dataRoot, indexPath string, vectorIndexPaths ...string) (*Re
 	}
 	vectors := map[string][]float64{}
 	var vectorPath string
+	var vectorStatuses []VectorIndexStatus
 	for _, path := range vectorIndexPaths {
 		path = strings.TrimSpace(path)
 		if path == "" {
 			continue
 		}
-		loaded, err := LoadVectorMap(path, docs, attachments)
+		status := VectorIndexStatus{Path: path}
+		loaded, reason, err := LoadVectorMap(path, docs, attachments)
 		if errors.Is(err, os.ErrNotExist) {
+			status.RejectedReason = "missing"
+			vectorStatuses = append(vectorStatuses, status)
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
+		status.LoadedVectors = len(loaded)
+		status.RejectedReason = reason
+		vectorStatuses = append(vectorStatuses, status)
 		for id, vector := range loaded {
 			vectors[id] = vector
 		}
@@ -120,12 +136,13 @@ func LoadRepository(dataRoot, indexPath string, vectorIndexPaths ...string) (*Re
 	}
 	engine := engineFromSnapshot(docs, snap, vectors)
 	repo := &Repository{
-		DataRoot:    dataRoot,
-		IndexPath:   indexPath,
-		VectorPath:  vectorPath,
-		Documents:   map[string]model.Document{},
-		Attachments: attachments,
-		Engine:      engine,
+		DataRoot:      dataRoot,
+		IndexPath:     indexPath,
+		VectorPath:    vectorPath,
+		VectorIndexes: vectorStatuses,
+		Documents:     map[string]model.Document{},
+		Attachments:   attachments,
+		Engine:        engine,
 	}
 	for _, doc := range docs {
 		repo.Documents[doc.ID] = doc
@@ -162,6 +179,10 @@ func LoadSnapshot(path string) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	snap.CorpusHash, err = readString(r)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snap.IndexerVersion, err = readString(r)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -290,17 +311,23 @@ func LoadVectorSnapshot(path string) (VectorSnapshot, error) {
 	return snap, nil
 }
 
-func LoadVectorMap(path string, docs []model.Document, attachments map[string]AttachmentDocument) (map[string][]float64, error) {
+func LoadVectorMap(path string, docs []model.Document, attachments map[string]AttachmentDocument) (map[string][]float64, string, error) {
 	snap, err := LoadVectorSnapshot(path)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if snap.CorpusHash != corpusHash(docs, attachments) || !snapshotDocumentsMatch(snap.Documents, docs, attachments) {
-		return nil, nil
+	if snap.CorpusHash != corpusHash(docs, attachments) {
+		return nil, "corpus_hash_mismatch", nil
+	}
+	if !snapshotDocumentsMatch(snap.Documents, docs, attachments) {
+		return nil, "document_hash_mismatch", nil
 	}
 	metadata, err := LoadVectorMetadata(VectorMetadataPath(path))
-	if err != nil || !vectorMetadataMatches(metadata, snap) {
-		return nil, nil
+	if err != nil {
+		return nil, "metadata_load_failed: " + err.Error(), nil
+	}
+	if reason := vectorMetadataRejectReason(metadata, snap); reason != "" {
+		return nil, reason, nil
 	}
 	out := make(map[string][]float64, len(snap.Vectors))
 	for _, item := range snap.Vectors {
@@ -308,22 +335,41 @@ func LoadVectorMap(path string, docs []model.Document, attachments map[string]At
 			out[item.ChunkID] = item.Vector
 		}
 	}
-	return out, nil
+	if len(out) == 0 {
+		return out, "no_vectors", nil
+	}
+	return out, "", nil
 }
 
 func vectorMetadataMatches(metadata VectorMetadata, snap VectorSnapshot) bool {
+	return vectorMetadataRejectReason(metadata, snap) == ""
+}
+
+func vectorMetadataRejectReason(metadata VectorMetadata, snap VectorSnapshot) string {
 	embedder, err := newOpenAIEmbedderFromEnv()
 	if err != nil {
-		return false
+		return "embedding_config_invalid: " + err.Error()
 	}
-	return metadata.Version == 1 &&
-		metadata.CorpusHash == snap.CorpusHash &&
-		metadata.Model == snap.Model &&
-		metadata.Dimensions == snap.Dimensions &&
-		metadata.Model == embedder.Model &&
-		metadata.Dimensions == embedder.Dimensions &&
-		metadata.QueryPrefix == envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: ") &&
-		metadata.DocumentPrefix == envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: ")
+	switch {
+	case metadata.Version != 1:
+		return "metadata_version_mismatch"
+	case metadata.CorpusHash != snap.CorpusHash:
+		return "metadata_corpus_hash_mismatch"
+	case metadata.Model != snap.Model:
+		return "metadata_snapshot_model_mismatch"
+	case metadata.Dimensions != snap.Dimensions:
+		return "metadata_snapshot_dimensions_mismatch"
+	case metadata.Model != embedder.Model:
+		return "embedding_model_mismatch"
+	case metadata.Dimensions != embedder.Dimensions:
+		return "embedding_dimensions_mismatch"
+	case metadata.QueryPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: "):
+		return "embedding_query_prefix_mismatch"
+	case metadata.DocumentPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: "):
+		return "embedding_document_prefix_mismatch"
+	default:
+		return ""
+	}
 }
 
 func engineFromSnapshot(docs []model.Document, snap Snapshot, vectors map[string][]float64) *Engine {
@@ -351,6 +397,7 @@ func engineFromSnapshot(docs []model.Document, snap Snapshot, vectors map[string
 			AttachmentTitle:  item.AttachmentTitle,
 			AttachmentFile:   item.AttachmentFile,
 			AttachmentStatus: item.AttachmentStatus,
+			ArticleRange:     item.ArticleRange,
 			Tokens:           item.Tokens,
 			tokenMap:         countTokens(item.Tokens),
 			Vector:           vectors[item.ID],
@@ -372,7 +419,9 @@ func engineFromSnapshot(docs []model.Document, snap Snapshot, vectors map[string
 }
 
 func snapshotMatches(snap Snapshot, docs []model.Document, attachments map[string]AttachmentDocument) bool {
-	return snapshotDocumentsMatch(snap.Documents, docs, attachments) && snap.CorpusHash == corpusHash(docs, attachments)
+	return snap.IndexerVersion == indexerVersion &&
+		snapshotDocumentsMatch(snap.Documents, docs, attachments) &&
+		snap.CorpusHash == corpusHash(docs, attachments)
 }
 
 func snapshotDocumentsMatch(snapshotDocs []SnapshotDocument, docs []model.Document, attachments map[string]AttachmentDocument) bool {
@@ -457,6 +506,10 @@ func readSnapshotChunk(r *bytes.Reader) (SnapshotChunk, error) {
 	if err != nil {
 		return SnapshotChunk{}, err
 	}
+	articleRange, err := readString(r)
+	if err != nil {
+		return SnapshotChunk{}, err
+	}
 	tokenCount, err := readU32(r)
 	if err != nil {
 		return SnapshotChunk{}, err
@@ -479,6 +532,7 @@ func readSnapshotChunk(r *bytes.Reader) (SnapshotChunk, error) {
 		AttachmentTitle:  attachmentTitle,
 		AttachmentFile:   attachmentFile,
 		AttachmentStatus: model.AttachmentStatus(attachmentStatus),
+		ArticleRange:     articleRange,
 		Tokens:           tokens,
 	}, nil
 }

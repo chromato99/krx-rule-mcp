@@ -10,7 +10,9 @@ Required controls:
 - Per-IP rate limit.
 - TLS termination at the ingress or reverse proxy.
 
-The implementation exposes unauthenticated `/healthz`, `/readyz`, and `/metrics` for platform checks. Do not expose `/metrics` publicly unless your platform already protects it.
+The implementation exposes unauthenticated `/healthz`, `/readyz`, and `/metrics` for platform checks. `/readyz` returns ready only after a repository with at least one document is loaded. Do not expose `/metrics` publicly unless your platform already protects it.
+
+The built-in rate limiter keys on `RemoteAddr`. Behind an ingress or reverse proxy, that may be the proxy IP rather than the original client IP, so enforce user-facing rate limits at the proxy layer or route trusted `X-Forwarded-For` handling before traffic reaches this server.
 
 Recommended environment variables:
 
