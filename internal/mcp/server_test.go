@@ -223,11 +223,7 @@ func TestRealDataDomainExpansionSearch(t *testing.T) {
 	if dataRoot == "" {
 		dataRoot = filepath.Join("..", "..", "data")
 	}
-	indexPath := os.Getenv("KRX_INDEX_PATH")
-	if indexPath == "" {
-		indexPath = filepath.Join(dataRoot, "index", "bm25.krxidx")
-	}
-	repo, err := searchindex.LoadRepository(dataRoot, indexPath)
+	repo, err := searchindex.LoadRepository(dataRoot, realDataIndexPath())
 	if err != nil {
 		t.Fatalf("load repository: %v", err)
 	}

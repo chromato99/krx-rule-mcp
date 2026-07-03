@@ -29,6 +29,7 @@ go.work.sum
 
 # External corpus mount/cache
 /data/
+/index/
 
 # Editor/IDE
 # .idea/

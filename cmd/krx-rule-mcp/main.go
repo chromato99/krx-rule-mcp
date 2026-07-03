@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -25,8 +24,9 @@ func main() {
 		mode         = flag.String("mode", env("KRX_MCP_MODE", "stdio"), "transport mode: stdio or http")
 		addr         = flag.String("addr", env("KRX_MCP_ADDR", ":8080"), "HTTP listen address")
 		dataDir      = flag.String("data-dir", envDataDir(), "data directory")
+		indexDir     = flag.String("index-dir", envIndexDir(), "search index snapshot directory")
 		indexPath    = flag.String("index", "", "BM25/core index snapshot path")
-		vectorIndex  = flag.String("vector-index", os.Getenv("KRX_VECTOR_INDEX_PATH"), "optional vector snapshot path")
+		vectorIndex  = flag.String("vector-index", "", "optional vector snapshot path")
 		lexiconPath  = flag.String("domain-lexicon", env("KRX_DOMAIN_LEXICON_PATH", searchindex.DefaultDomainLexiconPath), "domain lexicon YAML path for query expansion")
 		token        = flag.String("token", os.Getenv("KRX_MCP_BEARER_TOKEN"), "required bearer token for HTTP mode")
 		origins      = flag.String("allowed-origins", os.Getenv("KRX_MCP_ALLOWED_ORIGINS"), "comma-separated Origin allowlist for HTTP mode")
@@ -34,7 +34,10 @@ func main() {
 	)
 	flag.Parse()
 	if strings.TrimSpace(*indexPath) == "" {
-		*indexPath = env("KRX_INDEX_PATH", filepath.Join(*dataDir, "index", "bm25.krxidx"))
+		*indexPath = env("KRX_INDEX_PATH", searchindex.DefaultBM25Path(*indexDir))
+	}
+	if strings.TrimSpace(*vectorIndex) == "" {
+		*vectorIndex = env("KRX_VECTOR_INDEX_PATH", searchindex.DefaultVectorPath(*indexDir))
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -143,6 +146,13 @@ func envDataDir() string {
 		return value
 	}
 	return env("KRX_DATA_DIR", "data")
+}
+
+func envIndexDir() string {
+	if value := strings.TrimSpace(os.Getenv("KRX_RULE_INDEX_DIR")); value != "" {
+		return value
+	}
+	return env("KRX_INDEX_DIR", searchindex.DefaultIndexDir)
 }
 
 func splitCSV(raw string) []string {

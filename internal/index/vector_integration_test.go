@@ -15,11 +15,11 @@ func TestRealDataVectorSearchEvaluation(t *testing.T) {
 
 	indexPath := os.Getenv("KRX_INDEX_PATH")
 	if indexPath == "" {
-		indexPath = filepath.Join("..", "..", "data", "index", "bm25.krxidx")
+		indexPath = DefaultBM25Path(dataTestIndexDir())
 	}
 	vectorPath := os.Getenv("KRX_VECTOR_INDEX_PATH")
 	if vectorPath == "" {
-		vectorPath = filepath.Join("..", "..", "data", "index", "vectors.krxvec")
+		vectorPath = DefaultVectorPath(dataTestIndexDir())
 	}
 	indexPath = resolveDataTestPath(indexPath)
 	vectorPath = resolveDataTestPath(vectorPath)
@@ -56,7 +56,8 @@ func TestRealDataVectorSearchEvaluation(t *testing.T) {
 	if !enabled || embedder == nil {
 		t.Fatal("embedding env is not enabled")
 	}
-	vectors, err := embedder.Embed(t.Context(), []string{"서울외환시장 거래시간 변경"})
+	query, id, attachmentID := retrievableAttachmentQuery(t, repo, model.DocumentTypeNotice)
+	vectors, err := embedder.Embed(t.Context(), []string{query})
 	if err != nil {
 		t.Fatalf("embed query: %v", err)
 	}
@@ -65,15 +66,21 @@ func TestRealDataVectorSearchEvaluation(t *testing.T) {
 	}
 
 	results := repo.Engine.Search(SearchOptions{
-		Query:       "서울외환시장 거래시간 변경",
+		Query:       query,
 		QueryVector: vectors[0],
 		Limit:       5,
 		Filter:      Filter{DocumentType: model.DocumentTypeNotice},
 	})
-	requireResult(t, results, "210217910", true)
-	if results[0].BM25Score == 0 || results[0].VectorScore == 0 {
-		t.Fatalf("expected RRF result with BM25 and vector scores: %#v", results[0])
+	requireAttachmentResult(t, results, id, attachmentID)
+	for _, result := range results {
+		if result.ID == id {
+			if result.BM25Score == 0 || result.VectorScore == 0 {
+				t.Fatalf("expected RRF result with BM25 and vector scores: %#v", result)
+			}
+			return
+		}
 	}
+	t.Fatalf("missing RRF result %s in %#v", id, results)
 }
 
 func resolveDataTestPath(path string) string {

@@ -112,3 +112,31 @@ func TestLoadDocumentsIgnoresBundleAttachmentMarkdown(t *testing.T) {
 		t.Fatalf("loaded wrong document: %#v", loaded[0])
 	}
 }
+
+func TestLoadDocumentsRejectsDuplicateIDs(t *testing.T) {
+	root := t.TempDir()
+	first := model.Document{
+		ID:           "rule-1",
+		Title:        "First Rule",
+		SourceURL:    "https://example.test/first",
+		CollectedAt:  time.Now().UTC(),
+		ContentHash:  "first",
+		DocumentType: model.DocumentTypeRule,
+		Language:     model.LanguageKorean,
+		Body:         "first body",
+	}
+	second := first
+	second.Title = "Second Rule"
+	second.SourceURL = "https://example.test/second"
+	second.ContentHash = "second"
+	second.Body = "second body"
+	if _, err := WriteDocument(root, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteDocument(root, second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDocuments(root); err == nil || !strings.Contains(err.Error(), "duplicate document id") {
+		t.Fatalf("LoadDocuments error = %v, want duplicate document id", err)
+	}
+}

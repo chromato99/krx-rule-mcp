@@ -5,13 +5,17 @@
 BM25 is required for serving. Build it after placing a generated corpus in `KRX_RULE_DATA_DIR`:
 
 ```bash
+export KRX_RULE_INDEX_DIR=/opt/krx-rule-index
+mkdir -p "$KRX_RULE_INDEX_DIR"
+
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
-  --index "$KRX_RULE_DATA_DIR/index/bm25.krxidx"
+  --index-dir "$KRX_RULE_INDEX_DIR"
 ```
 
 Freshness is based on the corpus hash, not file mtimes. The hash includes document `content_hash` and each attachment's `id`, `status`, `text_path`, and `content_hash`.
 It also includes language/source metadata so adding or changing English full-text documents invalidates stale snapshots.
+The default BM25 snapshot path is `$KRX_RULE_INDEX_DIR/bm25.krxidx`.
 
 Useful flags:
 
@@ -160,8 +164,8 @@ KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small \
 KRX_EMBEDDING_DIMENSIONS=384 \
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
-  --index "$KRX_RULE_DATA_DIR/index/bm25.krxidx" \
-  --vector-index "$KRX_RULE_DATA_DIR/index/vectors.krxvec"
+  --index-dir "$KRX_RULE_INDEX_DIR" \
+  --vector-index "$KRX_RULE_INDEX_DIR/vectors.krxvec"
 ```
 
 For a cheaper smoke test, add `--vector-sample-query "상장 심사"` and `--vector-sample-per-query 16`, or cap work with `--vector-limit`.

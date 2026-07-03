@@ -22,7 +22,9 @@ jobs:
         run: |
           set -eu
           export KRX_RULE_DATA_DIR="$RUNNER_TEMP/krx-rule-data"
+          export KRX_RULE_INDEX_DIR="$RUNNER_TEMP/krx-rule-index"
           mkdir -p "$KRX_RULE_DATA_DIR/rules"
+          mkdir -p "$KRX_RULE_INDEX_DIR"
           cat > "$KRX_RULE_DATA_DIR/rules/sample.md" <<'EOF'
           ---
           id: "sample-rule"
@@ -39,17 +41,17 @@ jobs:
           EOF
           go run ./cmd/krx-rule-index \
             --data-dir "$KRX_RULE_DATA_DIR" \
-            --index "$KRX_RULE_DATA_DIR/index/bm25.krxidx"
+            --index-dir "$KRX_RULE_INDEX_DIR"
           go run ./cmd/krx-rule-index \
             --data-dir "$KRX_RULE_DATA_DIR" \
-            --index "$KRX_RULE_DATA_DIR/index/bm25.krxidx" \
+            --index-dir "$KRX_RULE_INDEX_DIR" \
             --check
           timeout 30s go run ./cmd/krx-rule-mcp \
             --mode http \
             --addr 127.0.0.1:18080 \
             --token ci-token \
             --data-dir "$KRX_RULE_DATA_DIR" \
-            --index "$KRX_RULE_DATA_DIR/index/bm25.krxidx" &
+            --index-dir "$KRX_RULE_INDEX_DIR" &
           pid=$!
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:18080/healthz; then
@@ -66,6 +68,7 @@ jobs:
       - name: Docker Compose config
         env:
           KRX_RULE_DATA_DIR: /opt/krx-rule-data
+          KRX_RULE_INDEX_DIR: /opt/krx-rule-index
         run: docker compose config
 
       - name: Docker build

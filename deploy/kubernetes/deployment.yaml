@@ -28,6 +28,9 @@ spec:
             - name: rule-data
               mountPath: /app/data
               readOnly: true
+            - name: rule-index
+              mountPath: /app/index
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /readyz
@@ -80,6 +83,9 @@ spec:
         - name: rule-data
           persistentVolumeClaim:
             claimName: krx-rule-data
+        - name: rule-index
+          persistentVolumeClaim:
+            claimName: krx-rule-index
         - name: embeddings-cache
           emptyDir: {}
       securityContext:

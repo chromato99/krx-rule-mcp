@@ -5,17 +5,17 @@
 `krx-rule-mcp` is the serving and indexing project.
 
 1. Reads a prepared Markdown corpus from `KRX_RULE_DATA_DIR`.
-2. Builds BM25 and optional vector snapshots through `cmd/krx-rule-index`.
+2. Builds BM25 and optional vector snapshots through `cmd/krx-rule-index` into `KRX_RULE_INDEX_DIR`.
 3. Loads matching snapshots into a Go search engine.
 4. Exposes MCP tools/resources over stdio or Streamable HTTP.
 
-`krx-rule-markdown` is a separate project responsible for KRX legal portal sync, attachment conversion, quality reports, and corpus validation. The handoff between projects is the generated `data/` directory.
+`krx-rule-markdown` is a separate project responsible for KRX legal portal sync, attachment conversion, quality reports, and corpus validation. The handoff between projects is the generated `data/` directory. Search snapshots are MCP-serving artifacts and should live outside that corpus directory.
 
 ## Runtime Flow
 
 1. `corpus.LoadDocuments` reads document bundle entrypoints such as `ko/rules/<title>/index.md`, `ko/notices/<title>/index.md`, and `en/rules/<title>/index.md`. Converted attachments are loaded from each document's `attachments` metadata and are indexed as parent-document chunks. Legacy flat `rules/*.md` and `notices/*.md` are still read as Korean corpus.
 2. `krx-rule-index` computes a corpus hash from document `content_hash`, language/source metadata, source file metadata, plus attachment `id/status/text_path/content_hash`.
-3. The BM25 snapshot is regenerated only when missing, stale, or forced.
+3. The BM25 snapshot is regenerated only when missing, stale, or forced, normally under `KRX_RULE_INDEX_DIR/bm25.krxidx`.
 4. If `--vector-index` is provided, document chunks are embedded through an OpenAI-compatible API and written as `KRXVEC2`.
 5. Vector metadata sidecar records corpus hash, model, dimensions, and E5 query/document prefixes.
 6. `krx-rule-mcp` refuses to start without a current BM25 snapshot.

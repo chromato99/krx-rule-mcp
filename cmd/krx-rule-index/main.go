@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -16,6 +15,7 @@ import (
 func main() {
 	var (
 		dataDir     = flag.String("data-dir", envDataDir(), "KRX rule Markdown corpus directory")
+		indexDir    = flag.String("index-dir", envIndexDir(), "search index snapshot directory")
 		indexPath   = flag.String("index", "", "BM25/core index snapshot path")
 		vectorPath  = flag.String("vector-index", "", "optional vector snapshot path")
 		vectorLimit = flag.Int("vector-limit", 0, "optional maximum number of chunks to embed")
@@ -27,7 +27,10 @@ func main() {
 	flag.Parse()
 
 	if *indexPath == "" {
-		*indexPath = envDefault("KRX_INDEX_PATH", filepath.Join(*dataDir, "index", "bm25.krxidx"))
+		*indexPath = envDefault("KRX_INDEX_PATH", searchindex.DefaultBM25Path(*indexDir))
+	}
+	if strings.TrimSpace(*vectorPath) == "" {
+		*vectorPath = strings.TrimSpace(os.Getenv("KRX_VECTOR_INDEX_PATH"))
 	}
 
 	snap, docs, err := searchindex.BuildSnapshot(*dataDir)
@@ -206,6 +209,13 @@ func envDataDir() string {
 		return value
 	}
 	return envDefault("KRX_DATA_DIR", "data")
+}
+
+func envIndexDir() string {
+	if value := strings.TrimSpace(os.Getenv("KRX_RULE_INDEX_DIR")); value != "" {
+		return value
+	}
+	return envDefault("KRX_INDEX_DIR", searchindex.DefaultIndexDir)
 }
 
 func envDefault(key, fallback string) string {

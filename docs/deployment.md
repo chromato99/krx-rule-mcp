@@ -11,13 +11,13 @@ Prepare a corpus with `krx-rule-markdown`, copy it to a host path, and point Com
 
 ```bash
 cp .env.compose.example .env
-vi .env  # set KRX_RULE_DATA_DIR and KRX_MCP_BEARER_TOKEN
+vi .env  # set KRX_RULE_DATA_DIR, KRX_RULE_INDEX_DIR, and KRX_MCP_BEARER_TOKEN
 docker compose up -d --build
 curl http://localhost:8080/healthz
 ```
 
-`KRX_RULE_DATA_DIR` is mounted read-only at `/app/data`. The server image does not contain corpus files, but it does include the default domain lexicon at `/app/config/domain-lexicon.yaml`.
-The host directory must be readable by the non-root container user. For local smoke tests with a temporary directory, run `chmod -R a+rX "$KRX_RULE_DATA_DIR"` after creating the corpus.
+`KRX_RULE_DATA_DIR` is mounted read-only at `/app/data`; `KRX_RULE_INDEX_DIR` is mounted read-only at `/app/index`. The server image does not contain corpus or index files, but it does include the default domain lexicon at `/app/config/domain-lexicon.yaml`.
+The host directories must be readable by the non-root container user. For local smoke tests with temporary directories, run `chmod -R a+rX "$KRX_RULE_DATA_DIR" "$KRX_RULE_INDEX_DIR"` after creating the corpus and indexes.
 
 ## Manual Index Jobs
 
@@ -26,9 +26,12 @@ Index generation is explicit and can run locally or inside the server image.
 Local:
 
 ```bash
+export KRX_RULE_INDEX_DIR=/opt/krx-rule-index
+mkdir -p "$KRX_RULE_INDEX_DIR"
+
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
-  --index "$KRX_RULE_DATA_DIR/index/bm25.krxidx"
+  --index-dir "$KRX_RULE_INDEX_DIR"
 ```
 
 Container:
@@ -38,9 +41,10 @@ docker build -f deploy/docker/Dockerfile --target server -t krx-rule-mcp:local .
 docker run --rm \
   --entrypoint /usr/local/bin/krx-rule-index \
   --user "$(id -u):$(id -g)" \
-  -v "$KRX_RULE_DATA_DIR:/app/data" \
+  -v "$KRX_RULE_DATA_DIR:/app/data:ro" \
+  -v "$KRX_RULE_INDEX_DIR:/app/index" \
   krx-rule-mcp:local \
-  --data-dir /app/data --index /app/data/index/bm25.krxidx
+  --data-dir /app/data --index-dir /app/index
 ```
 
 To build vectors with the compose TEI sidecar:
@@ -50,15 +54,16 @@ docker compose up -d krx-rule-embeddings
 docker run --rm --network krx-rule-mcp_default \
   --entrypoint /usr/local/bin/krx-rule-index \
   --user "$(id -u):$(id -g)" \
-  -v "$KRX_RULE_DATA_DIR:/app/data" \
+  -v "$KRX_RULE_DATA_DIR:/app/data:ro" \
+  -v "$KRX_RULE_INDEX_DIR:/app/index" \
   -e OPENAI_API_KEY=local \
   -e KRX_EMBEDDING_BASE_URL=http://krx-rule-embeddings:80/v1 \
   -e KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small \
   -e KRX_EMBEDDING_DIMENSIONS=384 \
   krx-rule-mcp:local \
   --data-dir /app/data \
-  --index /app/data/index/bm25.krxidx \
-  --vector-index /app/data/index/vectors.krxvec
+  --index-dir /app/index \
+  --vector-index /app/index/vectors.krxvec
 ```
 
 The vector command builds the full corpus by default. For a cheap smoke test, add `--vector-sample-query "상장 심사" --vector-sample-per-query 16`.
@@ -69,7 +74,7 @@ The vector command builds the full corpus by default. For a cheap smoke test, ad
 
 - `server`: distroless Go image containing `krx-rule-mcp`, `krx-rule-index`, and `config/domain-lexicon.yaml`.
 
-The image is non-root and can run with a read-only filesystem. Corpus data is provided by a read-only volume for serving, and by a writable volume only when running `krx-rule-index`.
+The image is non-root and can run with a read-only filesystem. Corpus data is provided by a read-only volume. Search indexes are provided by a separate read-only volume for serving, and by a writable volume only when running `krx-rule-index`.
 
 ## Kubernetes
 
@@ -79,7 +84,7 @@ Manifests are in `deploy/kubernetes`.
 kubectl apply -f deploy/kubernetes/
 ```
 
-The default manifest runs the Go MCP server and TEI sidecar in the same Pod. It expects a PVC named `krx-rule-data` mounted at `/app/data` with a prebuilt corpus and indexes.
+The default manifest runs the Go MCP server and TEI sidecar in the same Pod. It expects a PVC named `krx-rule-data` mounted at `/app/data` with a prebuilt corpus and a separate PVC named `krx-rule-index` mounted at `/app/index` with prebuilt BM25/vector snapshots.
 
 Before applying, update:
 
@@ -87,7 +92,7 @@ Before applying, update:
 - `krx-rule-mcp-secret`
 - ingress host and TLS secret
 - allowed origins
-- PVC/storage strategy for `krx-rule-data`
+- PVC/storage strategy for `krx-rule-data` and `krx-rule-index`
 
 ## GitHub Actions
 

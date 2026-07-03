@@ -3,6 +3,7 @@
 .env
 .env.*
 data
+index
 docs
 deploy/kubernetes
 compose.yaml

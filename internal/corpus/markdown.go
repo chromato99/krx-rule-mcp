@@ -90,6 +90,7 @@ func WriteDocument(root string, doc model.Document) (string, error) {
 func LoadDocuments(root string) ([]model.Document, error) {
 	var docs []model.Document
 	seen := make(map[string]struct{})
+	seenIDs := make(map[string]string)
 	for _, item := range documentRoots(root) {
 		base := item.path
 		if _, err := os.Stat(base); errors.Is(err, os.ErrNotExist) {
@@ -117,6 +118,10 @@ func LoadDocuments(root string) ([]model.Document, error) {
 			}
 			doc.Language = model.NormalizeLanguage(doc.Language)
 			doc.Path = path
+			if previousPath, ok := seenIDs[doc.ID]; ok {
+				return nil, fmt.Errorf("duplicate document id %q in %s and %s", doc.ID, previousPath, path)
+			}
+			seenIDs[doc.ID] = path
 			docs = append(docs, doc)
 		}
 	}

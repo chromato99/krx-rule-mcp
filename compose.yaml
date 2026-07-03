@@ -15,8 +15,9 @@ services:
       KRX_MCP_BEARER_TOKEN: "${KRX_MCP_BEARER_TOKEN:-change-me}"
       KRX_MCP_ALLOWED_ORIGINS: "${KRX_MCP_ALLOWED_ORIGINS:-}"
       KRX_RULE_DATA_DIR: /app/data
-      KRX_INDEX_PATH: "${KRX_INDEX_PATH:-/app/data/index/bm25.krxidx}"
-      KRX_VECTOR_INDEX_PATH: "${KRX_VECTOR_INDEX_PATH:-/app/data/index/vectors.krxvec}"
+      KRX_RULE_INDEX_DIR: /app/index
+      KRX_INDEX_PATH: "${KRX_INDEX_PATH:-/app/index/bm25.krxidx}"
+      KRX_VECTOR_INDEX_PATH: "${KRX_VECTOR_INDEX_PATH:-/app/index/vectors.krxvec}"
       KRX_DOMAIN_LEXICON_PATH: "${KRX_DOMAIN_LEXICON_PATH:-/app/config/domain-lexicon.yaml}"
       KRX_VECTOR_SEARCH_ENABLED: "${KRX_VECTOR_SEARCH_ENABLED:-true}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-local}"
@@ -27,6 +28,7 @@ services:
       KRX_EMBEDDING_DOCUMENT_PREFIX: "${KRX_EMBEDDING_DOCUMENT_PREFIX:-passage: }"
     volumes:
       - "${KRX_RULE_DATA_DIR:?Set KRX_RULE_DATA_DIR to a generated krx-rule-markdown data directory}:/app/data:ro"
+      - "${KRX_RULE_INDEX_DIR:?Set KRX_RULE_INDEX_DIR to a krx-rule-mcp index directory}:/app/index:ro"
     read_only: true
     tmpfs:
       - /tmp
