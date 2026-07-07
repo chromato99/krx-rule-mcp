@@ -1,5 +1,36 @@
 # Search
 
+## Repository-Provided Snapshots
+
+The source repository includes default search snapshots under root-level `index/`:
+
+- `index/bm25.krxidx`: required BM25 snapshot.
+- `index/vectors.krxvec`: optional vector snapshot.
+- `index/vectors.krxvec.meta.json`: vector metadata sidecar.
+
+These files are generated from the maintained `krx-rule-markdown/data` corpus with the default E5 embedding settings:
+
+| Field | Value |
+| --- | --- |
+| Model | `intfloat/multilingual-e5-small` |
+| Dimensions | `384` |
+| Document prefix | `passage: ` |
+| Query prefix | `query: ` |
+
+They are convenient for a source checkout or local Compose run when the mounted corpus matches the snapshot corpus hash.
+
+Check the bundled snapshots before serving:
+
+```bash
+go run ./cmd/krx-rule-index \
+  --data-dir "$KRX_RULE_DATA_DIR" \
+  --index-dir ./index \
+  --vector-index ./index/vectors.krxvec \
+  --check
+```
+
+If the check reports stale or missing snapshots, rebuild them. BM25 must match the corpus for the server to start; stale or incompatible vector snapshots are ignored and the server falls back to BM25.
+
 ## BM25
 
 BM25 is required for serving. Build it after placing a generated corpus in `KRX_RULE_DATA_DIR`:
@@ -16,6 +47,7 @@ go run ./cmd/krx-rule-index \
 Freshness is based on the corpus hash, not file mtimes. The hash includes document `content_hash` and each attachment's `id`, `status`, `text_path`, and `content_hash`.
 It also includes language/source metadata so adding or changing English full-text documents invalidates stale snapshots.
 The default BM25 snapshot path is `$KRX_RULE_INDEX_DIR/bm25.krxidx`.
+For the repository-provided default snapshot, set `KRX_RULE_INDEX_DIR` to the checkout's `index/` directory.
 
 Useful flags:
 
@@ -129,7 +161,7 @@ If converted text looks formula-like but no preserved EqEdit block or generated 
 
 Treat `formula_text_detected` as a retrieval hint, not as confirmation that the original HWP equation was structurally preserved.
 
-After formula conversion code or converted attachment Markdown changes, rebuild indexes. `krx-rule-index --check` will report stale snapshots because corpus hashes include attachment metadata and content hashes.
+After formula/table conversion code or converted attachment Markdown changes, rebuild indexes. `krx-rule-index --check` will report stale snapshots because corpus hashes include attachment metadata and content hashes.
 
 ## Language Filtering
 
@@ -172,6 +204,28 @@ go run ./cmd/krx-rule-index \
 
 For a cheaper smoke test, add `--vector-sample-query "상장 심사"` and `--vector-sample-per-query 16`, or cap work with `--vector-limit`.
 
+When using a different TEI model, set both the sidecar model and the MCP embedding model to the same id, set the correct output dimensions, then rebuild the vector snapshot:
+
+```bash
+export KRX_TEI_MODEL_ID=BAAI/bge-m3
+export KRX_EMBEDDING_MODEL=BAAI/bge-m3
+export KRX_EMBEDDING_DIMENSIONS=1024
+export KRX_EMBEDDING_QUERY_PREFIX=""
+export KRX_EMBEDDING_DOCUMENT_PREFIX=""
+
+docker compose up -d --force-recreate krx-rule-embeddings
+
+OPENAI_API_KEY=local \
+KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
+go run ./cmd/krx-rule-index \
+  --data-dir "$KRX_RULE_DATA_DIR" \
+  --index-dir "$KRX_RULE_INDEX_DIR" \
+  --vector-index "$KRX_RULE_INDEX_DIR/vectors.krxvec" \
+  --force
+```
+
+Use the prefixes recommended by the model. E5 uses `query: ` and `passage: `; many non-E5 models use no prefix, which can be represented by setting the prefix environment variables to empty strings.
+
 ## External Embeddings API
 
 Any OpenAI-compatible `/v1/embeddings` endpoint can replace TEI:
@@ -181,6 +235,18 @@ export KRX_EMBEDDING_BASE_URL=https://api.openai.com/v1
 export OPENAI_API_KEY=...
 export KRX_EMBEDDING_MODEL=text-embedding-3-small
 export KRX_EMBEDDING_DIMENSIONS=1536
+export KRX_EMBEDDING_QUERY_PREFIX=""
+export KRX_EMBEDDING_DOCUMENT_PREFIX=""
+```
+
+Rebuild the vector snapshot after changing any embedding setting:
+
+```bash
+go run ./cmd/krx-rule-index \
+  --data-dir "$KRX_RULE_DATA_DIR" \
+  --index-dir "$KRX_RULE_INDEX_DIR" \
+  --vector-index "$KRX_RULE_INDEX_DIR/vectors.krxvec" \
+  --force
 ```
 
 Use the same settings for vector indexing and MCP serving. E5 defaults are:

@@ -24,8 +24,8 @@ services:
       KRX_EMBEDDING_BASE_URL: "${KRX_EMBEDDING_BASE_URL:-http://krx-rule-embeddings:80/v1}"
       KRX_EMBEDDING_MODEL: "${KRX_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}"
       KRX_EMBEDDING_DIMENSIONS: "${KRX_EMBEDDING_DIMENSIONS:-384}"
-      KRX_EMBEDDING_QUERY_PREFIX: "${KRX_EMBEDDING_QUERY_PREFIX:-query: }"
-      KRX_EMBEDDING_DOCUMENT_PREFIX: "${KRX_EMBEDDING_DOCUMENT_PREFIX:-passage: }"
+      KRX_EMBEDDING_QUERY_PREFIX: "${KRX_EMBEDDING_QUERY_PREFIX-query: }"
+      KRX_EMBEDDING_DOCUMENT_PREFIX: "${KRX_EMBEDDING_DOCUMENT_PREFIX-passage: }"
     volumes:
       - "${KRX_RULE_DATA_DIR:?Set KRX_RULE_DATA_DIR to a generated krx-rule-markdown data directory}:/app/data:ro"
       - "${KRX_RULE_INDEX_DIR:?Set KRX_RULE_INDEX_DIR to a krx-rule-mcp index directory}:/app/index:ro"

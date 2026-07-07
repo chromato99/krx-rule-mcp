@@ -228,7 +228,7 @@ func envDefault(key, fallback string) string {
 
 func envDefaultPreserveSpace(key, fallback string) string {
 	value, ok := os.LookupEnv(key)
-	if !ok || value == "" {
+	if !ok {
 		return fallback
 	}
 	return value

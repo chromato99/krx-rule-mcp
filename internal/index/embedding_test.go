@@ -50,6 +50,16 @@ func TestOpenAIEmbedderAppliesInputPrefix(t *testing.T) {
 	}
 }
 
+func TestEnvDefaultPreserveSpaceAllowsExplicitEmpty(t *testing.T) {
+	t.Setenv("KRX_TEST_PREFIX", "")
+	if got := envDefaultPreserveSpace("KRX_TEST_PREFIX", "query: "); got != "" {
+		t.Fatalf("prefix = %q, want empty", got)
+	}
+	if got := envDefaultPreserveSpace("KRX_TEST_PREFIX_UNSET", "query: "); got != "query: " {
+		t.Fatalf("fallback prefix = %q", got)
+	}
+}
+
 func TestVectorMetadataRoundTrip(t *testing.T) {
 	path := t.TempDir() + "/vectors.krxvec.meta.json"
 	want := VectorMetadata{

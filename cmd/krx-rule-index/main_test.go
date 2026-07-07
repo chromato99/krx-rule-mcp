@@ -144,6 +144,16 @@ func TestVectorFreshIncludesPrefixMetadata(t *testing.T) {
 	}
 }
 
+func TestEnvDefaultPreserveSpaceAllowsExplicitEmpty(t *testing.T) {
+	t.Setenv("KRX_TEST_PREFIX", "")
+	if got := envDefaultPreserveSpace("KRX_TEST_PREFIX", "passage: "); got != "" {
+		t.Fatalf("prefix = %q, want empty", got)
+	}
+	if got := envDefaultPreserveSpace("KRX_TEST_PREFIX_UNSET", "passage: "); got != "passage: " {
+		t.Fatalf("fallback prefix = %q", got)
+	}
+}
+
 func writeCommandTestCorpus(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "generated_at": "2026-07-07T13:10:32.994157893Z",
+  "corpus_hash": "c87e8128bd73ff9c48c4c823e433cb827ba9b87dd699d21df3041b041443fe49",
+  "model": "intfloat/multilingual-e5-small",
+  "dimensions": 384,
+  "query_prefix": "query: ",
+  "document_prefix": "passage: "
+}

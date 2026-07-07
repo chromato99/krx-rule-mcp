@@ -2,7 +2,7 @@
 
 한국거래소 법무포털 규정 corpus를 AI 클라이언트가 빠르게 검색하고 참조할 수 있게 하는 Go 기반 MCP 서버입니다.
 
-이 저장소는 수집기를 포함하지 않습니다. [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)이 만든 `data/` corpus를 입력으로 받아 BM25/vector index를 생성하고, stdio 또는 Streamable HTTP MCP 서버로 제공합니다.
+이 저장소는 수집기를 포함하지 않습니다. [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)이 만든 `data/` corpus를 입력으로 받아 BM25/vector index를 생성하고, stdio 또는 Streamable HTTP MCP 서버로 제공합니다. 소스 checkout에는 현재 관리 중인 corpus와 맞춘 기본 `index/` snapshot도 포함되어 있어, 같은 corpus를 사용할 때는 바로 최신성 검사 후 실행할 수 있습니다.
 
 ## 제공 기능
 
@@ -13,7 +13,7 @@
 - **KRX 도메인 사전 검색 보강**: `config/domain-lexicon.yaml`을 로드해 `동적상하한가 -> 실시간가격제한제도/가격변동폭/별표25` 같은 보수적 query expansion을 적용합니다.
 - **선택형 vector 검색**: OpenAI 호환 embeddings API로 만든 `KRXVEC2` snapshot을 로드하고 BM25 + vector 결과를 RRF로 병합합니다.
 - **RAG 문맥 재조회**: 검색 결과의 `matched_chunk_id` 또는 `attachment_matches[].chunk_id`로 `get_context`를 호출해 해당 chunk 주변 문맥만 다시 가져올 수 있습니다.
-- **명시적 index 생성**: `krx-rule-index`를 사용자가 호출할 때만 index를 만들며, corpus hash가 최신이면 빠르게 종료합니다.
+- **기본 제공 index와 명시적 재생성**: 저장소의 `index/`에는 기본 BM25/vector snapshot이 포함됩니다. corpus가 달라지면 `krx-rule-index`로 재생성하며, corpus hash가 최신이면 빠르게 종료합니다.
 - **TEI sidecar 운영**: Docker Compose 기본 구성이 Hugging Face Text Embeddings Inference sidecar를 함께 띄웁니다.
 - **안전한 HTTP 배포**: Bearer token, Origin allowlist, request size limit, rate limit, `/healthz`, `/readyz`, `/metrics`를 제공합니다.
 
@@ -45,14 +45,37 @@ mkdir -p "$KRX_RULE_INDEX_DIR"
 rsync -a krx-rule-markdown/data/ "$KRX_RULE_DATA_DIR"/
 ```
 
-로컬 개발 중 두 저장소를 같은 부모 디렉터리에 clone했다면, `KRX_RULE_DATA_DIR`에 sibling repo의 `data` 경로를 지정해도 됩니다.
+로컬 개발 중 두 저장소를 같은 부모 디렉터리에 clone했다면, `KRX_RULE_DATA_DIR`에 sibling repo의 `data` 경로를 지정해도 됩니다. 이 저장소가 제공하는 기본 index를 쓰려면 `KRX_RULE_INDEX_DIR`를 `krx-rule-mcp/index`로 지정하세요.
 
 ## Index 생성
 
 BM25 index는 필수입니다.
-이 저장소의 로컬 `index/` 디렉터리는 `.gitignore` 대상이므로 git commit이나 서버 이미지에 포함되지 않습니다.
-새 checkout, 새 배포 환경, 또는 corpus 재생성 후에는 서버를 올리기 전에 반드시 `krx-rule-index`로 BM25 snapshot을 생성하거나 미리 생성된 `KRX_RULE_INDEX_DIR`를 mount해야 합니다.
-BM25 snapshot이 없거나 현재 corpus와 맞지 않으면 서버는 시작 중 `BM25 index snapshot ... not found` 또는 `does not match Markdown corpus` 오류로 종료합니다.
+소스 checkout에는 기본 snapshot이 `index/`에 포함되어 있습니다.
+
+- `index/bm25.krxidx`: 기본 BM25 snapshot
+- `index/vectors.krxvec`: 기본 vector snapshot
+- `index/vectors.krxvec.meta.json`: vector metadata sidecar
+
+기본 snapshot은 현재 관리 중인 `krx-rule-markdown/data` corpus와 다음 embedding 설정으로 생성됩니다.
+
+| 항목 | 값 |
+| --- | --- |
+| model | `intfloat/multilingual-e5-small` |
+| dimensions | `384` |
+| document prefix | `passage: ` |
+| query prefix | `query: ` |
+
+같은 corpus와 같은 embedding 설정을 사용한다면 먼저 최신성만 확인하세요.
+
+```bash
+go run ./cmd/krx-rule-index \
+  --data-dir "$KRX_RULE_DATA_DIR" \
+  --index-dir ./index \
+  --vector-index ./index/vectors.krxvec \
+  --check
+```
+
+새 checkout의 기본 index가 현재 corpus와 맞지 않거나 corpus를 재생성했다면 서버를 올리기 전에 `krx-rule-index`로 snapshot을 다시 생성하세요. BM25 snapshot이 없거나 현재 corpus와 맞지 않으면 서버는 시작 중 `BM25 index snapshot ... not found` 또는 `does not match Markdown corpus` 오류로 종료합니다. Vector snapshot은 corpus hash, model, dimensions, query/document prefix가 모두 같을 때만 채택되며, 맞지 않으면 BM25-only mode로 동작합니다.
 
 ```bash
 go run ./cmd/krx-rule-index \
@@ -61,9 +84,9 @@ go run ./cmd/krx-rule-index \
 ```
 
 이미 최신이면 `BM25 index up to date`를 출력하고 종료합니다. 강제로 다시 만들려면 `--force`, 쓰기 없이 최신 여부만 확인하려면 `--check`를 사용합니다.
-기본 BM25 snapshot은 `$KRX_RULE_INDEX_DIR/bm25.krxidx`에 저장됩니다.
+기본 BM25 snapshot은 `$KRX_RULE_INDEX_DIR/bm25.krxidx`에 저장됩니다. 저장소가 제공하는 기본 index를 갱신하려면 `KRX_RULE_INDEX_DIR=./index`로 두고 재생성한 뒤 `index/` 파일들을 함께 커밋합니다.
 
-Vector index는 선택입니다. 기본 예시는 `intfloat/multilingual-e5-small`과 E5 prefix를 사용합니다.
+Vector index는 선택입니다. 기본 예시는 기본 제공 index와 같은 `intfloat/multilingual-e5-small`, 384차원, E5 prefix를 사용합니다.
 
 ```bash
 docker compose up -d krx-rule-embeddings
@@ -79,6 +102,25 @@ go run ./cmd/krx-rule-index \
 ```
 
 `KRX_EMBEDDING_QUERY_PREFIX` 기본값은 `query: `, `KRX_EMBEDDING_DOCUMENT_PREFIX` 기본값은 `passage: `입니다. Vector freshness는 corpus hash, model, dimensions, query/document prefix가 모두 같을 때만 최신으로 봅니다.
+
+다른 embedding 모델을 쓰려면 index 생성과 서버 실행에 같은 embedding 설정을 사용해야 합니다. 예를 들어 OpenAI 호환 외부 API로 `text-embedding-3-small`을 쓰는 경우:
+
+```bash
+export KRX_EMBEDDING_BASE_URL=https://api.openai.com/v1
+export OPENAI_API_KEY=...
+export KRX_EMBEDDING_MODEL=text-embedding-3-small
+export KRX_EMBEDDING_DIMENSIONS=1536
+export KRX_EMBEDDING_QUERY_PREFIX=""
+export KRX_EMBEDDING_DOCUMENT_PREFIX=""
+
+go run ./cmd/krx-rule-index \
+  --data-dir "$KRX_RULE_DATA_DIR" \
+  --index-dir "$KRX_RULE_INDEX_DIR" \
+  --vector-index "$KRX_RULE_INDEX_DIR/vectors.krxvec" \
+  --force
+```
+
+TEI sidecar 자체 모델을 바꾸려면 `KRX_TEI_MODEL_ID`와 `KRX_EMBEDDING_MODEL`을 같은 모델 id로 맞추고, 해당 모델의 출력 차원으로 `KRX_EMBEDDING_DIMENSIONS`를 설정한 뒤 sidecar를 재시작하고 vector index를 다시 생성하세요. E5 계열이 아닌 모델은 모델 권장 방식에 맞춰 query/document prefix를 바꾸거나 빈 문자열로 둘 수 있습니다. Prefix도 vector metadata에 기록되므로, index 생성 때와 서버 실행 때 값이 다르면 vector snapshot은 거부됩니다.
 
 ## 언어별 검색
 
@@ -142,7 +184,7 @@ LaTeX 변환은 자동 생성 결과이므로, 정확한 산식이 중요한 답
 
 ## 서버 실행
 
-서버 실행은 위의 `Index 생성` 단계가 끝난 뒤에 수행합니다. `krx-rule-mcp`는 기동 시 `$KRX_RULE_INDEX_DIR/bm25.krxidx`를 로드하며, 이 파일은 저장소에 커밋되지 않습니다.
+서버 실행은 기본 제공 index가 현재 corpus와 맞는지 확인하거나 위의 `Index 생성` 단계가 끝난 뒤에 수행합니다. `krx-rule-mcp`는 기동 시 `$KRX_RULE_INDEX_DIR/bm25.krxidx`를 로드합니다.
 
 stdio:
 
@@ -179,19 +221,21 @@ docker compose up -d --build
 curl http://localhost:8080/healthz
 ```
 
-`KRX_RULE_DATA_DIR` host path는 컨테이너의 `/app/data:ro`로, `KRX_RULE_INDEX_DIR` host path는 `/app/index:ro`로 mount됩니다. Server image는 corpus나 index를 내장하지 않습니다.
+`KRX_RULE_DATA_DIR` host path는 컨테이너의 `/app/data:ro`로, `KRX_RULE_INDEX_DIR` host path는 `/app/index:ro`로 mount됩니다. 로컬에서 저장소 기본 index를 쓰려면 `KRX_RULE_INDEX_DIR`를 checkout의 `krx-rule-mcp/index`로 지정할 수 있습니다. Server image는 corpus나 index를 내장하지 않으므로, 기본 index도 volume으로 mount해야 합니다.
 두 경로는 non-root 컨테이너 사용자가 읽을 수 있어야 합니다. 로컬 테스트용 임시 디렉터리를 쓸 때는 `chmod -R a+rX "$KRX_RULE_DATA_DIR" "$KRX_RULE_INDEX_DIR"`처럼 읽기 권한을 열어 주세요.
 
 ## Embeddings 설정
 
-기본값:
+기본 제공 vector index와 Compose 기본값:
 
 - `KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small`
 - `KRX_EMBEDDING_DIMENSIONS=384`
 - `KRX_EMBEDDING_BASE_URL=http://krx-rule-embeddings:80/v1`
 - `OPENAI_API_KEY=local`
+- `KRX_EMBEDDING_QUERY_PREFIX=query: `
+- `KRX_EMBEDDING_DOCUMENT_PREFIX=passage: `
 
-외부 OpenAI 호환 embeddings API를 쓰려면 index 생성과 서버 실행에 같은 설정을 사용하세요.
+외부 OpenAI 호환 embeddings API나 다른 TEI 모델을 쓰려면 vector index를 새 설정으로 재생성하고, 서버 실행 환경에도 같은 `KRX_EMBEDDING_*` 값을 지정하세요. `vectors.krxvec.meta.json`에는 corpus hash, model, dimensions, query prefix, document prefix가 기록되며 하나라도 다르면 vector 검색은 비활성화됩니다.
 
 ## 도메인 사전
 

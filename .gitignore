@@ -27,9 +27,6 @@ go.work.sum
 # env file
 .env
 
-# Local generated search index
-/index/
-
 # Editor/IDE
 # .idea/
 # .vscode/
