@@ -8,6 +8,8 @@ import (
 
 var (
 	tokenPattern          = regexp.MustCompile(`[0-9A-Za-z가-힣]+`)
+	scriptNotationPattern = regexp.MustCompile(`([0-9A-Za-z가-힣]+)\s*[_^]\{([^}]*)\}`)
+	aliasTokenPattern     = regexp.MustCompile(`[0-9A-Za-z가-힣]+`)
 	singleASCIIAlnum      = regexp.MustCompile(`[0-9A-Za-z]`)
 	paragraphSplitPattern = regexp.MustCompile(`\n{2,}`)
 	whitespacePattern     = regexp.MustCompile(`\s+`)
@@ -20,6 +22,7 @@ func Tokenize(text string) []string {
 }
 
 func indexTokenize(text string) []string {
+	text = appendScriptNotationAliases(text)
 	raw := tokenPattern.FindAllString(strings.ToLower(text), -1)
 	tokens := make([]string, 0, len(raw)*2)
 	for _, tok := range raw {
@@ -40,6 +43,7 @@ func indexTokenize(text string) []string {
 }
 
 func uniqueTokenize(text string) []string {
+	text = appendScriptNotationAliases(text)
 	raw := tokenPattern.FindAllString(strings.ToLower(text), -1)
 	seen := make(map[string]struct{}, len(raw)*2)
 	tokens := make([]string, 0, len(raw)*2)
@@ -58,6 +62,29 @@ func uniqueTokenize(text string) []string {
 		}
 	}
 	return tokens
+}
+
+func appendScriptNotationAliases(text string) string {
+	matches := scriptNotationPattern.FindAllStringSubmatch(text, -1)
+	if len(matches) == 0 {
+		return text
+	}
+	aliases := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) != 3 {
+			continue
+		}
+		base := strings.Join(aliasTokenPattern.FindAllString(match[1], -1), "")
+		script := strings.Join(aliasTokenPattern.FindAllString(match[2], -1), "")
+		if base == "" || script == "" {
+			continue
+		}
+		aliases = append(aliases, base+script)
+	}
+	if len(aliases) == 0 {
+		return text
+	}
+	return text + " " + strings.Join(aliases, " ")
 }
 
 func addToken(tokens *[]string, seen map[string]struct{}, token string) {

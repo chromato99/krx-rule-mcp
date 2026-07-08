@@ -16,7 +16,7 @@ import (
 
 const (
 	indexSnapshotFormatVersion  uint16 = 4
-	indexerVersion                     = "tokenizer-ko-2gram-3gram-chunk1600-md-html-table-article-bm25-k1-1.4-b-0.75"
+	indexerVersion                     = "tokenizer-ko-2gram-3gram-script-alias-chunk1600-md-html-table-article-bm25-k1-1.4-b-0.75"
 	vectorSnapshotFormatVersion uint16 = 1
 )
 

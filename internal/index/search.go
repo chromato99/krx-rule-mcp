@@ -454,7 +454,7 @@ func (e *Engine) rankBM25(opts SearchOptions, scores map[string]SearchResult) []
 
 func (e *Engine) rankVector(opts SearchOptions, scores map[string]SearchResult) []SearchResult {
 	results := mapValues(scores)
-	sort.Slice(results, func(i, j int) bool { return results[i].Score > results[j].Score })
+	sort.Slice(results, func(i, j int) bool { return e.searchResultLess(results[i], results[j]) })
 	return trim(results, opts.Limit)
 }
 
@@ -462,7 +462,7 @@ func (e *Engine) rrf(opts SearchOptions, bm25, vector map[string]SearchResult) [
 	combined := map[string]SearchResult{}
 	addRank := func(scores map[string]SearchResult, kind string) {
 		results := mapValues(scores)
-		sort.Slice(results, func(i, j int) bool { return results[i].Score > results[j].Score })
+		sort.Slice(results, func(i, j int) bool { return e.searchResultLess(results[i], results[j]) })
 		for rank, res := range results {
 			existing := combined[res.ID]
 			if existing.ID == "" {
@@ -491,8 +491,25 @@ func (e *Engine) rrf(opts SearchOptions, bm25, vector map[string]SearchResult) [
 	addRank(bm25, "bm25")
 	addRank(vector, "vector")
 	results := mapValues(combined)
-	sort.Slice(results, func(i, j int) bool { return results[i].Score > results[j].Score })
+	sort.Slice(results, func(i, j int) bool { return e.searchResultLess(results[i], results[j]) })
 	return trim(results, opts.Limit)
+}
+
+func (e *Engine) searchResultLess(a, b SearchResult) bool {
+	if !sameScore(a.Score, b.Score) {
+		return a.Score > b.Score
+	}
+	if !sameScore(a.BM25Score, b.BM25Score) {
+		return a.BM25Score > b.BM25Score
+	}
+	if !sameScore(a.VectorScore, b.VectorScore) {
+		return a.VectorScore > b.VectorScore
+	}
+	return docLess(e.docs[a.ID], e.docs[b.ID])
+}
+
+func sameScore(a, b float64) bool {
+	return math.Abs(a-b) < 1e-12
 }
 
 func attachmentMatch(c chunk, score float64, snippet string) AttachmentMatch {

@@ -99,6 +99,40 @@ func TestVectorRRF(t *testing.T) {
 	}
 }
 
+func TestRRFScoreTiePrefersStrongerBM25(t *testing.T) {
+	docs := []model.Document{
+		{ID: "semantic", Title: "의미 검색", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "공통"},
+		{ID: "lexical", Title: "정확 검색", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "공통 희귀 희귀 희귀"},
+	}
+	engine := BuildWithAttachments(docs, nil, map[string][]float64{
+		"semantic#0": {1, 0},
+		"lexical#0":  {0.8, 0.2},
+	})
+	results := engine.Search(SearchOptions{
+		Query:       "공통 희귀",
+		QueryVector: []float64{1, 0},
+		Limit:       2,
+	})
+	if len(results) != 2 {
+		t.Fatalf("results = %#v, want two documents", results)
+	}
+	if !sameScore(results[0].Score, results[1].Score) {
+		t.Fatalf("test setup should produce an RRF score tie: %#v", results)
+	}
+	if results[0].ID != "lexical" {
+		t.Fatalf("RRF tie should prefer stronger BM25 result: %#v", results)
+	}
+}
+
+func TestTokenizeAddsScriptNotationAliases(t *testing.T) {
+	tokens := Tokenize("S_{0} S_{-15} 99^{th} 컨설팅 방식^{3)}")
+	for _, want := range []string{"s0", "s15", "99th", "방식3"} {
+		if !containsToken(tokens, want) {
+			t.Fatalf("Tokenize() missing %q in %#v", want, tokens)
+		}
+	}
+}
+
 func TestVectorFallbackWhenBM25HasNoHits(t *testing.T) {
 	docs := []model.Document{
 		{ID: "a", Title: "상장규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "상장 심사"},
@@ -119,6 +153,15 @@ func TestVectorFallbackWhenBM25HasNoHits(t *testing.T) {
 	if results[0].BM25Score != 0 || results[0].VectorScore == 0 {
 		t.Fatalf("expected vector-only scores: %#v", results[0])
 	}
+}
+
+func containsToken(tokens []string, want string) bool {
+	for _, token := range tokens {
+		if token == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBM25UsesTermFrequencyForIndexedDocuments(t *testing.T) {
