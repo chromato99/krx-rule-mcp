@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "generated_at": "2026-07-07T16:33:16.461461474Z",
-  "corpus_hash": "0e984e0d7d02846b923da8328d5ac33114543bdfdd5784d4ce1e9c85be16cafe",
+  "generated_at": "2026-07-08T11:26:34.236860393Z",
+  "corpus_hash": "5a923e0a4c9200d7e77d515dce915b7d600941635d5d8b364c8a75259e2a4985",
   "model": "intfloat/multilingual-e5-small",
   "dimensions": 384,
   "query_prefix": "query: ",

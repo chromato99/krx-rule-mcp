@@ -125,7 +125,7 @@ func TestRRFScoreTiePrefersStrongerBM25(t *testing.T) {
 }
 
 func TestTokenizeAddsScriptNotationAliases(t *testing.T) {
-	tokens := Tokenize("S_{0} S_{-15} 99^{th} 컨설팅 방식^{3)}")
+	tokens := Tokenize("S_{0} S<sub>-15</sub> 99<sup>th</sup> 컨설팅 방식<sup>3)</sup>")
 	for _, want := range []string{"s0", "s15", "99th", "방식3"} {
 		if !containsToken(tokens, want) {
 			t.Fatalf("Tokenize() missing %q in %#v", want, tokens)

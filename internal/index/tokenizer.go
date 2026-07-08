@@ -9,6 +9,7 @@ import (
 var (
 	tokenPattern          = regexp.MustCompile(`[0-9A-Za-z가-힣]+`)
 	scriptNotationPattern = regexp.MustCompile(`([0-9A-Za-z가-힣]+)\s*[_^]\{([^}]*)\}`)
+	htmlScriptPattern     = regexp.MustCompile(`(?is)([0-9A-Za-z가-힣]+)\s*<(?:sub|sup)>([^<]*)</(?:sub|sup)>`)
 	aliasTokenPattern     = regexp.MustCompile(`[0-9A-Za-z가-힣]+`)
 	singleASCIIAlnum      = regexp.MustCompile(`[0-9A-Za-z]`)
 	paragraphSplitPattern = regexp.MustCompile(`\n{2,}`)
@@ -65,26 +66,35 @@ func uniqueTokenize(text string) []string {
 }
 
 func appendScriptNotationAliases(text string) string {
-	matches := scriptNotationPattern.FindAllStringSubmatch(text, -1)
-	if len(matches) == 0 {
-		return text
-	}
-	aliases := make([]string, 0, len(matches))
-	for _, match := range matches {
-		if len(match) != 3 {
-			continue
-		}
-		base := strings.Join(aliasTokenPattern.FindAllString(match[1], -1), "")
-		script := strings.Join(aliasTokenPattern.FindAllString(match[2], -1), "")
-		if base == "" || script == "" {
-			continue
-		}
-		aliases = append(aliases, base+script)
-	}
+	aliases := scriptNotationAliases(text)
 	if len(aliases) == 0 {
 		return text
 	}
 	return text + " " + strings.Join(aliases, " ")
+}
+
+func scriptNotationAliases(text string) []string {
+	aliases := []string{}
+	for _, match := range scriptNotationPattern.FindAllStringSubmatch(text, -1) {
+		if len(match) == 3 {
+			aliases = appendScriptAlias(aliases, match[1], match[2])
+		}
+	}
+	for _, match := range htmlScriptPattern.FindAllStringSubmatch(text, -1) {
+		if len(match) == 3 {
+			aliases = appendScriptAlias(aliases, match[1], match[2])
+		}
+	}
+	return aliases
+}
+
+func appendScriptAlias(aliases []string, baseRaw, scriptRaw string) []string {
+	base := strings.Join(aliasTokenPattern.FindAllString(baseRaw, -1), "")
+	script := strings.Join(aliasTokenPattern.FindAllString(scriptRaw, -1), "")
+	if base == "" || script == "" {
+		return aliases
+	}
+	return append(aliases, base+script)
 }
 
 func addToken(tokens *[]string, seen map[string]struct{}, token string) {
