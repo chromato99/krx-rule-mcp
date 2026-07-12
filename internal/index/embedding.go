@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -21,12 +22,13 @@ type EmbedderInfo interface {
 }
 
 type OpenAIEmbedder struct {
-	BaseURL     string
-	APIKey      string
-	Model       string
-	Dimensions  int
-	InputPrefix string
-	Client      *http.Client
+	BaseURL       string
+	APIKey        string
+	Model         string
+	ModelRevision string
+	Dimensions    int
+	InputPrefix   string
+	Client        *http.Client
 }
 
 func NewEmbedderFromEnv() (*OpenAIEmbedder, bool, error) {
@@ -65,11 +67,12 @@ func newOpenAIEmbedderFromEnv() (*OpenAIEmbedder, error) {
 		dims = parsed
 	}
 	return &OpenAIEmbedder{
-		BaseURL:    strings.TrimRight(envDefault("KRX_EMBEDDING_BASE_URL", "http://127.0.0.1:18081/v1"), "/"),
-		APIKey:     envDefault("OPENAI_API_KEY", "local"),
-		Model:      envDefault("KRX_EMBEDDING_MODEL", "intfloat/multilingual-e5-small"),
-		Dimensions: dims,
-		Client:     &http.Client{Timeout: 45 * time.Second},
+		BaseURL:       strings.TrimRight(envDefault("KRX_EMBEDDING_BASE_URL", "http://127.0.0.1:18081/v1"), "/"),
+		APIKey:        envDefault("OPENAI_API_KEY", "local"),
+		Model:         envDefault("KRX_EMBEDDING_MODEL", "intfloat/multilingual-e5-small"),
+		ModelRevision: strings.TrimSpace(os.Getenv("KRX_EMBEDDING_MODEL_REVISION")),
+		Dimensions:    dims,
+		Client:        &http.Client{Timeout: 45 * time.Second},
 	}, nil
 }
 
@@ -116,9 +119,26 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, input []string) ([][]float64
 		return nil, err
 	}
 	vectors := make([][]float64, len(input))
+	seen := make(map[int]struct{}, len(out.Data))
+	if len(out.Data) != len(input) {
+		return nil, fmt.Errorf("embedding API returned %d vectors for %d inputs", len(out.Data), len(input))
+	}
 	for _, row := range out.Data {
-		if row.Index >= 0 && row.Index < len(vectors) {
-			vectors[row.Index] = row.Embedding
+		if row.Index < 0 || row.Index >= len(vectors) {
+			return nil, fmt.Errorf("embedding API returned invalid index %d", row.Index)
+		}
+		if _, duplicate := seen[row.Index]; duplicate {
+			return nil, fmt.Errorf("embedding API returned duplicate index %d", row.Index)
+		}
+		seen[row.Index] = struct{}{}
+		if err := validateEmbeddingVector(row.Embedding, e.Dimensions); err != nil {
+			return nil, fmt.Errorf("embedding API index %d: %w", row.Index, err)
+		}
+		vectors[row.Index] = row.Embedding
+	}
+	for index, vector := range vectors {
+		if vector == nil {
+			return nil, fmt.Errorf("embedding API omitted index %d", index)
 		}
 	}
 	return vectors, nil
@@ -130,6 +150,10 @@ func (e *OpenAIEmbedder) EmbeddingInfo() (string, int) {
 
 func EmbedSnapshotChunks(ctx context.Context, chunks []SnapshotChunk, embedder Embedder) (map[string][]float64, error) {
 	out := map[string][]float64{}
+	expectedDimensions := 0
+	if info, ok := embedder.(EmbedderInfo); ok {
+		_, expectedDimensions = info.EmbeddingInfo()
+	}
 	const batchSize = 32
 	for start := 0; start < len(chunks); start += batchSize {
 		end := start + batchSize
@@ -146,13 +170,38 @@ func EmbedSnapshotChunks(ctx context.Context, chunks []SnapshotChunk, embedder E
 		if err != nil {
 			return out, err
 		}
+		if len(vectors) != len(inputs) {
+			return out, fmt.Errorf("embedder returned %d vectors for %d inputs", len(vectors), len(inputs))
+		}
 		for i, vec := range vectors {
-			if len(vec) > 0 {
-				out[ids[i]] = vec
+			if expectedDimensions == 0 {
+				expectedDimensions = len(vec)
 			}
+			if err := validateEmbeddingVector(vec, expectedDimensions); err != nil {
+				return out, fmt.Errorf("embed chunk %q: %w", ids[i], err)
+			}
+			if _, duplicate := out[ids[i]]; duplicate {
+				return out, fmt.Errorf("duplicate chunk id %q in embedding input", ids[i])
+			}
+			out[ids[i]] = vec
 		}
 	}
 	return out, nil
+}
+
+func validateEmbeddingVector(vector []float64, dimensions int) error {
+	if dimensions <= 0 {
+		return fmt.Errorf("embedding dimensions must be positive")
+	}
+	if len(vector) != dimensions {
+		return fmt.Errorf("embedding dimensions=%d want=%d", len(vector), dimensions)
+	}
+	for _, value := range vector {
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.IsInf(float64(float32(value)), 0) {
+			return fmt.Errorf("embedding contains non-finite value")
+		}
+	}
+	return nil
 }
 
 func envDefault(key, fallback string) string {

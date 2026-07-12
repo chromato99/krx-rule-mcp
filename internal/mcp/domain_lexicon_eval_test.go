@@ -61,14 +61,14 @@ func TestRealDataDomainLexiconProbe(t *testing.T) {
 			query:         "listing review preliminary",
 			documentType:  "rule",
 			wantExpansion: "listing_review",
-			wantTitle:     "상장규정",
+			wantTitle:     "Listing Regulation",
 		},
 		{
 			name:          "disclosure english",
 			query:         "disclosure timely disclosure",
 			documentType:  "rule",
 			wantExpansion: "disclosure",
-			wantTitle:     "공시규정",
+			wantTitle:     "공시",
 		},
 		{
 			name:          "margin bilingual",
@@ -146,7 +146,7 @@ func expansionIDs(expansion *searchindex.DomainQueryExpansion) string {
 	return strings.Join(ids, ",")
 }
 
-func resultTitles(results []searchindex.SearchResult) string {
+func resultTitles(results []SearchResultDTO) string {
 	var titles []string
 	for _, result := range results {
 		titles = append(titles, result.Title)
@@ -154,7 +154,7 @@ func resultTitles(results []searchindex.SearchResult) string {
 	return strings.Join(titles, " | ")
 }
 
-func resultsContainTitle(results []searchindex.SearchResult, value string) bool {
+func resultsContainTitle(results []SearchResultDTO, value string) bool {
 	for _, result := range results {
 		if strings.Contains(result.Title, value) {
 			return true

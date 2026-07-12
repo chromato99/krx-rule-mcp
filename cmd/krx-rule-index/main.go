@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -23,90 +24,127 @@ func main() {
 		samplePer   = flag.Int("vector-sample-per-query", 16, "chunks per sample query")
 		force       = flag.Bool("force", false, "rebuild snapshots even when they are current")
 		check       = flag.Bool("check", false, "check index freshness without writing files")
+		requireFull = flag.Bool("require-full-vector", false, "require a full-coverage vector snapshot when checking")
 	)
 	flag.Parse()
 
 	if *indexPath == "" {
 		*indexPath = envDefault("KRX_INDEX_PATH", searchindex.DefaultBM25Path(*indexDir))
 	}
+	if filepath.Base(filepath.Clean(*indexPath)) != searchindex.BM25SnapshotFile {
+		fatal(fmt.Errorf("--index must name %s when generation publishing is enabled", searchindex.BM25SnapshotFile))
+	}
+	// Preserve the legacy --index flag as an index-directory selector. Files are
+	// always published below generations/<content-id>; the root path is never
+	// replaced independently of its vector companion.
+	*indexDir = filepath.Dir(filepath.Clean(*indexPath))
 	if strings.TrimSpace(*vectorPath) == "" {
 		*vectorPath = strings.TrimSpace(os.Getenv("KRX_VECTOR_INDEX_PATH"))
 	}
+	vectorRequested := strings.TrimSpace(*vectorPath) != ""
+	if *requireFull && !vectorRequested {
+		fatal(fmt.Errorf("--require-full-vector requires --vector-index"))
+	}
 
-	snap, docs, err := searchindex.BuildSnapshot(*dataDir)
+	var buildLock *searchindex.GenerationBuildLock
+	var err error
+	if !*check {
+		buildLock, err = searchindex.AcquireGenerationBuildLock(*indexDir)
+		if err != nil {
+			fatal(err)
+		}
+		defer func() { _ = buildLock.Close() }()
+	}
+
+	snap, docs, err := searchindex.BuildReleaseSnapshot(*dataDir)
 	if err != nil {
 		fatal(err)
 	}
 
-	indexCurrent := bm25Current(*indexPath, snap)
-	vectorRequested := strings.TrimSpace(*vectorPath) != ""
+	currentDescriptor, currentDir, currentErr := searchindex.ReadCurrentGeneration(*indexDir)
+	currentIndexPath := ""
+	currentVectorPath := ""
+	indexCurrent := false
+	if currentErr == nil {
+		currentIndexPath = filepath.Join(currentDir, searchindex.BM25SnapshotFile)
+		indexCurrent = currentDescriptor.IndexSourceHash == snap.IndexSourceHash &&
+			currentDescriptor.IndexBuildHash == snap.IndexBuildHash &&
+			currentDescriptor.CorpusReleaseHash == snap.CorpusReleaseHash &&
+			bm25Current(currentIndexPath, snap)
+	}
 	vectorCurrent := true
+	var embedder *searchindex.OpenAIEmbedder
 	if vectorRequested {
-		embedder, err := searchindex.NewDocumentEmbedderFromEnv()
+		embedder, err = searchindex.NewDocumentEmbedderFromEnv()
 		if err != nil {
 			fatal(err)
 		}
-		vectorCurrent = vectorFresh(*vectorPath, snap, embedder)
+		vectorCurrent = false
+		if indexCurrent && currentDescriptor.Vector != nil {
+			currentVectorPath = filepath.Join(currentDir, searchindex.VectorSnapshotFile)
+			vectorCurrent = vectorFreshWithPolicy(currentVectorPath, snap, embedder, *requireFull)
+		}
 	}
 
 	if *check {
 		if !indexCurrent {
-			fmt.Fprintf(os.Stderr, "BM25 index is stale or missing: %s\n", *indexPath)
+			fmt.Fprintf(os.Stderr, "BM25 generation is stale, missing, or invalid under %s\n", *indexDir)
 			os.Exit(1)
 		}
 		if vectorRequested && !vectorCurrent {
-			fmt.Fprintf(os.Stderr, "vector index is stale or missing: %s\n", *vectorPath)
+			fmt.Fprintf(os.Stderr, "vector generation is stale, missing, or invalid under %s\n", *indexDir)
 			os.Exit(1)
 		}
-		fmt.Println("index up to date")
+		fmt.Printf("index generation up to date %s\n", currentDescriptor.GenerationID)
 		return
 	}
 
-	if *force || !indexCurrent {
-		if err := searchindex.WriteSnapshot(*indexPath, snap); err != nil {
+	if !*force && indexCurrent && (!vectorRequested || vectorCurrent) {
+		fmt.Printf("index generation up to date %s\n", currentDescriptor.GenerationID)
+		return
+	}
+
+	build := searchindex.GenerationBuild{Snapshot: snap}
+	if vectorRequested {
+		selected := selectVectorChunks(snap.Chunks, splitQueries(*sampleQuery), *samplePer, *vectorLimit)
+		if len(selected) == 0 {
+			fatal(fmt.Errorf("vector selection produced no chunks"))
+		}
+		vectors, err := searchindex.EmbedSnapshotChunks(context.Background(), selected, embedder)
+		if err != nil {
 			fatal(err)
 		}
-		fmt.Printf("wrote BM25 index %s documents=%d chunks=%d\n", *indexPath, len(docs), len(snap.Chunks))
-	} else {
-		fmt.Printf("BM25 index up to date %s\n", *indexPath)
-	}
-
-	if !vectorRequested {
-		return
-	}
-	embedder, err := searchindex.NewDocumentEmbedderFromEnv()
-	if err != nil {
-		fatal(err)
-	}
-	if !*force && vectorCurrent {
-		fmt.Printf("vector index up to date %s\n", *vectorPath)
-		return
-	}
-	selected := selectVectorChunks(snap.Chunks, splitQueries(*sampleQuery), *samplePer, *vectorLimit)
-	vectors, err := searchindex.EmbedSnapshotChunks(context.Background(), selected, embedder)
-	if err != nil {
-		fatal(err)
-	}
-	model, dimensions := embedder.EmbeddingInfo()
-	if dimensions == 0 && len(vectors) > 0 {
-		for _, vector := range vectors {
-			dimensions = len(vector)
-			break
+		model, dimensions := embedder.EmbeddingInfo()
+		if dimensions == 0 && len(vectors) > 0 {
+			for _, vector := range vectors {
+				dimensions = len(vector)
+				break
+			}
+		}
+		scope := searchindex.VectorScopeFull
+		if len(selected) != len(snap.Chunks) {
+			scope = searchindex.VectorScopeSample
+		}
+		build.IncludeVector = true
+		build.Vectors = vectors
+		build.VectorModel = model
+		build.VectorDimensions = dimensions
+		build.VectorOptions = searchindex.VectorWriteOptions{
+			Scope:          scope,
+			ModelRevision:  embedder.ModelRevision,
+			QueryPrefix:    envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: "),
+			DocumentPrefix: envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: "),
 		}
 	}
-	if err := searchindex.WriteVectorSnapshot(*vectorPath, snap, vectors, model, dimensions); err != nil {
+	published, err := buildLock.Publish(build)
+	if err != nil {
 		fatal(err)
 	}
-	if err := searchindex.WriteVectorMetadata(searchindex.VectorMetadataPath(*vectorPath), searchindex.VectorMetadata{
-		CorpusHash:     snap.CorpusHash,
-		Model:          model,
-		Dimensions:     dimensions,
-		QueryPrefix:    envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: "),
-		DocumentPrefix: envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: "),
-	}); err != nil {
-		fatal(err)
+	fmt.Printf("published index generation %s documents=%d chunks=%d", published.GenerationID, len(docs), len(snap.Chunks))
+	if published.Vector != nil {
+		fmt.Printf(" vectors=%d model=%s", published.Vector.Vectors, published.Vector.Model)
 	}
-	fmt.Printf("wrote vector index %s vectors=%d model=%s dimensions=%d\n", *vectorPath, len(vectors), model, dimensions)
+	fmt.Println()
 }
 
 func bm25Current(path string, snap searchindex.Snapshot) bool {
@@ -114,24 +152,66 @@ func bm25Current(path string, snap searchindex.Snapshot) bool {
 	if err != nil {
 		return false
 	}
-	return current.CorpusHash == snap.CorpusHash && current.IndexerVersion == snap.IndexerVersion
+	return current.Version == snap.Version &&
+		current.IndexSourceHash == snap.IndexSourceHash &&
+		current.IndexBuildHash == snap.IndexBuildHash &&
+		current.CorpusReleaseHash == snap.CorpusReleaseHash &&
+		current.IndexerVersion == snap.IndexerVersion
 }
 
 func vectorFresh(path string, snap searchindex.Snapshot, embedder *searchindex.OpenAIEmbedder) bool {
+	return vectorFreshWithPolicy(path, snap, embedder, false)
+}
+
+func vectorFreshWithPolicy(path string, snap searchindex.Snapshot, embedder *searchindex.OpenAIEmbedder, requireFull bool) bool {
 	vector, err := searchindex.LoadVectorSnapshot(path)
 	if err != nil {
 		return false
 	}
-	if vector.CorpusHash != snap.CorpusHash || vector.Model != embedder.Model || vector.Dimensions != embedder.Dimensions {
+	if vector.Version != searchindex.VectorSnapshotFormatVersion || vector.IndexSourceHash != snap.IndexSourceHash || vector.IndexBuildHash != snap.IndexBuildHash || vector.CorpusReleaseHash != snap.CorpusReleaseHash ||
+		vector.Model != embedder.Model || vector.ModelRevision != embedder.ModelRevision || vector.Dimensions != embedder.Dimensions ||
+		vector.QueryPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: ") ||
+		vector.DocumentPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: ") {
 		return false
 	}
+	expectedIDs := make([]string, 0, len(snap.Chunks))
+	vectorMap := make(map[string][]float64, len(vector.Vectors))
+	for _, chunk := range snap.Chunks {
+		expectedIDs = append(expectedIDs, chunk.ID)
+	}
+	for _, item := range vector.Vectors {
+		vectorMap[item.ChunkID] = item.Vector
+	}
+	if requireFull && vector.Scope != searchindex.VectorScopeFull {
+		return false
+	}
+	if err := searchindex.ValidateVectorMap(vectorMap, expectedIDs, vector.Dimensions, requireFull || vector.Scope == searchindex.VectorScopeFull); err != nil {
+		return false
+	}
+	expectedMetadata := searchindex.BuildVectorMetadata(snap, vectorMap, vector.Model, vector.Dimensions, searchindex.VectorWriteOptions{
+		Scope:          vector.Scope,
+		ModelRevision:  vector.ModelRevision,
+		QueryPrefix:    vector.QueryPrefix,
+		DocumentPrefix: vector.DocumentPrefix,
+		GenerationID:   vector.GenerationID,
+	})
 	metadata, err := searchindex.LoadVectorMetadata(searchindex.VectorMetadataPath(path))
 	if err != nil {
 		return false
 	}
-	return metadata.CorpusHash == snap.CorpusHash &&
+	return metadata.Version == searchindex.VectorMetadataFormatVersion &&
+		metadata.GenerationID == vector.GenerationID &&
+		metadata.IndexSourceHash == snap.IndexSourceHash &&
+		metadata.IndexBuildHash == snap.IndexBuildHash &&
+		metadata.CorpusReleaseHash == snap.CorpusReleaseHash &&
 		metadata.Model == embedder.Model &&
+		metadata.ModelRevision == embedder.ModelRevision &&
 		metadata.Dimensions == embedder.Dimensions &&
+		metadata.Scope == vector.Scope &&
+		metadata.ExpectedChunkCount == len(snap.Chunks) &&
+		metadata.StoredVectorCount == len(vector.Vectors) &&
+		metadata.ChunkIDSetHash == vector.ChunkIDSetHash &&
+		metadata.StoredChunkIDSetHash == expectedMetadata.StoredChunkIDSetHash &&
 		metadata.DocumentPrefix == envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: ") &&
 		metadata.QueryPrefix == envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: ")
 }

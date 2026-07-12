@@ -152,9 +152,8 @@ func renderTestMarkdown(t *testing.T, doc model.Document) []byte {
 	meta.Body = ""
 	meta.Path = ""
 	meta.Language = model.NormalizeLanguage(meta.Language)
-	if meta.ContentHash == "" {
-		meta.ContentHash = model.HashText(doc.Body)
-	}
+	meta.BodyHash = model.HashText(doc.Body)
+	meta.ContentHash = model.HashText(doc.Title + "\n" + doc.Body)
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
 	enc := yaml.NewEncoder(&buf)

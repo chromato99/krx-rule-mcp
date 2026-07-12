@@ -12,7 +12,6 @@ var (
 	htmlScriptPattern     = regexp.MustCompile(`(?is)([0-9A-Za-z가-힣]+)\s*<(?:sub|sup)>([^<]*)</(?:sub|sup)>`)
 	aliasTokenPattern     = regexp.MustCompile(`[0-9A-Za-z가-힣]+`)
 	singleASCIIAlnum      = regexp.MustCompile(`[0-9A-Za-z]`)
-	paragraphSplitPattern = regexp.MustCompile(`\n{2,}`)
 	whitespacePattern     = regexp.MustCompile(`\s+`)
 	htmlTableOpenPattern  = regexp.MustCompile(`(?is)<table\b[^>]*>`)
 	htmlTableRowPattern   = regexp.MustCompile(`(?is)<tr\b[^>]*>.*?</tr>`)
@@ -123,70 +122,10 @@ func isHangulToken(token string) bool {
 }
 
 func ChunkText(text string, maxRunes int) []string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil
-	}
-	if maxRunes <= 0 {
-		maxRunes = 1600
-	}
-	paras := paragraphSplitPattern.Split(text, -1)
-	var chunks []string
-	var current strings.Builder
-	currentLen := 0
-	for _, para := range paras {
-		para = strings.TrimSpace(para)
-		if para == "" {
-			continue
-		}
-		paraLen := utf8.RuneCountInString(para)
-		if currentLen > 0 && currentLen+paraLen+2 > maxRunes {
-			chunks = append(chunks, strings.TrimSpace(current.String()))
-			current.Reset()
-			currentLen = 0
-		}
-		if paraLen > maxRunes && isMarkdownTable(para) {
-			for _, part := range splitMarkdownTable(para, maxRunes) {
-				if currentLen > 0 {
-					chunks = append(chunks, strings.TrimSpace(current.String()))
-					current.Reset()
-					currentLen = 0
-				}
-				chunks = append(chunks, part)
-			}
-			continue
-		}
-		if paraLen > maxRunes && isHTMLTable(para) {
-			for _, part := range splitHTMLTable(para, maxRunes) {
-				if currentLen > 0 {
-					chunks = append(chunks, strings.TrimSpace(current.String()))
-					current.Reset()
-					currentLen = 0
-				}
-				chunks = append(chunks, part)
-			}
-			continue
-		}
-		if paraLen > maxRunes {
-			for _, part := range splitRunes(para, maxRunes) {
-				if currentLen > 0 {
-					chunks = append(chunks, strings.TrimSpace(current.String()))
-					current.Reset()
-					currentLen = 0
-				}
-				chunks = append(chunks, part)
-			}
-			continue
-		}
-		if currentLen > 0 {
-			current.WriteString("\n\n")
-			currentLen += 2
-		}
-		current.WriteString(para)
-		currentLen += paraLen
-	}
-	if currentLen > 0 {
-		chunks = append(chunks, strings.TrimSpace(current.String()))
+	anchored := ChunkTextWithAnchors(text, maxRunes)
+	chunks := make([]string, 0, len(anchored))
+	for _, chunk := range anchored {
+		chunks = append(chunks, chunk.Text)
 	}
 	return chunks
 }

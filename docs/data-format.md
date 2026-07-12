@@ -4,6 +4,7 @@ Documents are stored as Markdown with YAML frontmatter.
 
 ```yaml
 ---
+schema_version: 2
 id: "210207961"
 title: "코스닥시장 상장규정"
 category: "업무규정 / 코스닥시장규정"
@@ -11,9 +12,14 @@ source_url: "https://rule.krx.co.kr/out/regulation/regulationViewPop.do"
 effective_date: "2026-07-01"
 published_date: "2026-05-13"
 collected_at: "2026-06-16T13:00:00Z"
-content_hash: "sha256..."
+body_hash: "sha256-of-canonical-markdown-body"
 document_type: "rule"
 language: "ko"
+conversion_status: "converted"
+searchable: true
+source_content_path: "ko/rules/코스닥시장-상장규정/raw/source.html"
+source_content_hash: "sha256-of-canonical-source-html"
+source_request_path: "ko/rules/코스닥시장-상장규정/raw/request.json"
 attachments:
   - id: "210203562-210032775-hwp"
     title: "[별표 1] 시가기준가종목의 최초의 가격을 결정하기 위한 최저호가가격 및 최고호가가격 산정기준"
@@ -21,8 +27,11 @@ attachments:
     source_url: "/Download.do"
     raw_path: "ko/rules/코스닥시장-상장규정/raw/별표-1-시가기준가종목의-최초의-가격을-결정하기-위한-최저호가가격-및-최고호가가격-산정기준.hwp"
     text_path: "ko/rules/코스닥시장-상장규정/attachments/별표-1-시가기준가종목의-최초의-가격을-결정하기-위한-최저호가가격-및-최고호가가격-산정기준.md"
-    content_hash: "sha256..."
-    status: "converted"
+    raw_file_hash: "sha256-of-original-bytes"
+    converted_text_hash: "sha256-of-canonical-converted-markdown"
+    conversion_status: "converted"
+    preservation_status: "preserved"
+    searchable: true
     quality_status: "ok"
     quality_score: 100
     converted_text_chars: 18354
@@ -37,9 +46,13 @@ Required document fields:
 - `title`
 - `source_url`
 - `collected_at`
-- `content_hash`
+- `body_hash`
 - `document_type`
 - `language`: `ko` or `en`
+
+Production loading requires `manifest.json` schema v2, a strict release profile, a matching manifest entry for every frontmatter file, `index_source_hash`, and `release_hash`. Text canonicalization is UTF-8, LF, Unicode NFC, and whole-value boundary trim. `body_hash`, exact-byte `raw_file_hash`, and canonical `converted_text_hash` have separate meanings; legacy `content_hash`/`status` remain read-compatible but are not the v2 contract.
+
+`conversion_status`, `preservation_status`, `quality_status`, and `searchable` are independent axes. Failed conversion/quality cannot be searchable. A release allowlist is valid only for a known failed attachment whose original is preserved and whose searchable value is explicitly false.
 
 The `id` field is the stable KRX document id used by MCP resource URIs and search metadata. Korean documents use the KRX id. English full-text documents use `{source_id}-en` and keep the Korean document id in `source_id`.
 
@@ -65,6 +78,8 @@ Attachment path fields are relative to the data root:
 
 If conversion fails, the manifest keeps the original file path and failure reason but omits `text_path`.
 
+When source provenance is present, all of `source_content_path`, `source_content_hash`, and `source_request_path` are required. The consumer verifies bounded UTF-8 content and a strict request JSON whitelist. Public responses may expose the KRX endpoint, stable document identifiers, and source-content hash, but never local paths, cookies, CSRF values, authorization data, or arbitrary headers.
+
 ## HWP Formula Blocks
 
 `krx-rule-markdown` preserves HWP EqEdit formulas in converted attachment Markdown. When a converted attachment contains formulas, the text normally ends with a `## HWP 수식` section.
@@ -83,10 +98,10 @@ If conversion fails, the manifest keeps the original file path and failure reaso
 
 MCP serving behavior:
 
-- `get_attachment` returns the converted Markdown unchanged, including the formula notice, original `hwp-equation`, and generated `math` block.
+- `get_attachment` returns a bounded page of converted Markdown, preserving formula notice, original `hwp-equation`, and generated `math` blocks that fall within that page. Use `next_offset` to continue without overlap.
 - `get_attachment` also returns a structured `formula_notice` JSON field when the attachment contains HWP formulas.
 - If search hits an attachment chunk, `search_rules` returns `attachment_matches[].chunk_id`; clients can pass it to `get_context` to read the exact formula neighborhood.
-- `krx-rule://attachments/{id}` resources expose the same converted Markdown.
+- `krx-rule://attachments/{id}` resources expose at most 50,000 characters and report truncation in resource `_meta`; use `get_attachment` for continuation.
 - The indexer chunks this content with the rest of the attachment text, so formula text can match both BM25 and vector search.
 - The LaTeX block is best-effort. Clients should keep the adjacent HWP EqEdit source available when exact formulas matter.
 
@@ -103,7 +118,7 @@ MCP serving behavior:
 }
 ```
 
-If only formula-like converted text is detected and no `hwp-equation`/`math` block is available, the server uses `code: "formula_text_detected"` with both availability flags set to `false`. That weaker notice means the text can help retrieval, but clients should verify precise formulas against the original attachment.
+If only formula-like converted text is detected and no preserved `hwp-equation` or `math` block exists, the server does not emit a structured `formula_notice`; the quality metadata and official source remain the verification path. This avoids presenting a formatting hint as proof that a source equation was preserved.
 
 Converted attachment quality fields are optional but recommended:
 
@@ -117,11 +132,12 @@ Converted attachment quality fields are optional but recommended:
 
 `data/reports/data-quality.json` stores the full data-quality audit, including issue severity, document id, attachment id, filename, and message. It is produced by `krx-rule-markdown`; `krx-rule-mcp` only reads the corpus fields needed for indexing and serving.
 
-Search snapshots are generated by `krx-rule-index` in `krx-rule-mcp` and should be stored outside the `krx-rule-markdown` corpus. The recommended local directory is `KRX_RULE_INDEX_DIR`. This repository also tracks a default root-level `index/` directory for the currently maintained corpus, so a source checkout can use `KRX_RULE_INDEX_DIR=./index` when the corpus hash matches.
+Search artifacts are generated by `krx-rule-index` outside the corpus and published as one immutable generation:
 
-- `bm25.krxidx`: `KRXIDX2\n` header plus gzip-compressed binary BM25 snapshot
-- `vectors.krxvec`: optional `KRXVEC2\n` header plus gzip-compressed binary vector snapshot
-- `vectors.krxvec.meta.json`: optional vector metadata sidecar
+- `current`: active lowercase SHA-256 generation id
+- `generations/<id>/generation.json`: corpus release and index source/build identity plus artifact size/digest
+- `generations/<id>/bm25.krxidx`: required `KRXIDX2\n` gzip-compressed binary snapshot (format v6)
+- `generations/<id>/vectors.krxvec`: optional `KRXVEC2\n` vector snapshot
+- `generations/<id>/vectors.krxvec.meta.json`: required companion when vector is present
 
-The `data/` directory remains the corpus handoff from `krx-rule-markdown`; search snapshots are MCP-serving artifacts. Snapshots include corpus hashes and are rejected or ignored when they no longer match the current Markdown/attachment corpus. The repository-provided `index/` is therefore a convenience snapshot, not a substitute for checking freshness after regenerating or replacing the corpus. Vector metadata also records embedding model, dimensions, query prefix, and document prefix so vector indexes are regenerated when E5 prefix settings change.
-The default repository vector metadata uses `intfloat/multilingual-e5-small`, 384 dimensions, `query: `, and `passage: `. Alternative embedding models require regenerating `vectors.krxvec` and `vectors.krxvec.meta.json` with the new model, dimension, and prefix settings.
+Snapshot chunks carry stable chunk id/index plus owning `article_id` and ordered `heading_path`. Vector metadata records full/sample scope, expected/stored coverage, chunk-ID set hashes, model/revision, dimensions, and query/document prefixes. The server resolves `current` once and verifies each exact artifact byte stream against `generation.json`; individual root-level flat files are legacy compatibility input only.

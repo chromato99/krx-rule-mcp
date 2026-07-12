@@ -19,7 +19,5 @@ EXPOSE 8080
 ENV KRX_MCP_MODE=http
 ENV KRX_RULE_DATA_DIR=/app/data
 ENV KRX_RULE_INDEX_DIR=/app/index
-ENV KRX_INDEX_PATH=/app/index/bm25.krxidx
-ENV KRX_VECTOR_INDEX_PATH=/app/index/vectors.krxvec
 ENV KRX_DOMAIN_LEXICON_PATH=/app/config/domain-lexicon.yaml
 ENTRYPOINT ["/usr/local/bin/krx-rule-mcp"]

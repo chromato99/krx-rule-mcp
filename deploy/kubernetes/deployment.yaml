@@ -12,15 +12,20 @@ spec:
       labels:
         app: krx-rule-mcp
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: server
-          image: ghcr.io/chromato99/krx-rule-mcp:latest
+          # Replace both digest occurrences with the exact published server image digest.
+          image: ghcr.io/chromato99/krx-rule-mcp@sha256:0000000000000000000000000000000000000000000000000000000000000000
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
                 name: krx-rule-mcp-config
             - secretRef:
                 name: krx-rule-mcp-secret
+          env:
+            - name: KRX_SERVER_IMAGE_DIGEST
+              value: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
           ports:
             - name: http
               containerPort: 8080
@@ -37,6 +42,7 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+            failureThreshold: 2
           livenessProbe:
             httpGet:
               path: /healthz
@@ -46,10 +52,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              memory: 1536Mi
             limits:
               cpu: 1000m
-              memory: 512Mi
+              memory: 2Gi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -57,11 +63,14 @@ spec:
             capabilities:
               drop: ["ALL"]
         - name: embeddings
-          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+          # Replace with the exact published TEI image digest.
+          image: ghcr.io/huggingface/text-embeddings-inference@sha256:0000000000000000000000000000000000000000000000000000000000000000
           imagePullPolicy: IfNotPresent
           args:
             - --model-id
             - intfloat/multilingual-e5-small
+            - --revision
+            - REPLACE_WITH_MODEL_COMMIT_SHA
           ports:
             - name: embeddings
               containerPort: 80
