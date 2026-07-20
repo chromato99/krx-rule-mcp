@@ -27,10 +27,26 @@ type ReleaseManifest struct {
 }
 
 var releaseOperationalFields = map[string]struct{}{
+	"release_hash":           {},
+	"generated_at":           {},
+	"last_checked_at":        {},
+	"source_response_hash":   {},
+	"last_refresh_error":     {},
+	"last_refresh_failed_at": {},
+}
+
+// legacyReleaseOperationalFields freezes the schema-v2 hash contract from
+// before refresh-failure provenance became operational metadata.
+var legacyReleaseOperationalFields = map[string]struct{}{
 	"release_hash":         {},
 	"generated_at":         {},
 	"last_checked_at":      {},
 	"source_response_hash": {},
+}
+
+var refreshFailureOperationalFields = map[string]struct{}{
+	"last_refresh_error":     {},
+	"last_refresh_failed_at": {},
 }
 
 func validateReleaseManifest(root string, docs []model.Document, attachmentTexts map[string]string, required bool) (ReleaseManifest, error) {
@@ -99,9 +115,17 @@ func validateReleaseManifest(root string, docs []model.Document, attachmentTexts
 		return ReleaseManifest{}, err
 	}
 	if declaredReleaseHash != actualReleaseHash {
-		return ReleaseManifest{}, fmt.Errorf("release manifest release_hash_mismatch: got %s want %s", declaredReleaseHash, actualReleaseHash)
+		legacyReleaseHash, eligible, err := legacyV2ReleaseHash(payload)
+		if err != nil {
+			return ReleaseManifest{}, err
+		}
+		if !eligible || declaredReleaseHash != legacyReleaseHash {
+			return ReleaseManifest{}, fmt.Errorf("release manifest release_hash_mismatch: got %s want %s", declaredReleaseHash, actualReleaseHash)
+		}
 	}
-	return ReleaseManifest{IndexSourceHash: actualIndexHash, ReleaseHash: actualReleaseHash}, nil
+	// Keep the declared legacy digest so indexes built against that release
+	// remain compatible after the hash contract migration.
+	return ReleaseManifest{IndexSourceHash: actualIndexHash, ReleaseHash: declaredReleaseHash}, nil
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {
@@ -117,6 +141,19 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 func releaseHash(payload map[string]any) (string, error) {
 	scrubbed := scrubReleaseFields(payload)
 	return canonicalJSONHash(scrubbed)
+}
+
+func legacyV2ReleaseHash(payload map[string]any) (string, bool, error) {
+	schema, ok := payload["schema_version"].(float64)
+	if !ok || schema != float64(IndexSourceSchemaVersion) || !containsLegacyRefreshField(payload) {
+		return "", false, nil
+	}
+	scrubbed := scrubReleaseFieldsWith(payload, legacyReleaseOperationalFields)
+	hash, err := canonicalJSONHash(scrubbed)
+	if err != nil {
+		return "", false, err
+	}
+	return hash, true, nil
 }
 
 func canonicalJSONHash(value any) (string, error) {
@@ -236,11 +273,11 @@ func validateManifestDocumentParity(root string, payload map[string]any, docs []
 				manifestMapping[key] = value
 			}
 		}
-		diskHash, err := canonicalJSONHash(frontmatter)
+		diskHash, err := manifestMetadataHash(frontmatter)
 		if err != nil {
 			return err
 		}
-		manifestHash, err := canonicalJSONHash(manifestMapping)
+		manifestHash, err := manifestMetadataHash(manifestMapping)
 		if err != nil {
 			return err
 		}
@@ -276,26 +313,55 @@ func readFrontmatterMapping(path string) (map[string]any, error) {
 	return mapping, nil
 }
 
+func manifestMetadataHash(value any) (string, error) {
+	return canonicalJSONHash(scrubReleaseFieldsWith(value, refreshFailureOperationalFields))
+}
+
 func scrubReleaseFields(value any) any {
+	return scrubReleaseFieldsWith(value, releaseOperationalFields)
+}
+
+func scrubReleaseFieldsWith(value any, excludedFields map[string]struct{}) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(typed))
 		for key, item := range typed {
-			if _, excluded := releaseOperationalFields[key]; excluded {
+			if _, excluded := excludedFields[key]; excluded {
 				continue
 			}
-			out[key] = scrubReleaseFields(item)
+			out[key] = scrubReleaseFieldsWith(item, excludedFields)
 		}
 		return out
 	case []any:
 		out := make([]any, len(typed))
 		for i, item := range typed {
-			out[i] = scrubReleaseFields(item)
+			out[i] = scrubReleaseFieldsWith(item, excludedFields)
 		}
 		return out
 	default:
 		return typed
 	}
+}
+
+func containsLegacyRefreshField(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			if _, operational := refreshFailureOperationalFields[key]; operational {
+				return true
+			}
+			if containsLegacyRefreshField(item) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range typed {
+			if containsLegacyRefreshField(item) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func normalizeReleaseJSON(value any) any {

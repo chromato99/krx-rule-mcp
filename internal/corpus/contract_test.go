@@ -596,6 +596,201 @@ func TestReleaseManifestVerification(t *testing.T) {
 	}
 }
 
+func TestStrictManifestParityAllowsCleanedRefreshFailureFields(t *testing.T) {
+	root := t.TempDir()
+	doc := contractDocument("refresh-parity", "Refresh Parity Rule")
+	doc.SchemaVersion = IndexSourceSchemaVersion
+	attachmentText := "converted attachment text"
+	doc.Attachments = []model.Attachment{{
+		ID:                     "refresh-parity-attachment",
+		Title:                  "Refresh Parity Attachment",
+		FileName:               "attachment.pdf",
+		Status:                 model.AttachmentConverted,
+		PreservationStatus:     "preserved",
+		TextPath:               attachmentRelativePath(doc, "attachment.md"),
+		ConvertedTextHash:      model.HashText(attachmentText),
+		ConvertedTextChars:     int64(len(attachmentText)),
+		ConvertedNonSpaceChars: int64(len(strings.ReplaceAll(attachmentText, " ", ""))),
+	}}
+	writeContractAttachment(t, root, doc, "attachment.md", attachmentText)
+	path := writeContractMarkdown(t, root, doc, true)
+	frontmatter, err := readFrontmatterMapping(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachments, ok := frontmatter["attachments"].([]any)
+	if !ok || len(attachments) != 1 {
+		t.Fatalf("frontmatter attachments = %#v", frontmatter["attachments"])
+	}
+	frontmatterAttachment, ok := attachments[0].(map[string]any)
+	if !ok {
+		t.Fatalf("frontmatter attachment = %#v", attachments[0])
+	}
+	frontmatterAttachment["last_refresh_error"] = "temporary upstream failure"
+	frontmatterAttachment["last_refresh_failed_at"] = "2026-07-01T00:00:00Z"
+	writeContractFrontmatterMapping(t, path, frontmatter, doc.Body)
+
+	loaded, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load legacy frontmatter: %v", err)
+	}
+	indexHash, err := IndexSourceHash(loaded.Documents, loaded.AttachmentTexts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativePath, err := filepath.Rel(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestDocument := make(map[string]any, len(frontmatter)+1)
+	for key, value := range frontmatter {
+		manifestDocument[key] = value
+	}
+	manifestDocument["path"] = filepath.ToSlash(relativePath)
+	manifestAttachment := manifestDocument["attachments"].([]any)[0].(map[string]any)
+	delete(manifestAttachment, "last_refresh_error")
+	delete(manifestAttachment, "last_refresh_failed_at")
+	payload := map[string]any{
+		"schema_version":    IndexSourceSchemaVersion,
+		"version":           "cleaned-refresh-metadata",
+		"release_profile":   map[string]any{"version": 1, "default": "strict", "allowed_failure_ids": []any{}},
+		"documents":         []any{manifestDocument},
+		"index_source_hash": indexHash,
+	}
+	refreshReleaseHash(t, payload)
+	writeManifestFixture(t, root, payload)
+
+	if _, err := LoadWithOptions(root, LoadOptions{RequireManifest: true}); err != nil {
+		t.Fatalf("LoadWithOptions old frontmatter and cleaned manifest: %v", err)
+	}
+
+	manifestAttachment["last_checked_at"] = "2026-07-02T00:00:00Z"
+	refreshReleaseHash(t, payload)
+	writeManifestFixture(t, root, payload)
+	if _, err := LoadWithOptions(root, LoadOptions{RequireManifest: true}); err == nil || !strings.Contains(err.Error(), "manifest_metadata_mismatch") {
+		t.Fatalf("non-refresh operational metadata mismatch error = %v, want manifest_metadata_mismatch", err)
+	}
+}
+
+func TestReleaseHashIgnoresRefreshFailureOperationalFieldsRecursively(t *testing.T) {
+	payload := func(refreshError, refreshFailedAt string) map[string]any {
+		return map[string]any{
+			"schema_version": IndexSourceSchemaVersion,
+			"documents": []any{
+				map[string]any{
+					"id": "rule",
+					"attachments": []any{
+						map[string]any{
+							"id":                     "attachment",
+							"status":                 "converted",
+							"last_refresh_error":     refreshError,
+							"last_refresh_failed_at": refreshFailedAt,
+						},
+					},
+				},
+			},
+			"attachment_log": []any{
+				map[string]any{
+					"id": "attachment",
+					"refresh": map[string]any{
+						"last_refresh_error":     refreshError,
+						"last_refresh_failed_at": refreshFailedAt,
+					},
+				},
+			},
+		}
+	}
+
+	first, err := releaseHash(payload("first failure", "2026-07-01T00:00:00Z"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPayload := payload("second failure", "2026-07-02T00:00:00Z")
+	second, err := releaseHash(secondPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("refresh failure fields changed release hash: %s != %s", first, second)
+	}
+
+	secondPayload["attachment_log"].([]any)[0].(map[string]any)["id"] = "different-attachment"
+	substantive, err := releaseHash(secondPayload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == substantive {
+		t.Fatalf("substantive nested field did not change release hash: %s", first)
+	}
+}
+
+func TestStrictLoadAcceptsLegacyV2RefreshFailureReleaseHash(t *testing.T) {
+	root := t.TempDir()
+	doc := contractDocument("legacy-release", "Legacy Release Rule")
+	doc.SchemaVersion = IndexSourceSchemaVersion
+	path := writeContractMarkdown(t, root, doc, true)
+	loaded, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexHash, err := IndexSourceHash(loaded.Documents, loaded.AttachmentTexts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frontmatter, err := readFrontmatterMapping(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relativePath, err := filepath.Rel(root, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestDocument := make(map[string]any, len(frontmatter)+1)
+	for key, value := range frontmatter {
+		manifestDocument[key] = value
+	}
+	manifestDocument["path"] = filepath.ToSlash(relativePath)
+	refreshRecord := map[string]any{
+		"id":                     "historical-refresh",
+		"status":                 "converted",
+		"last_refresh_error":     "temporary upstream failure",
+		"last_refresh_failed_at": "2026-07-01T00:00:00Z",
+	}
+	payload := map[string]any{
+		"schema_version":    IndexSourceSchemaVersion,
+		"version":           "legacy-v2",
+		"generated_at":      "2026-07-01T00:00:00Z",
+		"release_profile":   map[string]any{"version": 1, "default": "strict", "allowed_failure_ids": []any{}},
+		"documents":         []any{manifestDocument},
+		"attachment_log":    []any{refreshRecord},
+		"index_source_hash": indexHash,
+	}
+	legacyHash := legacyRefreshReleaseHashFixture(t, payload)
+	payload["release_hash"] = legacyHash
+	currentHash, err := releaseHash(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentHash == legacyHash {
+		t.Fatalf("current release hash still includes legacy refresh failure fields: %s", currentHash)
+	}
+	writeManifestFixture(t, root, payload)
+
+	verified, err := LoadWithOptions(root, LoadOptions{RequireManifest: true})
+	if err != nil {
+		t.Fatalf("LoadWithOptions legacy v2 release: %v", err)
+	}
+	if verified.ReleaseHash != legacyHash {
+		t.Fatalf("release hash = %q, want declared legacy hash %q", verified.ReleaseHash, legacyHash)
+	}
+
+	refreshRecord["status"] = "failed"
+	writeManifestFixture(t, root, payload)
+	if _, err := LoadWithOptions(root, LoadOptions{RequireManifest: true}); err == nil || !strings.Contains(err.Error(), "release_hash_mismatch") {
+		t.Fatalf("substantively tampered legacy release error = %v, want release_hash_mismatch", err)
+	}
+}
+
 func TestReleaseModeRequiresManifest(t *testing.T) {
 	root := t.TempDir()
 	writeContractMarkdown(t, root, contractDocument("required", "Required Manifest Rule"), true)
@@ -1141,6 +1336,26 @@ func writeContractMarkdown(t *testing.T, root string, doc model.Document, v2 boo
 	return path
 }
 
+func writeContractFrontmatterMapping(t *testing.T, path string, frontmatter map[string]any, body string) {
+	t.Helper()
+	var out bytes.Buffer
+	out.WriteString("---\n")
+	encoder := yaml.NewEncoder(&out)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(frontmatter); err != nil {
+		t.Fatal(err)
+	}
+	if err := encoder.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out.WriteString("---\n\n")
+	out.WriteString(body)
+	out.WriteString("\n")
+	if err := os.WriteFile(path, out.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func attachmentRelativePath(doc model.Document, name string) string {
 	return filepath.ToSlash(filepath.Join(doc.Language, "rules", model.Slug(doc.Title), "attachments", name))
 }
@@ -1227,4 +1442,41 @@ func refreshReleaseHash(t *testing.T, payload map[string]any) {
 		t.Fatal(err)
 	}
 	payload["release_hash"] = hash
+}
+
+func legacyRefreshReleaseHashFixture(t *testing.T, payload map[string]any) string {
+	t.Helper()
+	legacyOperationalFields := map[string]struct{}{
+		"release_hash":         {},
+		"generated_at":         {},
+		"last_checked_at":      {},
+		"source_response_hash": {},
+	}
+	var scrub func(any) any
+	scrub = func(value any) any {
+		switch typed := value.(type) {
+		case map[string]any:
+			out := make(map[string]any, len(typed))
+			for key, item := range typed {
+				if _, excluded := legacyOperationalFields[key]; excluded {
+					continue
+				}
+				out[key] = scrub(item)
+			}
+			return out
+		case []any:
+			out := make([]any, len(typed))
+			for i, item := range typed {
+				out[i] = scrub(item)
+			}
+			return out
+		default:
+			return typed
+		}
+	}
+	hash, err := canonicalJSONHash(scrub(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return hash
 }
