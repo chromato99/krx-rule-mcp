@@ -18,6 +18,9 @@ jobs:
       - name: Go tests
         run: go test ./...
 
+      - name: Go race tests
+        run: go test -race ./...
+
       - name: Go vet
         run: go vet ./...
 
@@ -30,18 +33,54 @@ jobs:
           mkdir -p "$KRX_RULE_INDEX_DIR"
           cat > "$KRX_RULE_DATA_DIR/ko/rules/sample-rule/index.md" <<'EOF'
           ---
+          schema_version: 2
           id: "sample-rule"
           title: "샘플 상장규정"
           source_url: "https://example.test/rule"
           collected_at: "2026-06-22T00:00:00Z"
-          content_hash: "sample-content-hash"
+          content_hash: "9380652c2a1c063c876a20c63fb99119320b709b07d82a7321e574bd42d25b3d"
+          body_hash: "f389bc5be819e933fa9cd354992cb6a8271f98c5f8cf7aacd64bd1b1ea7e24e5"
           document_type: "rule"
           language: "ko"
+          conversion_status: "converted"
+          searchable: true
           ---
 
           # 제1조
 
           신규상장 심사와 공시 의무에 관한 샘플 규정입니다.
+          EOF
+          cat > "$KRX_RULE_DATA_DIR/manifest.json" <<'EOF'
+          {
+            "schema_version": 2,
+            "version": "ci",
+            "generated_at": "2026-06-22T00:00:00Z",
+            "source": "ci-smoke",
+            "documents": [
+              {
+                "schema_version": 2,
+                "id": "sample-rule",
+                "title": "샘플 상장규정",
+                "source_url": "https://example.test/rule",
+                "collected_at": "2026-06-22T00:00:00Z",
+                "content_hash": "9380652c2a1c063c876a20c63fb99119320b709b07d82a7321e574bd42d25b3d",
+                "body_hash": "f389bc5be819e933fa9cd354992cb6a8271f98c5f8cf7aacd64bd1b1ea7e24e5",
+                "document_type": "rule",
+                "language": "ko",
+                "conversion_status": "converted",
+                "searchable": true,
+                "path": "ko/rules/sample-rule/index.md"
+              }
+            ],
+            "attachment_log": [],
+            "index_source_hash": "b816c72c6e68c5e60f416c4e6aa71cd0172780ad4610b43c879c2d6a4587c208",
+            "release_profile": {
+              "version": 1,
+              "default": "strict",
+              "allowed_failure_ids": []
+            },
+            "release_hash": "674d7f47b98101626064e812202887b517f938997b8d7f4280d8a581daf990ac"
+          }
           EOF
           go run ./cmd/krx-rule-index \
             --data-dir "$KRX_RULE_DATA_DIR" \
@@ -58,7 +97,7 @@ jobs:
             --index-dir "$KRX_RULE_INDEX_DIR" &
           pid=$!
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:18080/healthz; then
+            if curl -fsS http://127.0.0.1:18080/healthz && curl -fsS http://127.0.0.1:18080/readyz; then
               kill "$pid"
               wait "$pid" || true
               exit 0
@@ -73,6 +112,7 @@ jobs:
         env:
           KRX_RULE_DATA_DIR: /opt/krx-rule-data
           KRX_RULE_INDEX_DIR: /opt/krx-rule-index
+          KRX_MCP_BEARER_TOKEN: ci-token
         run: docker compose config
 
       - name: Docker build

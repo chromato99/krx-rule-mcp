@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "generation_id": "f8d6dd7264565bd07b4df6b0c45bdf9219808db2b1f949c939e65ab6a995f41a",
+  "created_at": "2026-07-10T15:50:22.619908551Z",
+  "corpus_release_hash": "caefd9850192ebbd27e8804ac515f70d552d0a98086c089db1f97b051518f6d6",
+  "index_source_hash": "ac5136d2743f22e5bd08295492d64ff34ab99ecf78111c4424266d40de8aa77a",
+  "index_build_hash": "8b4aba264124c0fedb39587908445f19298893ba5e2452503e53396f929192e8",
+  "bm25": {
+    "file": "bm25.krxidx",
+    "sha256": "f52a50b05f8a55843a54deeaf2ceb199b6226ca2d79ea979baf4b54baa57f598",
+    "size": 11460254
+  }
+}

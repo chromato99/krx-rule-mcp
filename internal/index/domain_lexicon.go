@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	defaultconfig "github.com/chromato99/krx-rule-mcp/config"
+	"github.com/chromato99/krx-rule-mcp/internal/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,10 +71,18 @@ func (e DomainQueryExpansion) TokenWeights(expansionWeight float64) map[string]f
 }
 
 func LoadDomainLexicon(path string) ([]DomainLexiconEntry, error) {
+	entries, _, err := LoadDomainLexiconWithDigest(path)
+	return entries, err
+}
+
+// LoadDomainLexiconWithDigest returns the SHA-256 digest of the exact YAML
+// bytes parsed, including the embedded fallback when the default file is not
+// present.
+func LoadDomainLexiconWithDigest(path string) ([]DomainLexiconEntry, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if strings.TrimSpace(path) != "" && path != DefaultDomainLexiconPath {
-			return nil, fmt.Errorf("read domain lexicon %q: %w", path, err)
+			return nil, "", fmt.Errorf("read domain lexicon %q: %w", path, err)
 		}
 		data = defaultconfig.DomainLexiconYAML
 	}
@@ -81,19 +90,19 @@ func LoadDomainLexicon(path string) ([]DomainLexiconEntry, error) {
 		Entries []DomainLexiconEntry `yaml:"entries"`
 	}
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("parse domain lexicon %q: %w", path, err)
+		return nil, "", fmt.Errorf("parse domain lexicon %q: %w", path, err)
 	}
 	entries := doc.Entries
 	if len(entries) == 0 {
 		if err := yaml.Unmarshal(data, &entries); err != nil {
-			return nil, fmt.Errorf("parse domain lexicon %q as entry list: %w", path, err)
+			return nil, "", fmt.Errorf("parse domain lexicon %q as entry list: %w", path, err)
 		}
 	}
 	entries, err = normalizeDomainLexicon(entries)
 	if err != nil {
-		return nil, fmt.Errorf("validate domain lexicon %q: %w", path, err)
+		return nil, "", fmt.Errorf("validate domain lexicon %q: %w", path, err)
 	}
-	return entries, nil
+	return entries, model.HashBytes(data), nil
 }
 
 func ExpandDomainQueryWithLexicon(query string, entries []DomainLexiconEntry) DomainQueryExpansion {

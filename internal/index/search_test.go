@@ -1,6 +1,7 @@
 package index
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +97,54 @@ func TestVectorRRF(t *testing.T) {
 	}
 	if results[0].BM25Score == 0 || results[0].VectorScore == 0 {
 		t.Fatalf("expected both scores: %#v", results[0])
+	}
+}
+
+func TestInvalidQueryVectorFallsBackToBM25(t *testing.T) {
+	doc := model.Document{ID: "a", Title: "상장규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "상장 심사"}
+	engine := BuildWithAttachments([]model.Document{doc}, nil, map[string][]float64{"a#0": {1, 0}})
+	tests := []struct {
+		name   string
+		vector []float64
+	}{
+		{name: "wrong dimensions", vector: []float64{1}},
+		{name: "nan", vector: []float64{math.NaN(), 0}},
+		{name: "infinity", vector: []float64{math.Inf(1), 0}},
+		{name: "float32 overflow", vector: []float64{math.MaxFloat64, 0}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			results := engine.Search(SearchOptions{Query: "상장", QueryVector: tc.vector, Limit: 1})
+			if len(results) != 1 || results[0].ID != doc.ID {
+				t.Fatalf("BM25 fallback results = %#v", results)
+			}
+			if results[0].VectorScore != 0 || results[0].BM25Score == 0 {
+				t.Fatalf("invalid query vector was reported as vector search: %#v", results[0])
+			}
+		})
+	}
+}
+
+func TestAssetReferencesKeepAltAndAnchorButNotLocalTarget(t *testing.T) {
+	doc := model.Document{
+		ID: "asset-rule", Title: "자산 규정", DocumentType: model.DocumentTypeRule, Language: model.LanguageKorean,
+		Body: "제1조\n\n![위험도표](assets/supersecretlocalpath.png)",
+		Assets: []model.Asset{{
+			ID: "asset-chart", SourceAnchor: "hwp:BinData/BIN0001.png",
+			ReferencePath: "assets/supersecretlocalpath.png",
+		}},
+	}
+	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
+	if results := engine.Search(SearchOptions{Query: "supersecretlocalpath", Limit: 5}); len(results) != 0 {
+		t.Fatalf("local asset target was indexed: %#v", results)
+	}
+	results := engine.Search(SearchOptions{Query: "위험도표 BIN0001", Limit: 5})
+	if len(results) != 1 || results[0].ID != doc.ID {
+		t.Fatalf("asset alt/source anchor was not indexed: %#v", results)
+	}
+	_, chunks, ok := engine.ContextAround(results[0].MatchedChunkID, 0, 0)
+	if !ok || len(chunks) != 1 || strings.Contains(chunks[0].Text, "supersecretlocalpath") || !strings.Contains(chunks[0].Text, "hwp:BinData/BIN0001.png") {
+		t.Fatalf("asset search chunk = %#v", chunks)
 	}
 }
 
@@ -276,32 +325,134 @@ func TestChunkTextSplitsHTMLTablesOnRowsAndRepeatsHeader(t *testing.T) {
 	}
 }
 
-func TestSearchResultIncludesArticleRange(t *testing.T) {
+func TestStructuredChunksPreserveOwningArticleAndHeadingPath(t *testing.T) {
 	doc := model.Document{
-		ID:           "rule-article",
-		Title:        "상장규정",
+		ID:           "rule-structure",
+		Title:        "구조 규정",
 		CollectedAt:  time.Now(),
 		DocumentType: model.DocumentTypeRule,
-		Body:         "제1조(목적) 상장 심사\n\n제2조(정의) 신규상장",
+		Body: strings.Join([]string{
+			"제1장 총칙",
+			"",
+			"제1절 목적",
+			"",
+			"**제1조(목적)**① 구조 경계를 검증한다.",
+			"",
+			"1. 첫 번째 요건",
+			"",
+			"가. 세부 소유 조문",
+			"",
+			"제99조(외부조문)에 따른 인용표현은 새 소유 조문이 아니다.",
+			"",
+			"**제2조(정의)** 정의 조문",
+		}, "\n"),
 	}
 	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
-	results := engine.Search(SearchOptions{Query: "신규상장", Limit: 1})
-	if len(results) != 1 || results[0].ArticleRange != "제1조(목적)~제2조(정의)" {
-		t.Fatalf("unexpected article range: %#v", results)
+	results := engine.Search(SearchOptions{Query: "세부 소유", Limit: 1})
+	wantPath := []string{"제1장 총칙", "제1절 목적", "제1조(목적)", "①", "1.", "가."}
+	if len(results) != 1 || results[0].ArticleID != "제1조" || !stringSlicesEqual(results[0].HeadingPath, wantPath) {
+		t.Fatalf("unexpected structural anchor: %#v", results)
+	}
+	results = engine.Search(SearchOptions{Query: "인용표현", Limit: 1})
+	if len(results) != 1 || results[0].ArticleID != "제1조" {
+		t.Fatalf("cited article became owning article: %#v", results)
+	}
+	results = engine.Search(SearchOptions{Query: "정의 조문", Limit: 1})
+	if len(results) != 1 || results[0].ArticleID != "제2조" {
+		t.Fatalf("new owning article was not detected: %#v", results)
+	}
+}
+
+func TestChunkTextKeepsHWPEquationMathPairAtomic(t *testing.T) {
+	text := strings.Join([]string{
+		"## HWP 수식",
+		"",
+		"### 수식 1",
+		"",
+		"수식 1 원본(HWP EqEdit):",
+		"```hwp-equation",
+		"A = " + strings.Repeat("x", 80),
+		"```",
+		"",
+		"수식 1 LaTeX(best-effort):",
+		"```math",
+		"A = " + strings.Repeat("y", 80),
+		"```",
+	}, "\n")
+	chunks := ChunkTextWithAnchors(text, 40)
+	paired := 0
+	for _, chunk := range chunks {
+		hasSource := strings.Contains(chunk.Text, "```hwp-equation")
+		hasMath := strings.Contains(chunk.Text, "```math")
+		if hasSource != hasMath {
+			t.Fatalf("equation pair was split: %#v", chunks)
+		}
+		if hasSource {
+			paired++
+			if !strings.Contains(chunk.Text, "수식 1 원본(HWP EqEdit):") || !strings.Contains(chunk.Text, "수식 1 LaTeX(best-effort):") {
+				t.Fatalf("producer equation labels were not kept with the pair: %q", chunk.Text)
+			}
+			if runeLen(chunk.Text) <= 40 {
+				t.Fatalf("test pair should exercise the oversized atomic policy: %q", chunk.Text)
+			}
+			if !stringSlicesEqual(chunk.HeadingPath, []string{"HWP 수식", "수식 1"}) {
+				t.Fatalf("equation heading path = %#v", chunk.HeadingPath)
+			}
+		}
+	}
+	if paired != 1 {
+		t.Fatalf("paired equation chunks = %d, want 1: %#v", paired, chunks)
+	}
+}
+
+func TestOversizedTableRowsRemainAtomic(t *testing.T) {
+	longCell := strings.Repeat("초과행", 40)
+	tests := []struct {
+		name string
+		text string
+		row  string
+	}{
+		{
+			name: "markdown",
+			text: "| 구분 | 값 |\n| --- | --- |\n| A | " + longCell + " |\n| B | 짧은행 |",
+			row:  "| A | " + longCell + " |",
+		},
+		{
+			name: "html",
+			text: "<table>\n<tr><th>구분</th><th>값</th></tr>\n<tr><td>A</td><td>" + longCell + "</td></tr>\n<tr><td>B</td><td>짧은행</td></tr>\n</table>",
+			row:  "<tr><td>A</td><td>" + longCell + "</td></tr>",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			chunks := ChunkText(tc.text, 80)
+			owners := 0
+			for _, chunk := range chunks {
+				if strings.Contains(chunk, tc.row) {
+					owners++
+					if runeLen(chunk) <= 80 {
+						t.Fatalf("oversized row policy was not exercised: %q", chunk)
+					}
+				}
+			}
+			if owners != 1 {
+				t.Fatalf("oversized row was split or duplicated: %#v", chunks)
+			}
+		})
 	}
 }
 
 func TestBuildSnapshotUsesCurrentIndexVersion(t *testing.T) {
 	root := t.TempDir()
-	writeFixtureMarkdown(t, root, "rules/ko/test.md", `---
-id: test-rule
-title: 테스트 규정
-document_type: rule
-language: ko
-content_hash: sha256:test
----
-증거금 증거금 증거금
-`)
+	writeIndexTestDocument(t, root, model.Document{
+		ID:           "test-rule",
+		Title:        "테스트 규정",
+		SourceURL:    "https://example.test/rule",
+		CollectedAt:  time.Now().UTC(),
+		DocumentType: model.DocumentTypeRule,
+		Language:     model.LanguageKorean,
+		Body:         "증거금 증거금 증거금",
+	})
 
 	snap, _, err := BuildSnapshot(root)
 	if err != nil {

@@ -1,12 +1,14 @@
 # Search
 
-## Repository-Provided Snapshots
+## Published index generations
 
-The source repository includes default search snapshots under root-level `index/`:
+Indexes are published as immutable, content-addressed generations under the configured index directory:
 
-- `index/bm25.krxidx`: required BM25 snapshot.
-- `index/vectors.krxvec`: optional vector snapshot.
-- `index/vectors.krxvec.meta.json`: vector metadata sidecar.
+- `index/current`: the lowercase SHA-256 ID of the active generation.
+- `index/generations/<id>/generation.json`: artifact names, sizes, SHA-256 digests, corpus release hash, and index source/build hashes.
+- `index/generations/<id>/bm25.krxidx`: required BM25 snapshot.
+- `index/generations/<id>/vectors.krxvec`: optional vector snapshot.
+- `index/generations/<id>/vectors.krxvec.meta.json`: optional vector metadata sidecar.
 
 These files are generated from the maintained `krx-rule-markdown/data` corpus with the default E5 embedding settings:
 
@@ -17,7 +19,7 @@ These files are generated from the maintained `krx-rule-markdown/data` corpus wi
 | Document prefix | `passage: ` |
 | Query prefix | `query: ` |
 
-They are convenient for a source checkout or local Compose run when the mounted corpus matches the snapshot corpus hash.
+`krx-rule-index` requires the producer's strict schema-v2 `manifest.json`. It verifies manifest/document parity and both `index_source_hash` and `release_hash` before building. A non-blocking single-writer lock prevents concurrent publishers. BM25, vector, metadata, and `generation.json` are completed and validated in a sibling staging directory before `current` is replaced atomically, so a failed or killed build leaves the previous generation selected.
 
 Check the bundled snapshots before serving:
 
@@ -29,7 +31,7 @@ go run ./cmd/krx-rule-index \
   --check
 ```
 
-If the check reports stale or missing snapshots, rebuild them. BM25 must match the corpus for the server to start; stale or incompatible vector snapshots are ignored and the server falls back to BM25.
+If the check reports a stale, missing, or invalid generation, rebuild it. The server resolves `current` once, verifies every artifact against `generation.json`, and then loads only that immutable generation. Required-vector mode rejects a generation without a complete compatible vector companion.
 
 ## BM25
 
@@ -44,10 +46,7 @@ go run ./cmd/krx-rule-index \
   --index-dir "$KRX_RULE_INDEX_DIR"
 ```
 
-Freshness is based on the corpus hash, not file mtimes. The hash includes document `content_hash` and each attachment's `id`, `status`, `text_path`, and `content_hash`.
-It also includes language/source metadata so adding or changing English full-text documents invalidates stale snapshots.
-The default BM25 snapshot path is `$KRX_RULE_INDEX_DIR/bm25.krxidx`.
-For the repository-provided default snapshot, set `KRX_RULE_INDEX_DIR` to the checkout's `index/` directory.
+Freshness is based on the verified corpus release hash plus deterministic index source/build hashes, not file mtimes. The index source contract includes searchable document and attachment content and retrieval-relevant metadata; the build hash additionally binds the tokenizer/chunker/indexer version. `--index` remains a compatibility way to select the directory by naming `<dir>/bm25.krxidx`, but the CLI never writes that flat path: it publishes beneath `<dir>/generations/` and updates `<dir>/current`.
 
 Useful flags:
 
@@ -56,8 +55,25 @@ Useful flags:
 
 The tokenizer extracts Korean, Latin, and numeric tokens, and adds Korean 2-gram/3-gram tokens so partial Korean phrases can match without a morphological analyzer.
 
+### Structured legal chunks
+
+Snapshot format v6 treats the 1,600-rune chunk size as a target rather than a destructive hard limit. The chunker recognizes chapter/section headings, owning article headings, and Korean 항·호·목 markers. Index-layer search results and chunk context carry:
+
+- `article_id`: the owning heading such as `제5조` or `제11조의2`.
+- `heading_path`: the ordered chapter, section, full article heading, 항, 호, and 목 path.
+
+Only a structural heading at the beginning of a block can change `article_id`. A sentence such as `제99조에 따른 ...` remains owned by the preceding article, so cited provisions are not presented as the chunk's source anchor. The former heuristic `article_range` is not serialized or populated.
+
+Semantic units are kept intact:
+
+- adjacent `hwp-equation` and `math` fenced blocks form one atomic chunk;
+- Markdown and HTML tables split only between rows and repeat their header;
+- a single table row or equation pair larger than 1,600 runes is emitted as one oversized chunk instead of being cut in the middle.
+
+The hermetic retrieval benchmark runs in ordinary Go CI and gates Recall@5, attachment hits, anchors, and filter isolation. Its clearing expectation follows the current corpus wording: `clearing settlement 최종결제가격` resolves to `파생상품시장 업무규정 시행세칙` `제5조`, rather than requiring a title containing `청산`.
+
 Converted attachments are indexed as chunks attached to their parent rule or notice. If an attachment chunk is the best match, the result returns the parent document and includes `matched_source: "attachment"` plus `attachment_matches`.
-Each search result also includes `matched_chunk_id`, `matched_chunk_index`, and, when detected for body chunks, `article_range`. Attachment matches include their own `chunk_id` and `chunk_index`. Domain lexicon expansion terms are scored with lower BM25 weight than the original query terms. Use these ids with `get_context` to fetch the exact matched chunk and neighboring chunks before writing an answer.
+Each search result includes `matched_chunk_id` and the zero-based `matched_chunk_index`. Attachment matches include their own `chunk_id` and zero-based `chunk_index`; index 0 is serialized explicitly. The public API does not expose heuristic article-range guesses. Domain lexicon expansion terms are scored with lower BM25 weight than the original query terms. Use these ids with `get_context` to fetch the exact matched chunk and neighboring chunks before writing an answer.
 
 `score`, `bm25_score`, and `vector_score` are ranking signals. They are useful for ordering and debugging retrieval, but they are not confidence probabilities.
 
@@ -111,7 +127,11 @@ RAG clients should use `search_rules` for recall and then call `get_context` for
 
 The response includes `document`, `chunks`, and combined `content`. The combined content marks each chunk with an HTML comment containing `chunk_id`, `source`, and, for attachments, `attachment_id`.
 
-Set `before_chunks` or `after_chunks` to `0` when only the target chunk is needed. `get_rule` and `get_attachment` default to a 20,000 character response cap and include `total_chars` plus `truncated`; pass `max_chars` to request more. Use `list_categories` to discover exact category strings before applying the `category` filter.
+Set `before_chunks` or `after_chunks` to `0` when only the target chunk is needed. `get_rule` and `get_attachment` default to 20,000 characters and allow at most 50,000 per call. If `truncated` is true, pass `next_offset` back as `offset`; `total_chars` is the full source length. `get_context` uses the same default and maximum cap. Resource text is also capped at 50,000 characters and reports truncation in `_meta`; use the corresponding paginated tool for continuation. Independently, serialized structured tool output is capped at 512KiB (`KRX_MCP_TOOL_OUTPUT_SIZE_LIMIT`) and the complete synchronous JSON-RPC wire response is capped at 1MiB (`KRX_MCP_RESPONSE_SIZE_LIMIT`) by default. Reduce `limit` or `max_chars` if a response would exceed either bound. List tools expose `limit`, `offset`, `total`, and `next_offset`; `list_recent_changes` defaults to 20 rows. Use `list_categories` to discover exact category strings before applying the `category` filter.
+
+Inputs are validated strictly: `query` is required and bounded, `document_type` must be `rule` or `notice`, dates must be real `YYYY-MM-DD` values in ascending range, and negative or oversized limits/offsets are rejected rather than silently coerced. Public document and attachment DTOs omit local paths and converter error strings. A verified `official_source` contains only the KRX source page, POST endpoint, whitelisted stable parameters, and source-content hash. Each source reports `searchable`; false sources are excluded from text indexing. A document or matched attachment with degraded conversion metadata carries a `quality_notice` so the warning stays attached to the exact source.
+
+Search results are discovery aids from a collected derivative snapshot. Ranking scores are not confidence probabilities, English text is not a substitute for the Korean legal text, and converted attachments may lose tables, images, or formula semantics. For current or compliance-sensitive answers, follow `source_url` and verify the effective Korean document on the official KRX portal.
 
 ## Formula-Aware Retrieval
 
@@ -161,7 +181,7 @@ If converted text looks formula-like but no preserved EqEdit block or generated 
 
 Treat `formula_text_detected` as a retrieval hint, not as confirmation that the original HWP equation was structurally preserved.
 
-After formula/table conversion code or converted attachment Markdown changes, rebuild indexes. `krx-rule-index --check` will report stale snapshots because corpus hashes include attachment metadata and content hashes.
+After formula/table conversion code or converted attachment Markdown changes, publish a new generation. `krx-rule-index --check` reports the active generation stale because corpus hashes include attachment metadata and content hashes.
 
 ## Language Filtering
 
@@ -182,8 +202,8 @@ Leave `language` empty for bilingual recall. Search results include `language` a
 Vector search is optional. It is enabled only when all of these are true:
 
 - `KRX_VECTOR_SEARCH_ENABLED=true`
-- a vector snapshot path is configured
-- the vector snapshot matches the current corpus
+- the active immutable generation contains a vector artifact and metadata
+- the vector snapshot matches the current corpus/index generation
 - vector metadata matches model, dimensions, query prefix, and document prefix
 - query embeddings can be created at runtime
 

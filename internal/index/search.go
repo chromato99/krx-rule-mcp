@@ -1,8 +1,8 @@
 package index
 
 import (
+	"fmt"
 	"math"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -45,7 +45,8 @@ type SearchResult struct {
 	MatchedSource     string               `json:"matched_source,omitempty"`
 	MatchedChunkID    string               `json:"matched_chunk_id,omitempty"`
 	MatchedChunkIndex int                  `json:"matched_chunk_index,omitempty"`
-	ArticleRange      string               `json:"article_range,omitempty"`
+	ArticleID         string               `json:"article_id,omitempty"`
+	HeadingPath       []string             `json:"heading_path,omitempty"`
 	AttachmentMatches []AttachmentMatch    `json:"attachment_matches,omitempty"`
 	FormulaNotice     *model.FormulaNotice `json:"formula_notice,omitempty"`
 	URI               string               `json:"uri"`
@@ -61,6 +62,8 @@ type AttachmentMatch struct {
 	ChunkIndex    int                    `json:"chunk_index,omitempty"`
 	Score         float64                `json:"score,omitempty"`
 	Snippet       string                 `json:"snippet,omitempty"`
+	ArticleID     string                 `json:"article_id,omitempty"`
+	HeadingPath   []string               `json:"heading_path,omitempty"`
 	FormulaNotice *model.FormulaNotice   `json:"formula_notice,omitempty"`
 }
 
@@ -74,7 +77,8 @@ type ChunkContext struct {
 	AttachmentTitle  string                 `json:"attachment_title,omitempty"`
 	AttachmentFile   string                 `json:"attachment_file,omitempty"`
 	AttachmentStatus model.AttachmentStatus `json:"attachment_status,omitempty"`
-	ArticleRange     string                 `json:"article_range,omitempty"`
+	ArticleID        string                 `json:"article_id,omitempty"`
+	HeadingPath      []string               `json:"heading_path,omitempty"`
 	Text             string                 `json:"text"`
 }
 
@@ -97,7 +101,8 @@ type chunk struct {
 	AttachmentTitle  string                 `json:"attachment_title,omitempty"`
 	AttachmentFile   string                 `json:"attachment_file,omitempty"`
 	AttachmentStatus model.AttachmentStatus `json:"attachment_status,omitempty"`
-	ArticleRange     string                 `json:"article_range,omitempty"`
+	ArticleID        string                 `json:"article_id,omitempty"`
+	HeadingPath      []string               `json:"heading_path,omitempty"`
 	Tokens           []string               `json:"tokens"`
 	Vector           []float64              `json:"vector,omitempty"`
 	tokenMap         map[string]int
@@ -113,29 +118,37 @@ func BuildWithAttachments(docs []model.Document, attachments map[string]Attachme
 	var totalLen int
 	for _, doc := range docs {
 		e.docs[doc.ID] = doc
-		parts := ChunkText(doc.Body, 1600)
-		if len(parts) == 0 {
-			parts = []string{doc.Title}
-		}
-		for i, part := range parts {
-			id := doc.ID + "#" + itoa(i)
-			c := chunk{
-				ID:           id,
-				DocID:        doc.ID,
-				Index:        i,
-				Source:       "body",
-				Text:         part,
-				Vector:       vectors[id],
-				ArticleRange: articleRange(part),
+		if doc.IsSearchable() {
+			searchBody := model.AssetSearchText(doc.Body, doc.Assets)
+			parts := ChunkTextWithAnchors(searchBody, 1600)
+			if len(parts) == 0 {
+				parts = []AnchoredChunk{{Text: doc.Title}}
 			}
-			totalLen += e.addChunk(c, doc.Title+" "+doc.Category+" "+part)
+			for i, part := range parts {
+				id := doc.ID + "#" + itoa(i)
+				c := chunk{
+					ID:          id,
+					DocID:       doc.ID,
+					Index:       i,
+					Source:      "body",
+					Text:        part.Text,
+					ArticleID:   part.ArticleID,
+					HeadingPath: append([]string(nil), part.HeadingPath...),
+					Vector:      vectors[id],
+				}
+				totalLen += e.addChunk(c, doc.Title+" "+doc.Category+" "+strings.Join(part.HeadingPath, " ")+" "+part.Text)
+			}
 		}
 		for _, att := range doc.Attachments {
+			if !att.IsSearchable() {
+				continue
+			}
 			attDoc, ok := attachments[att.ID]
 			if !ok || strings.TrimSpace(attDoc.Text) == "" {
 				continue
 			}
-			parts := ChunkText(attDoc.Text, 1600)
+			searchText := model.AssetSearchText(attDoc.Text, att.Assets)
+			parts := ChunkTextWithAnchors(searchText, 1600)
 			for i, part := range parts {
 				id := doc.ID + "#att-" + att.ID + "-" + itoa(i)
 				c := chunk{
@@ -147,10 +160,12 @@ func BuildWithAttachments(docs []model.Document, attachments map[string]Attachme
 					AttachmentTitle:  firstNonEmpty(att.Title, att.FileName),
 					AttachmentFile:   att.FileName,
 					AttachmentStatus: att.Status,
-					Text:             part,
+					Text:             part.Text,
+					ArticleID:        part.ArticleID,
+					HeadingPath:      append([]string(nil), part.HeadingPath...),
 					Vector:           vectors[id],
 				}
-				totalLen += e.addChunk(c, doc.Title+" "+doc.Category+" "+att.Title+" "+att.FileName+" "+part)
+				totalLen += e.addChunk(c, doc.Title+" "+doc.Category+" "+att.Title+" "+att.FileName+" "+strings.Join(part.HeadingPath, " ")+" "+part.Text)
 			}
 		}
 	}
@@ -381,7 +396,8 @@ func (e *Engine) bm25Scores(queryTokens []string, filter Filter, tokenWeights ma
 		res.MatchedSource = c.Source
 		res.MatchedChunkID = c.ID
 		res.MatchedChunkIndex = c.Index
-		res.ArticleRange = c.ArticleRange
+		res.ArticleID = c.ArticleID
+		res.HeadingPath = append([]string(nil), c.HeadingPath...)
 		if c.Source == "attachment" {
 			res.Snippet = "첨부 " + c.AttachmentTitle + ": " + res.Snippet
 			res.AttachmentMatches = []AttachmentMatch{attachmentMatch(c, score, res.Snippet)}
@@ -401,7 +417,7 @@ func (e *Engine) bm25Scores(queryTokens []string, filter Filter, tokenWeights ma
 
 func (e *Engine) vectorScores(queryVector []float64, filter Filter) map[string]SearchResult {
 	out := map[string]SearchResult{}
-	if len(queryVector) == 0 {
+	if !e.validQueryVector(queryVector) {
 		return out
 	}
 	for _, c := range e.chunks {
@@ -423,7 +439,8 @@ func (e *Engine) vectorScores(queryVector []float64, filter Filter) map[string]S
 		res.MatchedSource = c.Source
 		res.MatchedChunkID = c.ID
 		res.MatchedChunkIndex = c.Index
-		res.ArticleRange = c.ArticleRange
+		res.ArticleID = c.ArticleID
+		res.HeadingPath = append([]string(nil), c.HeadingPath...)
 		if c.Source == "attachment" {
 			res.Snippet = "첨부 " + c.AttachmentTitle + ": " + res.Snippet
 			res.AttachmentMatches = []AttachmentMatch{attachmentMatch(c, score, res.Snippet)}
@@ -439,6 +456,38 @@ func (e *Engine) vectorScores(queryVector []float64, filter Filter) map[string]S
 		}
 	}
 	return out
+}
+
+func (e *Engine) validQueryVector(vector []float64) bool {
+	return e.ValidateQueryVector(vector) == nil
+}
+
+// ValidateQueryVector verifies that a query vector is safe and dimensionally
+// compatible with the vectors loaded by this engine. Callers can use it to
+// reject invalid embedding responses instead of silently falling back to BM25.
+func (e *Engine) ValidateQueryVector(vector []float64) error {
+	if len(vector) == 0 {
+		return fmt.Errorf("query vector is empty")
+	}
+	expectedDimensions := 0
+	for _, chunk := range e.chunks {
+		if len(chunk.Vector) > 0 {
+			expectedDimensions = len(chunk.Vector)
+			break
+		}
+	}
+	if expectedDimensions == 0 {
+		return fmt.Errorf("engine has no loaded vectors")
+	}
+	if len(vector) != expectedDimensions {
+		return fmt.Errorf("query vector dimensions %d do not match loaded vector dimensions %d", len(vector), expectedDimensions)
+	}
+	for position, value := range vector {
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.IsInf(float64(float32(value)), 0) {
+			return fmt.Errorf("query vector value at position %d is not finite float32", position)
+		}
+	}
+	return nil
 }
 
 func (e *Engine) rankBM25(opts SearchOptions, scores map[string]SearchResult) []SearchResult {
@@ -514,15 +563,17 @@ func sameScore(a, b float64) bool {
 
 func attachmentMatch(c chunk, score float64, snippet string) AttachmentMatch {
 	return AttachmentMatch{
-		ID:         c.AttachmentID,
-		Title:      c.AttachmentTitle,
-		FileName:   c.AttachmentFile,
-		URI:        "krx-rule://attachments/" + c.AttachmentID,
-		Status:     c.AttachmentStatus,
-		ChunkID:    c.ID,
-		ChunkIndex: c.Index,
-		Score:      score,
-		Snippet:    snippet,
+		ID:          c.AttachmentID,
+		Title:       c.AttachmentTitle,
+		FileName:    c.AttachmentFile,
+		URI:         "krx-rule://attachments/" + c.AttachmentID,
+		Status:      c.AttachmentStatus,
+		ChunkID:     c.ID,
+		ChunkIndex:  c.Index,
+		Score:       score,
+		Snippet:     snippet,
+		ArticleID:   c.ArticleID,
+		HeadingPath: append([]string(nil), c.HeadingPath...),
 	}
 }
 
@@ -541,28 +592,10 @@ func chunkContext(doc model.Document, c chunk) ChunkContext {
 		AttachmentTitle:  c.AttachmentTitle,
 		AttachmentFile:   c.AttachmentFile,
 		AttachmentStatus: c.AttachmentStatus,
-		ArticleRange:     c.ArticleRange,
+		ArticleID:        c.ArticleID,
+		HeadingPath:      append([]string(nil), c.HeadingPath...),
 		Text:             c.Text,
 	}
-}
-
-var articlePattern = regexp.MustCompile(`제\s*\d+(?:의\d+)?\s*조(?:\([^)]*\))?`)
-
-func articleRange(text string) string {
-	matches := articlePattern.FindAllString(text, -1)
-	if len(matches) == 0 {
-		return ""
-	}
-	first := normalizeArticleLabel(matches[0])
-	last := normalizeArticleLabel(matches[len(matches)-1])
-	if first == last {
-		return first
-	}
-	return first + "~" + last
-}
-
-func normalizeArticleLabel(value string) string {
-	return strings.Join(strings.Fields(value), "")
 }
 
 func mergeAttachmentMatches(existing, incoming []AttachmentMatch) []AttachmentMatch {
@@ -689,6 +722,9 @@ func cosine(a, b []float64) float64 {
 	}
 	var dot, an, bn float64
 	for i := range a {
+		if math.IsNaN(a[i]) || math.IsInf(a[i], 0) || math.IsNaN(b[i]) || math.IsInf(b[i], 0) {
+			return 0
+		}
 		dot += a[i] * b[i]
 		an += a[i] * a[i]
 		bn += b[i] * b[i]
@@ -696,7 +732,11 @@ func cosine(a, b []float64) float64 {
 	if an == 0 || bn == 0 {
 		return 0
 	}
-	return dot / (math.Sqrt(an) * math.Sqrt(bn))
+	score := dot / (math.Sqrt(an) * math.Sqrt(bn))
+	if math.IsNaN(score) || math.IsInf(score, 0) {
+		return 0
+	}
+	return score
 }
 
 func mapValues(m map[string]SearchResult) []SearchResult {

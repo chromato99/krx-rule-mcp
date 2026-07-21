@@ -45,7 +45,7 @@ func TestBM25CurrentUsesCorpusHash(t *testing.T) {
 	if !bm25Current(path, snap) {
 		t.Fatal("expected BM25 index to be current")
 	}
-	snap.CorpusHash = "stale"
+	snap.IndexSourceHash = "stale"
 	if bm25Current(path, snap) {
 		t.Fatal("expected BM25 index to be stale")
 	}
@@ -122,16 +122,16 @@ func TestVectorFreshIncludesPrefixMetadata(t *testing.T) {
 		t.Fatalf("build snapshot: %v", err)
 	}
 	path := filepath.Join(root, "index", "vectors.krxvec")
-	if err := searchindex.WriteVectorSnapshot(path, snap, map[string][]float64{"rule-1#0": {1, 0}}, "test-model", 2); err != nil {
-		t.Fatalf("write vector snapshot: %v", err)
-	}
-	if err := searchindex.WriteVectorMetadata(searchindex.VectorMetadataPath(path), searchindex.VectorMetadata{
-		CorpusHash:     snap.CorpusHash,
-		Model:          "test-model",
-		Dimensions:     2,
+	vectors := map[string][]float64{"rule-1#0": {1, 0}}
+	options := searchindex.VectorWriteOptions{
+		Scope:          searchindex.VectorScopeFull,
 		QueryPrefix:    "query: ",
 		DocumentPrefix: "passage: ",
-	}); err != nil {
+	}
+	if err := searchindex.WriteVectorSnapshot(path, snap, vectors, "test-model", 2, options); err != nil {
+		t.Fatalf("write vector snapshot: %v", err)
+	}
+	if err := searchindex.WriteVectorMetadata(searchindex.VectorMetadataPath(path), searchindex.BuildVectorMetadata(snap, vectors, "test-model", 2, options)); err != nil {
 		t.Fatalf("write vector metadata: %v", err)
 	}
 	embedder := &searchindex.OpenAIEmbedder{Model: "test-model", Dimensions: 2}
@@ -192,9 +192,8 @@ func renderMainTestMarkdown(t *testing.T, doc model.Document) []byte {
 	meta.Body = ""
 	meta.Path = ""
 	meta.Language = model.NormalizeLanguage(meta.Language)
-	if meta.ContentHash == "" {
-		meta.ContentHash = model.HashText(doc.Body)
-	}
+	meta.BodyHash = model.HashText(doc.Body)
+	meta.ContentHash = model.HashText(doc.Title + "\n" + doc.Body)
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
 	enc := yaml.NewEncoder(&buf)

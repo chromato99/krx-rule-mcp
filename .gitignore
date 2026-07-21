@@ -27,6 +27,9 @@ go.work.sum
 # env file
 .env
 
+# Runtime-only index writer lock
+index/.generation-build.lock
+
 # Editor/IDE
 # .idea/
 # .vscode/
