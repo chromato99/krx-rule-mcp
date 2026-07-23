@@ -48,6 +48,7 @@ type releaseDescriptor struct {
 	DomainLexiconDigest string                   `json:"domain_lexicon_digest"`
 	RuntimeVectorMode   string                   `json:"runtime_vector_mode"`
 	ServerImageDigest   string                   `json:"server_image_digest"`
+	TEIImageDigest      string                   `json:"tei_image_digest"`
 }
 
 type vectorReleaseDescriptor struct {
@@ -75,15 +76,18 @@ type httpRuntimeConfig struct {
 	MaxConcurrentRequests int
 	RequestTimeout        time.Duration
 	ShutdownTimeout       time.Duration
+	ReadinessEmbedTimeout time.Duration
 	ExpectedGeneration    string
 	Artifacts             artifactRuntime
 	Metrics               *security.Metrics
+	Embedder              searchindex.Embedder
+	VectorRequired        bool
 }
 
 func main() {
 	var (
-		mode               = flag.String("mode", env("KRX_MCP_MODE", "stdio"), "transport mode: stdio or http")
-		addr               = flag.String("addr", env("KRX_MCP_ADDR", ":8080"), "HTTP listen address")
+		mode               = flag.String("mode", env("RULE_MCP_MODE", "stdio"), "transport mode: stdio or http")
+		addr               = flag.String("addr", env("RULE_MCP_ADDR", ":8080"), "HTTP listen address")
 		dataDir            = flag.String("data-dir", envDataDir(), "data directory")
 		indexDir           = flag.String("index-dir", envIndexDir(), "search index snapshot directory")
 		indexPath          = flag.String("index", "", "BM25/core index snapshot path")
@@ -91,18 +95,19 @@ func main() {
 		vectorPolicy       = flag.String("vector-policy", env("KRX_VECTOR_SEARCH_POLICY", "optional"), "vector runtime policy: optional or required when vector search is enabled")
 		requireVector      = flag.Bool("require-vector", envBool("KRX_REQUIRE_VECTOR"), "require a valid full-coverage vector snapshot and embedding configuration")
 		lexiconPath        = flag.String("domain-lexicon", env("KRX_DOMAIN_LEXICON_PATH", searchindex.DefaultDomainLexiconPath), "domain lexicon YAML path for query expansion")
-		token              = flag.String("token", os.Getenv("KRX_MCP_BEARER_TOKEN"), "required bearer token for HTTP mode")
-		origins            = flag.String("allowed-origins", os.Getenv("KRX_MCP_ALLOWED_ORIGINS"), "comma-separated Origin allowlist for HTTP mode")
-		requestLimit       = flag.Int64("request-size-limit", envInt64("KRX_MCP_REQUEST_SIZE_LIMIT", 1<<20), "maximum HTTP request body size in bytes")
-		responseLimit      = flag.Int64("response-size-limit", envInt64("KRX_MCP_RESPONSE_SIZE_LIMIT", 1<<20), "maximum complete HTTP MCP response body size in bytes")
-		toolOutputLimit    = flag.Int("tool-output-size-limit", envInt("KRX_MCP_TOOL_OUTPUT_SIZE_LIMIT", 512<<10), "maximum structured tool output size in bytes")
-		maxQueryRunes      = flag.Int("max-query-runes", envInt("KRX_MCP_MAX_QUERY_RUNES", 1000), "maximum search query length in characters")
-		maxSearches        = flag.Int("max-concurrent-searches", envInt("KRX_MCP_MAX_CONCURRENT_SEARCHES", 16), "maximum concurrent search and query embedding operations")
-		maxRequests        = flag.Int("max-concurrent-requests", envInt("KRX_MCP_MAX_CONCURRENT_REQUESTS", 64), "maximum concurrent HTTP MCP requests")
-		embedTimeout       = flag.Duration("embedding-timeout", envDuration("KRX_MCP_EMBEDDING_TIMEOUT", 3*time.Second), "query embedding deadline")
-		requestTimeout     = flag.Duration("request-timeout", envDuration("KRX_MCP_REQUEST_TIMEOUT", 30*time.Second), "overall HTTP MCP request deadline")
-		shutdownTimeout    = flag.Duration("shutdown-timeout", envDuration("KRX_MCP_SHUTDOWN_TIMEOUT", 15*time.Second), "HTTP graceful shutdown deadline")
-		expectedGeneration = flag.String("expected-release-generation", os.Getenv("KRX_EXPECTED_RELEASE_GENERATION"), "expected lowercase SHA-256 digest of the canonical release descriptor")
+		token              = flag.String("token", os.Getenv("RULE_MCP_BEARER_TOKEN"), "required bearer token for HTTP mode")
+		origins            = flag.String("allowed-origins", os.Getenv("RULE_MCP_ALLOWED_ORIGINS"), "comma-separated Origin allowlist for HTTP mode")
+		requestLimit       = flag.Int64("request-size-limit", envInt64("RULE_MCP_REQUEST_SIZE_LIMIT", 1<<20), "maximum HTTP request body size in bytes")
+		responseLimit      = flag.Int64("response-size-limit", envInt64("RULE_MCP_RESPONSE_SIZE_LIMIT", 1<<20), "maximum complete HTTP MCP response body size in bytes")
+		toolOutputLimit    = flag.Int("tool-output-size-limit", envInt("RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT", 512<<10), "maximum structured tool output size in bytes")
+		maxQueryRunes      = flag.Int("max-query-runes", envInt("RULE_MCP_MAX_QUERY_RUNES", 1000), "maximum search query length in characters")
+		maxSearches        = flag.Int("max-concurrent-searches", envInt("RULE_MCP_MAX_CONCURRENT_SEARCHES", 16), "maximum concurrent search and query embedding operations")
+		maxRequests        = flag.Int("max-concurrent-requests", envInt("RULE_MCP_MAX_CONCURRENT_REQUESTS", 64), "maximum concurrent HTTP MCP requests")
+		embedTimeout       = flag.Duration("embedding-timeout", envDuration("RULE_MCP_EMBEDDING_TIMEOUT", 3*time.Second), "query embedding deadline")
+		readinessTimeout   = flag.Duration("readiness-embedding-timeout", envDuration("RULE_MCP_READINESS_EMBEDDING_TIMEOUT", 5*time.Second), "required-vector readiness canary embedding deadline")
+		requestTimeout     = flag.Duration("request-timeout", envDuration("RULE_MCP_REQUEST_TIMEOUT", 30*time.Second), "overall HTTP MCP request deadline")
+		shutdownTimeout    = flag.Duration("shutdown-timeout", envDuration("RULE_MCP_SHUTDOWN_TIMEOUT", 15*time.Second), "HTTP graceful shutdown deadline")
+		expectedGeneration = flag.String("expected-release-generation", os.Getenv("RULE_MCP_EXPECTED_RELEASE_GENERATION"), "expected lowercase SHA-256 digest of the canonical release descriptor")
 		printGeneration    = flag.Bool("print-release-generation", false, "print the canonical release descriptor and generation, then exit")
 	)
 	flag.Parse()
@@ -113,7 +118,7 @@ func main() {
 			os.Exit(1)
 		}
 		*token = strings.TrimSpace(*token)
-		if *maxQueryRunes <= 0 || *maxSearches <= 0 || *maxRequests <= 0 || *requestLimit <= 0 || *toolOutputLimit <= 0 || *embedTimeout <= 0 || *requestTimeout <= 0 || *shutdownTimeout <= 0 {
+		if *maxQueryRunes <= 0 || *maxSearches <= 0 || *maxRequests <= 0 || *requestLimit <= 0 || *toolOutputLimit <= 0 || *embedTimeout <= 0 || *readinessTimeout <= 0 || *requestTimeout <= 0 || *shutdownTimeout <= 0 {
 			_, _ = fmt.Fprintln(os.Stderr, "HTTP limits and timeouts must be greater than zero")
 			os.Exit(1)
 		}
@@ -205,7 +210,13 @@ func main() {
 	if activeEmbedder != nil {
 		runtimeVectorMode = "bm25+vector"
 	}
-	artifacts, descriptor, err := inspectArtifacts(repo, lexiconDigest, runtimeVectorMode, strings.TrimSpace(os.Getenv("KRX_SERVER_IMAGE_DIGEST")))
+	artifacts, descriptor, err := inspectArtifacts(
+		repo,
+		lexiconDigest,
+		runtimeVectorMode,
+		strings.TrimSpace(os.Getenv("RULE_MCP_SERVER_IMAGE_DIGEST")),
+		strings.TrimSpace(os.Getenv("RULE_MCP_TEI_IMAGE_DIGEST")),
+	)
 	if err != nil {
 		logger.Error("inspect loaded artifacts failed", "error", err)
 		os.Exit(1)
@@ -236,6 +247,7 @@ func main() {
 	service := &mcpserver.Service{
 		Repo:               repo,
 		Embedder:           activeEmbedder,
+		VectorRequired:     vectorRequired,
 		DomainLexicon:      lexicon,
 		Logger:             logger,
 		ReleaseGeneration:  artifacts.ReleaseGeneration,
@@ -266,9 +278,12 @@ func main() {
 			MaxConcurrentRequests: *maxRequests,
 			RequestTimeout:        *requestTimeout,
 			ShutdownTimeout:       *shutdownTimeout,
+			ReadinessEmbedTimeout: *readinessTimeout,
 			ExpectedGeneration:    strings.TrimSpace(*expectedGeneration),
 			Artifacts:             artifacts,
 			Metrics:               runtimeMetrics,
+			Embedder:              activeEmbedder,
+			VectorRequired:        vectorRequired,
 		}
 		if err := runHTTP(ctx, config, server, repo, logger); err != nil {
 			logger.Error("HTTP server failed", "error", err)
@@ -447,7 +462,8 @@ func copyResponseHeaders(dst, src http.Header) {
 }
 
 func readinessHandler(config httpRuntimeConfig, repo *searchindex.Repository) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		if repo == nil || len(repo.Documents) == 0 {
 			http.Error(w, "repository not ready", http.StatusServiceUnavailable)
 			return
@@ -456,9 +472,53 @@ func readinessHandler(config httpRuntimeConfig, repo *searchindex.Repository) ht
 			http.Error(w, "loaded release generation does not match expected generation", http.StatusServiceUnavailable)
 			return
 		}
+		if config.VectorRequired {
+			if repo.Engine == nil || !repo.Engine.HasVectors() || repo.VectorScope != searchindex.VectorScopeFull || repo.VectorCoverage != 1 {
+				http.Error(w, "required full-coverage vector index is not ready", http.StatusServiceUnavailable)
+				return
+			}
+			if config.Embedder == nil {
+				http.Error(w, "required embedding service is not configured", http.StatusServiceUnavailable)
+				return
+			}
+			timeout := config.ReadinessEmbedTimeout
+			if timeout <= 0 {
+				timeout = 5 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(request.Context(), timeout)
+			vectors, err := config.Embedder.Embed(ctx, []string{"상장 규정"})
+			cancel()
+			if err != nil {
+				http.Error(w, "required embedding service is not ready", http.StatusServiceUnavailable)
+				return
+			}
+			if err := validateReadinessEmbedding(config.Embedder, repo.Engine, vectors); err != nil {
+				http.Error(w, "required embedding response is invalid", http.StatusServiceUnavailable)
+				return
+			}
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = fmt.Fprintf(w, "ready release_generation=%s\n", config.Artifacts.ReleaseGeneration)
 	})
+}
+
+func validateReadinessEmbedding(embedder searchindex.Embedder, engine *searchindex.Engine, vectors [][]float64) error {
+	if len(vectors) != 1 {
+		return fmt.Errorf("embedding canary returned %d vectors; expected 1", len(vectors))
+	}
+	if info, ok := embedder.(searchindex.EmbedderInfo); ok {
+		_, dimensions := info.EmbeddingInfo()
+		if dimensions > 0 && len(vectors[0]) != dimensions {
+			return fmt.Errorf("embedding canary dimensions=%d want=%d", len(vectors[0]), dimensions)
+		}
+	}
+	if engine == nil {
+		return fmt.Errorf("vector engine is nil")
+	}
+	if err := engine.ValidateQueryVector(vectors[0]); err != nil {
+		return fmt.Errorf("validate embedding canary: %w", err)
+	}
+	return nil
 }
 
 func env(key, fallback string) string {
@@ -497,7 +557,7 @@ func splitCSV(raw string) []string {
 	return out
 }
 
-func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtimeVectorMode, serverImageDigest string) (artifactRuntime, releaseDescriptor, error) {
+func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtimeVectorMode, serverImageDigest, teiImageDigest string) (artifactRuntime, releaseDescriptor, error) {
 	if repo == nil {
 		return artifactRuntime{}, releaseDescriptor{}, fmt.Errorf("loaded repository is nil")
 	}
@@ -561,7 +621,7 @@ func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtime
 		}
 	}
 	descriptor := releaseDescriptor{
-		Schema:              "krx-rule-mcp-release-v2",
+		Schema:              "krx-rule-mcp-release-v3",
 		CorpusReleaseHash:   repo.CorpusReleaseHash,
 		IndexSourceHash:     repo.IndexSourceHash,
 		IndexBuildHash:      repo.IndexBuildHash,
@@ -572,6 +632,7 @@ func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtime
 		DomainLexiconDigest: domainLexiconDigest,
 		RuntimeVectorMode:   runtimeVectorMode,
 		ServerImageDigest:   serverImageDigest,
+		TEIImageDigest:      teiImageDigest,
 	}
 	descriptorJSON, err := json.Marshal(descriptor)
 	if err != nil {

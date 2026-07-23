@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -103,25 +106,29 @@ func TestReleaseGenerationBindsCanonicalDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, descriptor, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-a")
+	first, descriptor, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-a", "sha256:tei-a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(indexPath); err != nil {
 		t.Fatal(err)
 	}
-	second, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-a")
+	second, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-a", "sha256:tei-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-b")
+	serverChanged, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-b", "sha256:tei-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.ReleaseGeneration != second.ReleaseGeneration || first.ReleaseGeneration == changed.ReleaseGeneration {
-		t.Fatalf("release generation is not deterministic or image-bound: first=%s second=%s changed=%s", first.ReleaseGeneration, second.ReleaseGeneration, changed.ReleaseGeneration)
+	teiChanged, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-a", "sha256:tei-b")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if descriptor.CorpusReleaseHash == "" || descriptor.CorpusReleaseHash != repo.CorpusReleaseHash || descriptor.IndexSourceHash == "" || descriptor.IndexBuildHash == "" || descriptor.DomainLexiconDigest == "" || descriptor.RuntimeVectorMode != "bm25" {
+	if first.ReleaseGeneration != second.ReleaseGeneration || first.ReleaseGeneration == serverChanged.ReleaseGeneration || first.ReleaseGeneration == teiChanged.ReleaseGeneration {
+		t.Fatalf("release generation is not deterministic or runtime-image-bound: first=%s second=%s server_changed=%s tei_changed=%s", first.ReleaseGeneration, second.ReleaseGeneration, serverChanged.ReleaseGeneration, teiChanged.ReleaseGeneration)
+	}
+	if descriptor.Schema != "krx-rule-mcp-release-v3" || descriptor.CorpusReleaseHash == "" || descriptor.CorpusReleaseHash != repo.CorpusReleaseHash || descriptor.IndexSourceHash == "" || descriptor.IndexBuildHash == "" || descriptor.DomainLexiconDigest == "" || descriptor.RuntimeVectorMode != "bm25" || descriptor.ServerImageDigest != "sha256:image-a" || descriptor.TEIImageDigest != "sha256:tei-a" {
 		t.Fatalf("canonical descriptor is incomplete: %#v", descriptor)
 	}
 }
@@ -142,6 +149,76 @@ func TestReadinessRequiresExpectedReleaseGeneration(t *testing.T) {
 	readinessHandler(config, repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "release_generation=actual") {
 		t.Fatalf("matching readiness response = %d %q", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestReadinessRequiredVectorValidatesLiveEmbedding(t *testing.T) {
+	doc := model.Document{ID: "rule-1", Title: "규정", Body: "상장 규정", DocumentType: model.DocumentTypeRule}
+	repo := &searchindex.Repository{
+		Documents:      map[string]model.Document{doc.ID: doc},
+		Engine:         searchindex.BuildWithAttachments([]model.Document{doc}, nil, map[string][]float64{"rule-1#0": {1, 0}}),
+		VectorScope:    searchindex.VectorScopeFull,
+		VectorCoverage: 1,
+	}
+	tests := []struct {
+		name     string
+		embedder searchindex.Embedder
+		want     int
+	}{
+		{name: "missing embedder", want: http.StatusServiceUnavailable},
+		{name: "connection failure", embedder: &readinessStubEmbedder{err: errors.New("connection refused"), dimensions: 2}, want: http.StatusServiceUnavailable},
+		{name: "deadline", embedder: readinessDeadlineEmbedder{dimensions: 2}, want: http.StatusServiceUnavailable},
+		{name: "invalid count", embedder: &readinessStubEmbedder{vectors: nil, dimensions: 2}, want: http.StatusServiceUnavailable},
+		{name: "reported dimensions", embedder: &readinessStubEmbedder{vectors: [][]float64{{1, 0}}, dimensions: 3}, want: http.StatusServiceUnavailable},
+		{name: "index dimensions", embedder: &readinessStubEmbedder{vectors: [][]float64{{1}}, dimensions: 1}, want: http.StatusServiceUnavailable},
+		{name: "non finite", embedder: &readinessStubEmbedder{vectors: [][]float64{{math.NaN(), 0}}, dimensions: 2}, want: http.StatusServiceUnavailable},
+		{name: "zero norm", embedder: &readinessStubEmbedder{vectors: [][]float64{{0, 0}}, dimensions: 2}, want: http.StatusServiceUnavailable},
+		{name: "healthy", embedder: &readinessStubEmbedder{vectors: [][]float64{{1, 0}}, dimensions: 2}, want: http.StatusOK},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := httpRuntimeConfig{
+				Artifacts:             artifactRuntime{ReleaseGeneration: "release"},
+				VectorRequired:        true,
+				Embedder:              test.embedder,
+				ReadinessEmbedTimeout: 2 * time.Millisecond,
+			}
+			recorder := httptest.NewRecorder()
+			readinessHandler(config, repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+			if recorder.Code != test.want {
+				t.Fatalf("readiness status = %d body=%q, want %d", recorder.Code, recorder.Body.String(), test.want)
+			}
+		})
+	}
+}
+
+func TestReadinessRequiredVectorRecoversWithEmbeddingService(t *testing.T) {
+	doc := model.Document{ID: "rule-1", Title: "규정", Body: "상장 규정", DocumentType: model.DocumentTypeRule}
+	repo := &searchindex.Repository{
+		Documents:      map[string]model.Document{doc.ID: doc},
+		Engine:         searchindex.BuildWithAttachments([]model.Document{doc}, nil, map[string][]float64{"rule-1#0": {1, 0}}),
+		VectorScope:    searchindex.VectorScopeFull,
+		VectorCoverage: 1,
+	}
+	embedder := &readinessStubEmbedder{err: errors.New("temporarily unavailable"), dimensions: 2}
+	handler := readinessHandler(httpRuntimeConfig{
+		Artifacts:             artifactRuntime{ReleaseGeneration: "release"},
+		VectorRequired:        true,
+		Embedder:              embedder,
+		ReadinessEmbedTimeout: time.Second,
+	}, repo)
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unavailable embedding readiness = %d", recorder.Code)
+	}
+	embedder.err = nil
+	embedder.vectors = [][]float64{{1, 0}}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "release_generation=release") {
+		t.Fatalf("recovered embedding readiness = %d %q", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -233,6 +310,33 @@ func TestResponseSizeLimitPreservesAllowedStatusBodyAndHeaders(t *testing.T) {
 	if recorder.Code != http.StatusCreated || recorder.Body.String() != "within-limit" || recorder.Header().Get("X-Test") != "preserved" {
 		t.Fatalf("bounded response changed allowed output: status=%d headers=%v body=%q", recorder.Code, recorder.Header(), recorder.Body.String())
 	}
+}
+
+type readinessStubEmbedder struct {
+	vectors    [][]float64
+	err        error
+	dimensions int
+}
+
+func (e *readinessStubEmbedder) Embed(context.Context, []string) ([][]float64, error) {
+	return e.vectors, e.err
+}
+
+func (e *readinessStubEmbedder) EmbeddingInfo() (string, int) {
+	return "test", e.dimensions
+}
+
+type readinessDeadlineEmbedder struct {
+	dimensions int
+}
+
+func (e readinessDeadlineEmbedder) Embed(ctx context.Context, _ []string) ([][]float64, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (e readinessDeadlineEmbedder) EmbeddingInfo() (string, int) {
+	return "test", e.dimensions
 }
 
 func writeRuntimeTestCorpusAndIndex(t *testing.T) (string, string) {

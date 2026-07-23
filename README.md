@@ -15,7 +15,7 @@
 - **RAG 문맥 재조회**: 검색 결과의 `matched_chunk_id` 또는 `attachment_matches[].chunk_id`로 `get_context`를 호출해 해당 chunk 주변 문맥만 다시 가져올 수 있습니다.
 - **원자적 index generation**: BM25와 선택적 vector/metadata를 `generations/<content-id>/`에 완성·검증한 뒤 `current` 포인터 하나만 원자 교체합니다. 중단된 build는 활성 generation을 바꾸지 않습니다.
 - **구조 anchor**: 조문 소유 관계, 항·호·목, heading path를 chunk에 저장하고 인용된 조문을 owning article로 오인하지 않습니다. 수식 원본/LaTeX pair와 table row는 분리하지 않습니다.
-- **TEI sidecar 운영**: Docker Compose 기본 구성이 Hugging Face Text Embeddings Inference sidecar를 함께 띄웁니다.
+- **TEI sidecar 운영 예시**: Docker Compose 예시는 운영자가 선택한 호환 TEI 이미지를 embeddings sidecar로 함께 띄웁니다.
 - **안전한 stateless HTTP 배포**: 서버측 MCP session을 보관하지 않으며 Bearer token, Origin allowlist, 요청·전체 응답·질의 크기 제한, 동시성 제한, deadline, rate limit, graceful shutdown을 제공합니다.
 - **배포 generation 검증**: corpus/index/vector/도메인 사전/runtime mode/server image를 묶은 canonical release descriptor의 SHA-256을 응답·로그·metrics에 기록하고 `/readyz`에서 기대값과 비교합니다.
 
@@ -102,6 +102,7 @@ docker compose up -d krx-rule-embeddings
 OPENAI_API_KEY=local \
 KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
 KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small \
+KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
 KRX_EMBEDDING_DIMENSIONS=384 \
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
@@ -130,7 +131,7 @@ go run ./cmd/krx-rule-index \
   --force
 ```
 
-TEI sidecar 자체 모델을 바꾸려면 `KRX_TEI_MODEL_ID`와 `KRX_EMBEDDING_MODEL`을 같은 모델 id로 맞추고, 해당 모델의 출력 차원으로 `KRX_EMBEDDING_DIMENSIONS`를 설정한 뒤 sidecar를 재시작하고 vector index를 다시 생성하세요. E5 계열이 아닌 모델은 모델 권장 방식에 맞춰 query/document prefix를 바꾸거나 빈 문자열로 둘 수 있습니다. Prefix도 vector metadata에 기록되므로, index 생성 때와 서버 실행 때 값이 다르면 vector snapshot은 거부됩니다.
+TEI sidecar 자체 모델을 바꾸려면 `RULE_MCP_TEI_MODEL_ID`와 `KRX_EMBEDDING_MODEL`을 같은 모델 id로 맞추고, 해당 모델의 출력 차원으로 `KRX_EMBEDDING_DIMENSIONS`를 설정한 뒤 sidecar를 재시작하고 vector index를 다시 생성하세요. E5 계열이 아닌 모델은 모델 권장 방식에 맞춰 query/document prefix를 바꾸거나 빈 문자열로 둘 수 있습니다. Prefix도 vector metadata에 기록되므로, index 생성 때와 서버 실행 때 값이 다르면 vector snapshot은 거부됩니다.
 
 ## 언어별 검색
 
@@ -211,7 +212,7 @@ go run ./cmd/krx-rule-mcp \
 HTTP:
 
 ```bash
-export KRX_MCP_BEARER_TOKEN="$(openssl rand -hex 32)"
+export RULE_MCP_BEARER_TOKEN="$(openssl rand -hex 32)"
 KRX_VECTOR_SEARCH_ENABLED=true \
 go run ./cmd/krx-rule-mcp \
   --mode http \
@@ -223,40 +224,48 @@ go run ./cmd/krx-rule-mcp \
 
 `change-me`, `REPLACE_WITH_STRONG_RANDOM_TOKEN` 같은 알려진 placeholder token은 HTTP 기동 전에 거부됩니다. HTTP transport는 stateless이므로 어느 replica로 요청이 전달되어도 서버측 session affinity가 필요하지 않습니다.
 
-Release generation을 계산하려면 운영 때와 같은 corpus/index/vector/embedding 환경과 `KRX_SERVER_IMAGE_DIGEST`를 사용해 다음을 실행합니다.
+Release generation을 계산하려면 운영 때와 같은 corpus/index/vector/embedding 환경, `RULE_MCP_SERVER_IMAGE_DIGEST`, `RULE_MCP_TEI_IMAGE_DIGEST`를 사용해 다음을 실행합니다.
 
 ```bash
-KRX_SERVER_IMAGE_DIGEST="sha256:<published-image-digest>" \
+RULE_MCP_SERVER_IMAGE_DIGEST="sha256:<published-image-digest>" \
+RULE_MCP_TEI_IMAGE_DIGEST="sha256:<tei-runtime-image-digest>" \
 go run ./cmd/krx-rule-mcp \
   --data-dir "$KRX_RULE_DATA_DIR" \
   --index-dir "$KRX_RULE_INDEX_DIR" \
   --print-release-generation
 ```
 
-출력된 `release_generation`을 `KRX_EXPECTED_RELEASE_GENERATION`에 설정하면 `/readyz`는 실제 canonical descriptor와 일치하는 Pod만 ready로 처리합니다. Descriptor에는 corpus/index source·build hash, BM25 artifact digest, 채택된 vector와 metadata digest, 도메인 사전 digest, runtime vector mode, server image digest가 포함됩니다.
+출력된 `release_generation`을 `RULE_MCP_EXPECTED_RELEASE_GENERATION`에 설정하면 `/readyz`는 실제 canonical descriptor와 일치하는 Pod만 ready로 처리합니다. Descriptor에는 corpus/index source·build hash, BM25 artifact digest, 채택된 vector와 metadata digest, 도메인 사전 digest, runtime vector mode, server image digest와 TEI runtime image digest가 포함됩니다. 따라서 server 또는 TEI image만 교체해도 별도의 release generation이 생성됩니다.
 
-Vector 검색을 쓰려면 index 생성 때 `--vector-index`로 vector 포함 generation을 publish하고, 서버에 `KRX_VECTOR_SEARCH_ENABLED=true`를 지정합니다. 서버 실행에는 별도 vector 경로를 주지 않습니다. 비활성화하면 generation에 vector가 있어도 파일을 읽지 않습니다. 기본 `KRX_VECTOR_SEARCH_POLICY=optional`은 잘못된 vector/embedding 설정에서 BM25로 fallback합니다. 운영에서 vector가 필수이면 `KRX_VECTOR_SEARCH_POLICY=required` 또는 `--require-vector`를 사용하며, 이때 full coverage와 올바른 embedding 설정이 없으면 기동을 실패합니다.
+Vector 검색을 쓰려면 index 생성 때 `--vector-index`로 vector 포함 generation을 publish하고, 서버에 `KRX_VECTOR_SEARCH_ENABLED=true`를 지정합니다. 서버 실행에는 별도 vector 경로를 주지 않습니다. 비활성화하면 generation에 vector가 있어도 파일을 읽지 않습니다. `KRX_VECTOR_SEARCH_POLICY=optional`은 잘못된 vector/embedding 설정에서 BM25로 fallback합니다. 운영에서 vector가 필수이면 `KRX_VECTOR_SEARCH_POLICY=required` 또는 `--require-vector`를 사용합니다. 이 정책은 full coverage와 embedding 설정이 없으면 기동을 실패시키고, runtime embedding 오류·timeout·잘못된 vector 응답은 BM25 결과가 아닌 MCP tool error로 반환합니다. HTTP `/readyz`도 실제 canary embedding이 유효해야 200을 반환합니다.
 
 ## Docker Compose
 
-Compose는 서버와 TEI embeddings sidecar를 띄우는 운영 런타임입니다. Corpus sync는 compose 서비스가 아니라 [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)의 단발성 작업으로 수행합니다.
+Compose는 서버와 사용자가 선택한 TEI embeddings sidecar를
+required-vector 정책으로 띄우는 운영 런타임입니다. TEI `/health`가
+성공해야 서버가 시작됩니다. `krx-rule-mcp`는 특정 TEI 이미지를
+기본값으로 선택하지 않으며, 사용자는 대상 아키텍처와 아래 embedding
+계약에 맞는 이미지를 `RULE_MCP_TEI_IMAGE`와 digest로 지정해야 합니다.
+Corpus sync는 compose 서비스가 아니라
+[`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)의
+단발성 작업으로 수행합니다.
 
 ```bash
 cp .env.compose.example .env
-vi .env  # KRX_RULE_DATA_DIR, KRX_RULE_INDEX_DIR, 강한 KRX_MCP_BEARER_TOKEN 설정
+vi .env  # data/index, token, user-selected TEI image/digest 설정
 docker compose up -d --build
 curl http://localhost:8080/healthz
 ```
 
-`KRX_RULE_DATA_DIR` host path는 컨테이너의 `/app/data:ro`로, `KRX_RULE_INDEX_DIR` host path는 `/app/index:ro`로 mount됩니다. 로컬에서 저장소 기본 generation을 쓰려면 `KRX_RULE_INDEX_DIR`를 checkout의 `krx-rule-mcp/index`로 지정할 수 있습니다. Server image는 corpus나 index를 내장하지 않으므로 volume mount가 필요합니다. 기본 host bind는 `127.0.0.1`이며 외부 공개가 필요할 때만 `KRX_MCP_BIND_ADDRESS`를 변경합니다.
+`KRX_RULE_DATA_DIR` host path는 컨테이너의 `/app/data:ro`로, `KRX_RULE_INDEX_DIR` host path는 `/app/index:ro`로 mount됩니다. 로컬에서 저장소 기본 generation을 쓰려면 `KRX_RULE_INDEX_DIR`를 checkout의 `krx-rule-mcp/index`로 지정할 수 있습니다. Server image는 corpus나 index를 내장하지 않으므로 volume mount가 필요합니다. 기본 host bind는 `127.0.0.1`이며 외부 공개가 필요할 때만 `RULE_MCP_BIND_ADDRESS`를 변경합니다.
 두 경로는 non-root 컨테이너 사용자가 읽을 수 있어야 합니다. 로컬 테스트용 임시 디렉터리를 쓸 때는 `chmod -R a+rX "$KRX_RULE_DATA_DIR" "$KRX_RULE_INDEX_DIR"`처럼 읽기 권한을 열어 주세요.
 
 ## Embeddings 설정
 
-기본 제공 vector index와 Compose 기본값:
+저장소 제공 vector index의 embedding 계약과 Compose 예시 설정:
 
 - `KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small`
-- `KRX_EMBEDDING_MODEL_REVISION=` (로컬에서는 선택; required-vector 배포에서는 immutable model commit 필수)
+- `KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3`
 - `KRX_EMBEDDING_DIMENSIONS=384`
 - `KRX_EMBEDDING_BASE_URL=http://krx-rule-embeddings:80/v1`
 - `OPENAI_API_KEY=local`
@@ -264,6 +273,13 @@ curl http://localhost:8080/healthz
 - `KRX_EMBEDDING_DOCUMENT_PREFIX=passage: `
 
 외부 OpenAI 호환 embeddings API나 다른 TEI 모델을 쓰려면 vector 포함 generation을 새 설정으로 재생성하고, 서버 실행 환경에도 같은 `KRX_EMBEDDING_*` 값을 지정하세요. Vector metadata에는 corpus/index hash, model/revision, dimensions, query/document prefix, scope와 chunk-id coverage가 기록되며 하나라도 다르면 vector 검색은 비활성화되거나 required 정책에서 기동을 실패합니다.
+
+TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
+아키텍처에서 동작하고 이 Compose의 CLI·HTTP 계약과 호환되는 이미지를
+지정하세요. 재현 가능한 배포에서는 tag가 아니라 manifest digest를
+포함한 immutable reference와 동일한 `RULE_MCP_TEI_IMAGE_DIGEST`를
+사용해야 합니다. 문서의 이미지 문자열은 형식 예시일 뿐 기본값이나
+권장 이미지가 아닙니다.
 
 ## 도메인 사전
 

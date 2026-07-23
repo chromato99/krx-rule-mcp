@@ -19,6 +19,7 @@ import (
 type Service struct {
 	Repo               *searchindex.Repository
 	Embedder           searchindex.Embedder
+	VectorRequired     bool
 	DomainLexicon      []searchindex.DomainLexiconEntry
 	Logger             *slog.Logger
 	ReleaseGeneration  string
@@ -461,7 +462,11 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	}
 	var queryVector []float64
 	queryVectorAdopted := false
-	if s.Embedder != nil && s.Repo.Engine.HasVectors() && strings.TrimSpace(searchQuery) != "" {
+	vectorAvailable := s.Embedder != nil && s.Repo != nil && s.Repo.Engine != nil && s.Repo.Engine.HasVectors()
+	if s.VectorRequired && !vectorAvailable {
+		return nil, SearchRulesOutput{}, fmt.Errorf("vector search is required but the embedder or vector index is unavailable")
+	}
+	if vectorAvailable && strings.TrimSpace(searchQuery) != "" {
 		embeddingTimeout := s.EmbeddingTimeout
 		if embeddingTimeout <= 0 {
 			embeddingTimeout = 3 * time.Second
@@ -474,12 +479,21 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 			if errors.Is(err, context.DeadlineExceeded) {
 				reason = "deadline"
 			}
+			if s.VectorRequired {
+				if s.Logger != nil {
+					s.Logger.Warn("required query embedding failed", "reason", reason, "error", err)
+				}
+				return nil, SearchRulesOutput{}, fmt.Errorf("required query embedding failed: %s", reason)
+			}
 			s.countEmbeddingFallback(reason)
 			if s.Logger != nil {
 				s.Logger.Warn("embedding query failed; falling back to BM25", "error", err)
 			}
 		} else if len(vectors) == 1 {
 			if reason := validateQueryVector(s.Embedder, s.Repo.Engine, vectors[0]); reason != "" {
+				if s.VectorRequired {
+					return nil, SearchRulesOutput{}, fmt.Errorf("required query embedding is unusable: %s", reason)
+				}
 				s.countEmbeddingFallback(reason)
 				if s.Logger != nil {
 					s.Logger.Warn("embedding query returned an unusable vector; falling back to BM25", "reason", reason)
@@ -489,6 +503,9 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 				queryVectorAdopted = true
 			}
 		} else {
+			if s.VectorRequired {
+				return nil, SearchRulesOutput{}, fmt.Errorf("required query embedding returned %d vectors; expected 1", len(vectors))
+			}
 			s.countEmbeddingFallback("invalid_vector_count")
 		}
 	}
@@ -523,10 +540,18 @@ func validateQueryVector(embedder searchindex.Embedder, engine *searchindex.Engi
 			return "query_vector_dimensions"
 		}
 	}
+	hasNonZeroFloat32 := false
 	for _, value := range vector {
-		if math.IsNaN(value) || math.IsInf(value, 0) || math.IsInf(float64(float32(value)), 0) {
+		value32 := float32(value)
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.IsInf(float64(value32), 0) {
 			return "query_vector_non_finite"
 		}
+		if value32 != 0 {
+			hasNonZeroFloat32 = true
+		}
+	}
+	if !hasNonZeroFloat32 {
+		return "query_vector_zero_norm"
 	}
 	if engine == nil || engine.ValidateQueryVector(vector) != nil {
 		return "query_vector_rejected"

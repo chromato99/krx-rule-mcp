@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -196,10 +195,8 @@ func validateEmbeddingVector(vector []float64, dimensions int) error {
 	if len(vector) != dimensions {
 		return fmt.Errorf("embedding dimensions=%d want=%d", len(vector), dimensions)
 	}
-	for _, value := range vector {
-		if math.IsNaN(value) || math.IsInf(value, 0) || math.IsInf(float64(float32(value)), 0) {
-			return fmt.Errorf("embedding contains non-finite value")
-		}
+	if err := validateFiniteNonZeroFloat32Vector(vector); err != nil {
+		return fmt.Errorf("embedding %w", err)
 	}
 	return nil
 }

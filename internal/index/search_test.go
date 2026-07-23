@@ -111,6 +111,8 @@ func TestInvalidQueryVectorFallsBackToBM25(t *testing.T) {
 		{name: "nan", vector: []float64{math.NaN(), 0}},
 		{name: "infinity", vector: []float64{math.Inf(1), 0}},
 		{name: "float32 overflow", vector: []float64{math.MaxFloat64, 0}},
+		{name: "zero norm", vector: []float64{0, 0}},
+		{name: "float32 underflow to zero", vector: []float64{math.SmallestNonzeroFloat64, 0}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -4,36 +4,41 @@ services:
       context: .
       dockerfile: deploy/docker/Dockerfile
       target: server
-    image: krx-rule-mcp:local
+    image: "${RULE_MCP_IMAGE:-krx-rule-mcp:local}"
     depends_on:
-      - krx-rule-embeddings
+      krx-rule-embeddings:
+        condition: service_healthy
+        restart: true
     ports:
-      - "${KRX_MCP_BIND_ADDRESS:-127.0.0.1}:${KRX_MCP_PORT:-8080}:8080"
+      - "${RULE_MCP_BIND_ADDRESS:-127.0.0.1}:${RULE_MCP_PORT:-8080}:8080"
     environment:
-      KRX_MCP_MODE: http
-      KRX_MCP_ADDR: ":8080"
-      KRX_MCP_BEARER_TOKEN: "${KRX_MCP_BEARER_TOKEN:?Set KRX_MCP_BEARER_TOKEN to a strong random value}"
-      KRX_MCP_ALLOWED_ORIGINS: "${KRX_MCP_ALLOWED_ORIGINS:-}"
-      KRX_EXPECTED_RELEASE_GENERATION: "${KRX_EXPECTED_RELEASE_GENERATION:-}"
-      KRX_SERVER_IMAGE_DIGEST: "${KRX_SERVER_IMAGE_DIGEST:-local-build}"
-      KRX_MCP_MAX_QUERY_RUNES: "${KRX_MCP_MAX_QUERY_RUNES:-1000}"
-      KRX_MCP_MAX_CONCURRENT_SEARCHES: "${KRX_MCP_MAX_CONCURRENT_SEARCHES:-16}"
-      KRX_MCP_MAX_CONCURRENT_REQUESTS: "${KRX_MCP_MAX_CONCURRENT_REQUESTS:-64}"
-      KRX_MCP_REQUEST_SIZE_LIMIT: "${KRX_MCP_REQUEST_SIZE_LIMIT:-1048576}"
-      KRX_MCP_RESPONSE_SIZE_LIMIT: "${KRX_MCP_RESPONSE_SIZE_LIMIT:-1048576}"
-      KRX_MCP_TOOL_OUTPUT_SIZE_LIMIT: "${KRX_MCP_TOOL_OUTPUT_SIZE_LIMIT:-524288}"
-      KRX_MCP_EMBEDDING_TIMEOUT: "${KRX_MCP_EMBEDDING_TIMEOUT:-3s}"
-      KRX_MCP_REQUEST_TIMEOUT: "${KRX_MCP_REQUEST_TIMEOUT:-30s}"
-      KRX_MCP_SHUTDOWN_TIMEOUT: "${KRX_MCP_SHUTDOWN_TIMEOUT:-15s}"
+      RULE_MCP_MODE: http
+      RULE_MCP_ADDR: ":8080"
+      RULE_MCP_BEARER_TOKEN: "${RULE_MCP_BEARER_TOKEN:?Set RULE_MCP_BEARER_TOKEN to a strong random value}"
+      RULE_MCP_ALLOWED_ORIGINS: "${RULE_MCP_ALLOWED_ORIGINS:-}"
+      RULE_MCP_EXPECTED_RELEASE_GENERATION: "${RULE_MCP_EXPECTED_RELEASE_GENERATION:-}"
+      RULE_MCP_SERVER_IMAGE_DIGEST: "${RULE_MCP_SERVER_IMAGE_DIGEST:-local-build}"
+      RULE_MCP_TEI_IMAGE_DIGEST: "${RULE_MCP_TEI_IMAGE_DIGEST:?Set the digest of the selected RULE_MCP_TEI_IMAGE}"
+      RULE_MCP_MAX_QUERY_RUNES: "${RULE_MCP_MAX_QUERY_RUNES:-1000}"
+      RULE_MCP_MAX_CONCURRENT_SEARCHES: "${RULE_MCP_MAX_CONCURRENT_SEARCHES:-4}"
+      RULE_MCP_MAX_CONCURRENT_REQUESTS: "${RULE_MCP_MAX_CONCURRENT_REQUESTS:-16}"
+      RULE_MCP_REQUEST_SIZE_LIMIT: "${RULE_MCP_REQUEST_SIZE_LIMIT:-1048576}"
+      RULE_MCP_RESPONSE_SIZE_LIMIT: "${RULE_MCP_RESPONSE_SIZE_LIMIT:-1048576}"
+      RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT: "${RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT:-524288}"
+      RULE_MCP_EMBEDDING_TIMEOUT: "${RULE_MCP_EMBEDDING_TIMEOUT:-5s}"
+      RULE_MCP_READINESS_EMBEDDING_TIMEOUT: "${RULE_MCP_READINESS_EMBEDDING_TIMEOUT:-5s}"
+      RULE_MCP_REQUEST_TIMEOUT: "${RULE_MCP_REQUEST_TIMEOUT:-40s}"
+      RULE_MCP_SHUTDOWN_TIMEOUT: "${RULE_MCP_SHUTDOWN_TIMEOUT:-45s}"
       KRX_RULE_DATA_DIR: /app/data
       KRX_RULE_INDEX_DIR: /app/index
       KRX_DOMAIN_LEXICON_PATH: "${KRX_DOMAIN_LEXICON_PATH:-/app/config/domain-lexicon.yaml}"
-      KRX_VECTOR_SEARCH_ENABLED: "${KRX_VECTOR_SEARCH_ENABLED:-true}"
-      KRX_VECTOR_SEARCH_POLICY: "${KRX_VECTOR_SEARCH_POLICY:-optional}"
+      KRX_VECTOR_SEARCH_ENABLED: "true"
+      KRX_VECTOR_SEARCH_POLICY: "required"
+      KRX_REQUIRE_VECTOR: "true"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-local}"
       KRX_EMBEDDING_BASE_URL: "${KRX_EMBEDDING_BASE_URL:-http://krx-rule-embeddings:80/v1}"
       KRX_EMBEDDING_MODEL: "${KRX_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}"
-      KRX_EMBEDDING_MODEL_REVISION: "${KRX_EMBEDDING_MODEL_REVISION:-}"
+      KRX_EMBEDDING_MODEL_REVISION: "${KRX_EMBEDDING_MODEL_REVISION:-614241f622f53c4eeff9890bdc4f31cfecc418b3}"
       KRX_EMBEDDING_DIMENSIONS: "${KRX_EMBEDDING_DIMENSIONS:-384}"
       KRX_EMBEDDING_QUERY_PREFIX: "${KRX_EMBEDDING_QUERY_PREFIX-query: }"
       KRX_EMBEDDING_DOCUMENT_PREFIX: "${KRX_EMBEDDING_DOCUMENT_PREFIX-passage: }"
@@ -45,18 +50,42 @@ services:
       - /tmp
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
     restart: unless-stopped
-    stop_grace_period: 20s
+    stop_grace_period: 50s
 
   krx-rule-embeddings:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9
+    image: "${RULE_MCP_TEI_IMAGE:?Select a TEI image compatible with this runtime}"
     command:
       - --model-id
-      - "${KRX_TEI_MODEL_ID:-intfloat/multilingual-e5-small}"
+      - "${RULE_MCP_TEI_MODEL_ID:-intfloat/multilingual-e5-small}"
+      - --revision
+      - "${KRX_EMBEDDING_MODEL_REVISION:-614241f622f53c4eeff9890bdc4f31cfecc418b3}"
+      - --tokenization-workers
+      - "${RULE_MCP_TEI_TOKENIZATION_WORKERS:-2}"
+      - --max-concurrent-requests
+      - "${RULE_MCP_TEI_MAX_CONCURRENT_REQUESTS:-8}"
+      - --max-batch-tokens
+      - "${RULE_MCP_TEI_MAX_BATCH_TOKENS:-4096}"
+    environment:
+      RAYON_NUM_THREADS: "${RULE_MCP_TEI_RAYON_NUM_THREADS:-4}"
     volumes:
       - embeddings-cache:/data
     ports:
-      - "127.0.0.1:${KRX_TEI_PORT:-18081}:80"
+      - "127.0.0.1:${RULE_MCP_TEI_PORT:-18081}:80"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:80/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
     restart: unless-stopped
 
 volumes:

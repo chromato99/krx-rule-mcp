@@ -158,8 +158,25 @@ func vectorGenerationID(snap Snapshot, vectors map[string][]float64, modelName s
 	return model.HashBytes(payload)
 }
 
-// ValidateVectorMap enforces chunk identity, dimensions, finite values, and
-// optional full coverage before vectors can be persisted or served.
+func validateFiniteNonZeroFloat32Vector(vector []float64) error {
+	hasNonZero := false
+	for position, value := range vector {
+		value32 := float32(value)
+		if math.IsNaN(value) || math.IsInf(value, 0) || math.IsInf(float64(value32), 0) {
+			return fmt.Errorf("value at position %d is not finite float32", position)
+		}
+		if value32 != 0 {
+			hasNonZero = true
+		}
+	}
+	if !hasNonZero {
+		return fmt.Errorf("has zero float32 norm")
+	}
+	return nil
+}
+
+// ValidateVectorMap enforces chunk identity, dimensions, finite non-zero
+// values, and optional full coverage before vectors can be persisted or served.
 func ValidateVectorMap(vectors map[string][]float64, expectedIDs []string, dimensions int, requireFull bool) error {
 	if dimensions <= 0 {
 		return fmt.Errorf("vector dimensions must be positive")
@@ -181,10 +198,8 @@ func ValidateVectorMap(vectors map[string][]float64, expectedIDs []string, dimen
 		if len(vector) != dimensions {
 			return fmt.Errorf("vector %q dimensions=%d want=%d", id, len(vector), dimensions)
 		}
-		for _, value := range vector {
-			if math.IsNaN(value) || math.IsInf(value, 0) || math.IsInf(float64(float32(value)), 0) {
-				return fmt.Errorf("vector %q contains non-finite value", id)
-			}
+		if err := validateFiniteNonZeroFloat32Vector(vector); err != nil {
+			return fmt.Errorf("vector %q %w", id, err)
 		}
 	}
 	if requireFull {
