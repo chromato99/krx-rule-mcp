@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -483,6 +484,45 @@ func TestSearchRulesEmbeddingDeadlineFallsBackToBM25(t *testing.T) {
 	}
 }
 
+func TestSearchRulesRequiredVectorRejectsEmbeddingFailures(t *testing.T) {
+	doc := model.Document{ID: "rule-1", Title: "규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "상장 심사"}
+	tests := []struct {
+		name     string
+		embedder searchindex.Embedder
+	}{
+		{name: "unavailable"},
+		{name: "connection error", embedder: errorEmbedder{err: errors.New("connection refused")}},
+		{name: "deadline", embedder: deadlineEmbedder{}},
+		{name: "invalid count", embedder: &stubEmbedder{vectors: nil}},
+		{name: "reported dimensions", embedder: &informedStubEmbedder{vectors: [][]float64{{1, 0}}, dimensions: 3}},
+		{name: "index dimensions", embedder: &stubEmbedder{vectors: [][]float64{{1, 0}}}},
+		{name: "non finite", embedder: &stubEmbedder{vectors: [][]float64{{math.NaN()}}}},
+		{name: "zero norm", embedder: &stubEmbedder{vectors: [][]float64{{0}}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			observer := &recordingObserver{}
+			service := &Service{
+				Repo:             testRepository(doc, map[string][]float64{"rule-1#0": {1}}),
+				Embedder:         test.embedder,
+				VectorRequired:   true,
+				EmbeddingTimeout: 5 * time.Millisecond,
+				Observer:         observer,
+			}
+			_, out, err := service.searchRules(context.Background(), &mcpsdk.CallToolRequest{}, SearchRulesInput{Query: "상장"})
+			if err == nil || !strings.Contains(err.Error(), "required") {
+				t.Fatalf("required vector failure returned output=%#v error=%v", out, err)
+			}
+			if len(out.Results) != 0 {
+				t.Fatalf("required vector failure returned BM25 results: %#v", out.Results)
+			}
+			if len(observer.fallbacks) != 0 {
+				t.Fatalf("required vector failure incremented fallback metrics: %#v", observer.fallbacks)
+			}
+		})
+	}
+}
+
 func TestSearchRulesConcurrencyIsBounded(t *testing.T) {
 	doc := model.Document{ID: "rule-1", Title: "규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "상장 심사"}
 	embedder := &controlledEmbedder{entered: make(chan struct{}), release: make(chan struct{})}
@@ -552,6 +592,7 @@ func TestSearchRulesRejectsInvalidQueryVectorsWithoutAdvertisingVectorMode(t *te
 		{name: "reported dimensions", embedder: &informedStubEmbedder{vectors: [][]float64{{1, 0}}, dimensions: 3}, wantReason: "query_vector_dimensions"},
 		{name: "index dimensions", embedder: &stubEmbedder{vectors: [][]float64{{1}}}, wantReason: "query_vector_rejected"},
 		{name: "non finite", embedder: &stubEmbedder{vectors: [][]float64{{math.NaN(), 0}}}, wantReason: "query_vector_non_finite"},
+		{name: "zero norm", embedder: &stubEmbedder{vectors: [][]float64{{0, 0}}}, wantReason: "query_vector_zero_norm"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -982,6 +1023,14 @@ type deadlineEmbedder struct{}
 func (deadlineEmbedder) Embed(ctx context.Context, _ []string) ([][]float64, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
+}
+
+type errorEmbedder struct {
+	err error
+}
+
+func (e errorEmbedder) Embed(context.Context, []string) ([][]float64, error) {
+	return nil, e.err
 }
 
 type controlledEmbedder struct {

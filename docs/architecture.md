@@ -20,7 +20,7 @@
 5. `krx-rule-mcp` resolves `current` once, reads only that immutable directory, and compares the digest of the exact decoded bytes with the descriptor. It refuses to start without a valid matching BM25 artifact.
 6. When vector search is disabled, vector files are not opened. Optional mode falls back to BM25 with a bounded reason; required mode rejects missing, sample, partial, stale, malformed, or incompatible vector data.
 7. Legal chunking records owning `article_id` and `heading_path`, keeps cited articles distinct, and treats formula pairs and table rows as atomic semantic units.
-8. At runtime, a canonical release descriptor binds corpus release, index source/build hashes, fixed artifact digests, optional vector metadata, domain lexicon, active vector mode, and server image digest. Its SHA-256 is exposed as `release_generation`; HTTP readiness optionally requires an exact configured match.
+8. At runtime, a canonical release descriptor binds corpus release, index source/build hashes, fixed artifact digests, optional vector metadata, domain lexicon, active vector mode, and the server and TEI runtime image digests. Its SHA-256 is exposed as `release_generation`; HTTP readiness optionally requires an exact configured match and, in required-vector mode, a valid live canary embedding.
 
 ## Packages
 
@@ -33,7 +33,11 @@
 
 ## Embeddings
 
-The default local deployment uses Hugging Face Text Embeddings Inference as an OpenAI-compatible sidecar. The repository-provided vector snapshot uses the same settings.
+The local deployment examples expect an operator-selected TEI image that exposes
+the compatible embeddings and health endpoints. The project does not choose,
+publish, or endorse a particular TEI image. The repository-provided vector
+snapshot records the model, revision, dimensions, and prefix settings that the
+selected runtime must match.
 
 Default settings:
 

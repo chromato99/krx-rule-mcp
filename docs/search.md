@@ -127,7 +127,7 @@ RAG clients should use `search_rules` for recall and then call `get_context` for
 
 The response includes `document`, `chunks`, and combined `content`. The combined content marks each chunk with an HTML comment containing `chunk_id`, `source`, and, for attachments, `attachment_id`.
 
-Set `before_chunks` or `after_chunks` to `0` when only the target chunk is needed. `get_rule` and `get_attachment` default to 20,000 characters and allow at most 50,000 per call. If `truncated` is true, pass `next_offset` back as `offset`; `total_chars` is the full source length. `get_context` uses the same default and maximum cap. Resource text is also capped at 50,000 characters and reports truncation in `_meta`; use the corresponding paginated tool for continuation. Independently, serialized structured tool output is capped at 512KiB (`KRX_MCP_TOOL_OUTPUT_SIZE_LIMIT`) and the complete synchronous JSON-RPC wire response is capped at 1MiB (`KRX_MCP_RESPONSE_SIZE_LIMIT`) by default. Reduce `limit` or `max_chars` if a response would exceed either bound. List tools expose `limit`, `offset`, `total`, and `next_offset`; `list_recent_changes` defaults to 20 rows. Use `list_categories` to discover exact category strings before applying the `category` filter.
+Set `before_chunks` or `after_chunks` to `0` when only the target chunk is needed. `get_rule` and `get_attachment` default to 20,000 characters and allow at most 50,000 per call. If `truncated` is true, pass `next_offset` back as `offset`; `total_chars` is the full source length. `get_context` uses the same default and maximum cap. Resource text is also capped at 50,000 characters and reports truncation in `_meta`; use the corresponding paginated tool for continuation. Independently, serialized structured tool output is capped at 512KiB (`RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT`) and the complete synchronous JSON-RPC wire response is capped at 1MiB (`RULE_MCP_RESPONSE_SIZE_LIMIT`) by default. Reduce `limit` or `max_chars` if a response would exceed either bound. List tools expose `limit`, `offset`, `total`, and `next_offset`; `list_recent_changes` defaults to 20 rows. Use `list_categories` to discover exact category strings before applying the `category` filter.
 
 Inputs are validated strictly: `query` is required and bounded, `document_type` must be `rule` or `notice`, dates must be real `YYYY-MM-DD` values in ascending range, and negative or oversized limits/offsets are rejected rather than silently coerced. Public document and attachment DTOs omit local paths and converter error strings. A verified `official_source` contains only the KRX source page, POST endpoint, whitelisted stable parameters, and source-content hash. Each source reports `searchable`; false sources are excluded from text indexing. A document or matched attachment with degraded conversion metadata carries a `quality_notice` so the warning stays attached to the exact source.
 
@@ -215,6 +215,7 @@ docker compose up -d krx-rule-embeddings
 OPENAI_API_KEY=local \
 KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
 KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small \
+KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
 KRX_EMBEDDING_DIMENSIONS=384 \
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
@@ -227,7 +228,7 @@ For a cheaper smoke test, add `--vector-sample-query "상장 심사"` and `--vec
 When using a different TEI model, set both the sidecar model and the MCP embedding model to the same id, set the correct output dimensions, then rebuild the vector snapshot:
 
 ```bash
-export KRX_TEI_MODEL_ID=BAAI/bge-m3
+export RULE_MCP_TEI_MODEL_ID=BAAI/bge-m3
 export KRX_EMBEDDING_MODEL=BAAI/bge-m3
 export KRX_EMBEDDING_DIMENSIONS=1024
 export KRX_EMBEDDING_QUERY_PREFIX=""
@@ -276,4 +277,4 @@ export KRX_EMBEDDING_QUERY_PREFIX="query: "
 export KRX_EMBEDDING_DOCUMENT_PREFIX="passage: "
 ```
 
-When both BM25 and vector scores are available, results are merged with reciprocal rank fusion. If vector search is unavailable at runtime, the server logs the reason and returns BM25 results.
+When both BM25 and vector scores are available, results are merged with reciprocal rank fusion. Under the `optional` policy, an unavailable runtime embedder is logged and the server returns BM25 results. Under the `required` policy, embedding failures and invalid vectors return a tool error and `/readyz` returns 503 until a valid canary embedding succeeds.

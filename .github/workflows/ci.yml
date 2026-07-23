@@ -112,7 +112,9 @@ jobs:
         env:
           KRX_RULE_DATA_DIR: /opt/krx-rule-data
           KRX_RULE_INDEX_DIR: /opt/krx-rule-index
-          KRX_MCP_BEARER_TOKEN: ci-token
+          RULE_MCP_BEARER_TOKEN: ci-token
+          RULE_MCP_TEI_IMAGE: registry.example/user-selected-tei@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+          RULE_MCP_TEI_IMAGE_DIGEST: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
         run: docker compose config
 
       - name: Docker build

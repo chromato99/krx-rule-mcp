@@ -24,7 +24,9 @@ spec:
             - secretRef:
                 name: krx-rule-mcp-secret
           env:
-            - name: KRX_SERVER_IMAGE_DIGEST
+            - name: RULE_MCP_SERVER_IMAGE_DIGEST
+              value: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            - name: RULE_MCP_TEI_IMAGE_DIGEST
               value: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
           ports:
             - name: http
@@ -42,6 +44,7 @@ spec:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 6
             failureThreshold: 2
           livenessProbe:
             httpGet:
@@ -63,8 +66,8 @@ spec:
             capabilities:
               drop: ["ALL"]
         - name: embeddings
-          # Replace with the exact published TEI image digest.
-          image: ghcr.io/huggingface/text-embeddings-inference@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          # Example only: select a compatible TEI image and pin its exact digest.
+          image: registry.example/user-selected-tei@sha256:0000000000000000000000000000000000000000000000000000000000000000
           imagePullPolicy: IfNotPresent
           args:
             - --model-id

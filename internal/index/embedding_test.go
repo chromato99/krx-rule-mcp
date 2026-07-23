@@ -69,6 +69,8 @@ func TestOpenAIEmbedderRejectsMalformedResponse(t *testing.T) {
 		{name: "invalid index", input: []string{"a"}, response: `{"data":[{"index":1,"embedding":[1,0]}]}`, dimensions: 2},
 		{name: "wrong dimensions", input: []string{"a"}, response: `{"data":[{"index":0,"embedding":[1]}]}`, dimensions: 2},
 		{name: "float32 overflow", input: []string{"a"}, response: `{"data":[{"index":0,"embedding":[1e100,0]}]}`, dimensions: 2},
+		{name: "zero norm", input: []string{"a"}, response: `{"data":[{"index":0,"embedding":[0,0]}]}`, dimensions: 2},
+		{name: "float32 underflow to zero", input: []string{"a"}, response: `{"data":[{"index":0,"embedding":[5e-324,0]}]}`, dimensions: 2},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -98,6 +100,8 @@ func TestEmbedSnapshotChunksRejectsInvalidVectors(t *testing.T) {
 		{name: "dimensions", chunks: []SnapshotChunk{{ID: "a", Text: "a"}}, vectors: [][]float64{{1}}},
 		{name: "nan", chunks: []SnapshotChunk{{ID: "a", Text: "a"}}, vectors: [][]float64{{math.NaN(), 0}}},
 		{name: "overflow", chunks: []SnapshotChunk{{ID: "a", Text: "a"}}, vectors: [][]float64{{1e100, 0}}},
+		{name: "zero norm", chunks: []SnapshotChunk{{ID: "a", Text: "a"}}, vectors: [][]float64{{0, 0}}},
+		{name: "float32 underflow to zero", chunks: []SnapshotChunk{{ID: "a", Text: "a"}}, vectors: [][]float64{{math.SmallestNonzeroFloat64, 0}}},
 		{name: "duplicate chunk", chunks: []SnapshotChunk{{ID: "a", Text: "a"}, {ID: "a", Text: "b"}}, vectors: [][]float64{{1, 0}, {0, 1}}},
 	}
 	for _, tc := range tests {

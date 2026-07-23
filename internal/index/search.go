@@ -482,10 +482,8 @@ func (e *Engine) ValidateQueryVector(vector []float64) error {
 	if len(vector) != expectedDimensions {
 		return fmt.Errorf("query vector dimensions %d do not match loaded vector dimensions %d", len(vector), expectedDimensions)
 	}
-	for position, value := range vector {
-		if math.IsNaN(value) || math.IsInf(value, 0) || math.IsInf(float64(float32(value)), 0) {
-			return fmt.Errorf("query vector value at position %d is not finite float32", position)
-		}
+	if err := validateFiniteNonZeroFloat32Vector(vector); err != nil {
+		return fmt.Errorf("query vector %w", err)
 	}
 	return nil
 }
