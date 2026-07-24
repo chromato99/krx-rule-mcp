@@ -77,6 +77,7 @@ Vector를 포함한 generation은 현재 관리 중인 `krx-rule-markdown/data` 
 같은 corpus와 같은 embedding 설정을 사용한다면 먼저 최신성만 확인하세요.
 
 ```bash
+KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
   --index-dir ./index \
@@ -112,7 +113,7 @@ go run ./cmd/krx-rule-index \
 
 `--vector-index`는 기존 CLI 호환을 위한 “vector 포함” 선택자입니다. 실제 BM25, vector, metadata는 지정한 index 디렉터리의 같은 immutable generation 안에 기록되며 root의 개별 파일을 차례로 덮어쓰지 않습니다.
 
-`KRX_EMBEDDING_QUERY_PREFIX` 기본값은 `query: `, `KRX_EMBEDDING_DOCUMENT_PREFIX` 기본값은 `passage: `입니다. Vector freshness는 corpus hash, model, dimensions, query/document prefix가 모두 같을 때만 최신으로 봅니다.
+`KRX_EMBEDDING_QUERY_PREFIX` 기본값은 `query: `, `KRX_EMBEDDING_DOCUMENT_PREFIX` 기본값은 `passage: `입니다. Vector freshness는 corpus hash, model과 revision, dimensions, query/document prefix가 모두 같을 때만 최신으로 봅니다.
 
 다른 embedding 모델을 쓰려면 index 생성과 서버 실행에 같은 embedding 설정을 사용해야 합니다. 예를 들어 OpenAI 호환 외부 API로 `text-embedding-3-small`을 쓰는 경우:
 
