@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	searchindex "github.com/chromato99/krx-rule-mcp/internal/index"
 	mcpserver "github.com/chromato99/krx-rule-mcp/internal/mcp"
 	"github.com/chromato99/krx-rule-mcp/internal/model"
+	"github.com/chromato99/krx-rule-mcp/internal/security"
 	"gopkg.in/yaml.v3"
 )
 
@@ -43,6 +45,55 @@ func TestSearchSlots(t *testing.T) {
 	}
 	if slots := searchSlots(3); cap(slots) != 3 {
 		t.Fatalf("slot capacity = %d", cap(slots))
+	}
+}
+
+func TestLoadHTTPAuthConfig(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "bearer-tokens.yaml")
+	tokenDigest := sha256.Sum256([]byte("test-token"))
+	data := fmt.Sprintf(`version: 1
+tokens:
+  - id: test
+    sha256: %s
+    enabled: true
+`, hex.EncodeToString(tokenDigest[:]))
+	if err := os.WriteFile(tokenFile, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	required, err := loadHTTPAuthConfig("required", tokenFile, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if required.Mode != security.AuthModeRequired || required.Registry.ActiveTokenCount() != 1 || required.Registry.Digest() == "" {
+		t.Fatalf("required auth config = %#v", required)
+	}
+
+	disabled, err := loadHTTPAuthConfig("disabled", filepath.Join(t.TempDir(), "missing.yaml"), false)
+	if err != nil {
+		t.Fatalf("disabled auth read token file: %v", err)
+	}
+	if disabled.Mode != security.AuthModeDisabled || disabled.Registry != nil {
+		t.Fatalf("disabled auth config = %#v", disabled)
+	}
+
+	for _, test := range []struct {
+		name       string
+		mode       string
+		path       string
+		legacyEnv  bool
+		wantSubstr string
+	}{
+		{name: "unknown mode", mode: "optional", path: tokenFile, wantSubstr: "auth mode"},
+		{name: "missing required file", mode: "required", wantSubstr: "bearer token file is required"},
+		{name: "legacy environment", mode: "required", path: tokenFile, legacyEnv: true, wantSubstr: "was removed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := loadHTTPAuthConfig(test.mode, test.path, test.legacyEnv)
+			if err == nil || !strings.Contains(err.Error(), test.wantSubstr) {
+				t.Fatalf("error = %v, want substring %q", err, test.wantSubstr)
+			}
+		})
 	}
 }
 
@@ -135,9 +186,20 @@ func TestReleaseGenerationBindsCanonicalDescriptor(t *testing.T) {
 
 func TestReadinessRequiresExpectedReleaseGeneration(t *testing.T) {
 	repo := &searchindex.Repository{Documents: map[string]model.Document{"rule-1": {ID: "rule-1"}}}
+	tokenFile := filepath.Join(t.TempDir(), "bearer-tokens.yaml")
+	tokenDigest := sha256.Sum256([]byte("ready-token"))
+	if err := os.WriteFile(tokenFile, []byte(fmt.Sprintf("version: 1\ntokens:\n  - id: ready\n    sha256: %s\n    enabled: true\n", hex.EncodeToString(tokenDigest[:]))), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := security.LoadBearerTokenRegistry(tokenFile)
+	if err != nil {
+		t.Fatal(err)
+	}
 	config := httpRuntimeConfig{
 		ExpectedGeneration: "expected",
 		Artifacts:          artifactRuntime{ReleaseGeneration: "actual"},
+		AuthMode:           security.AuthModeRequired,
+		TokenRegistry:      registry,
 	}
 	recorder := httptest.NewRecorder()
 	readinessHandler(config, repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -147,8 +209,28 @@ func TestReadinessRequiresExpectedReleaseGeneration(t *testing.T) {
 	config.ExpectedGeneration = "actual"
 	recorder = httptest.NewRecorder()
 	readinessHandler(config, repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "release_generation=actual") {
+	if recorder.Code != http.StatusOK ||
+		!strings.Contains(recorder.Body.String(), "release_generation=actual") ||
+		!strings.Contains(recorder.Body.String(), "auth_mode=required") ||
+		!strings.Contains(recorder.Body.String(), "auth_registry_generation="+registry.Digest()) ||
+		!strings.Contains(recorder.Body.String(), "active_bearer_tokens=1") {
 		t.Fatalf("matching readiness response = %d %q", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestReadinessReportsDisabledAuthentication(t *testing.T) {
+	repo := &searchindex.Repository{Documents: map[string]model.Document{"rule-1": {ID: "rule-1"}}}
+	config := httpRuntimeConfig{
+		Artifacts: artifactRuntime{ReleaseGeneration: "actual"},
+		AuthMode:  security.AuthModeDisabled,
+	}
+	recorder := httptest.NewRecorder()
+	readinessHandler(config, repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if recorder.Code != http.StatusOK ||
+		!strings.Contains(recorder.Body.String(), "auth_mode=disabled") ||
+		!strings.Contains(recorder.Body.String(), "auth_registry_generation=none") ||
+		!strings.Contains(recorder.Body.String(), "active_bearer_tokens=0") {
+		t.Fatalf("disabled auth readiness response = %d %q", recorder.Code, recorder.Body.String())
 	}
 }
 

@@ -21,8 +21,6 @@ spec:
           envFrom:
             - configMapRef:
                 name: krx-rule-mcp-config
-            - secretRef:
-                name: krx-rule-mcp-secret
           env:
             - name: RULE_MCP_SERVER_IMAGE_DIGEST
               value: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
@@ -37,6 +35,9 @@ spec:
               readOnly: true
             - name: rule-index
               mountPath: /app/index
+              readOnly: true
+            - name: bearer-token-registry
+              mountPath: /run/secrets/krx-rule-mcp
               readOnly: true
           readinessProbe:
             httpGet:
@@ -98,6 +99,10 @@ spec:
         - name: rule-index
           persistentVolumeClaim:
             claimName: krx-rule-index
+        - name: bearer-token-registry
+          secret:
+            secretName: krx-rule-mcp-secret
+            optional: true
         - name: embeddings-cache
           emptyDir: {}
       securityContext:

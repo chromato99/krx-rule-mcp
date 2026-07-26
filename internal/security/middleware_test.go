@@ -14,7 +14,7 @@ func TestBearerAndOrigin(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	handler := WithOriginAllowlist([]string{"https://chatgpt.com"}, WithBearerToken("secret", next))
+	handler := WithOriginAllowlist([]string{"https://chatgpt.com"}, WithBearerAuth(AuthModeRequired, newTestBearerRegistry(t, "secret"), next))
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	req.Header.Set("Origin", "https://chatgpt.com")
@@ -32,39 +32,6 @@ func TestBearerAndOrigin(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("bad origin status = %d", rec.Code)
-	}
-}
-
-func TestBearerTokenRequiresBearerScheme(t *testing.T) {
-	handler := WithBearerToken("secret", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-
-	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "secret")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("bare token status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-
-	req = httptest.NewRequest(http.MethodPost, "/mcp", nil)
-	req.Header.Set("Authorization", "bearer secret")
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("case-insensitive bearer status = %d, want %d", rec.Code, http.StatusNoContent)
-	}
-}
-
-func TestRejectsKnownPlaceholderBearerTokens(t *testing.T) {
-	for _, token := range []string{"", "change-me", "REPLACE_WITH_STRONG_RANDOM_TOKEN", "<token>"} {
-		if err := ValidateBearerToken(token); err == nil {
-			t.Fatalf("expected placeholder token %q to be rejected", token)
-		}
-	}
-	if err := ValidateBearerToken("ci-token"); err != nil {
-		t.Fatalf("test-only non-deployment token should remain usable: %v", err)
 	}
 }
 
@@ -114,7 +81,7 @@ func TestRateLimitWindowReset(t *testing.T) {
 }
 
 func TestRejectedCredentialsDoNotConsumeAuthenticatedQuota(t *testing.T) {
-	protected := WithBearerToken("strong-secret", WithRateLimit(1, time.Minute, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	protected := WithBearerAuth(AuthModeRequired, newTestBearerRegistry(t, "strong-secret"), WithRateLimit(1, time.Minute, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})))
 	for i := 0; i < 2; i++ {
@@ -206,7 +173,16 @@ func TestRequestTimeoutPropagatesContextDeadline(t *testing.T) {
 
 func TestMetricsExposeReleaseIdentity(t *testing.T) {
 	metrics := NewMetrics()
-	metrics.SetRuntimeInfo(RuntimeInfo{ReleaseGeneration: "gen", CorpusDigest: "corpus", IndexDigest: "index", RuntimeVectorMode: "bm25", VectorCoverage: 0.75})
+	metrics.SetRuntimeInfo(RuntimeInfo{
+		ReleaseGeneration:  "gen",
+		CorpusDigest:       "corpus",
+		IndexDigest:        "index",
+		RuntimeVectorMode:  "bm25",
+		VectorCoverage:     0.75,
+		AuthMode:           "required",
+		AuthRegistryDigest: "auth-digest",
+		ActiveBearerTokens: 2,
+	})
 	metrics.ObserveTool("search_rules", 25*time.Millisecond)
 	metrics.CountEmbeddingFallback("deadline")
 	rec := httptest.NewRecorder()
@@ -214,6 +190,8 @@ func TestMetricsExposeReleaseIdentity(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, `release_generation="gen"`) ||
 		!strings.Contains(body, `runtime_vector_mode="bm25"`) ||
+		!strings.Contains(body, `krx_rule_mcp_auth_info{mode="required",registry_digest="auth-digest"} 1`) ||
+		!strings.Contains(body, `krx_rule_mcp_active_bearer_tokens 2`) ||
 		!strings.Contains(body, `krx_rule_mcp_tool_calls_total{tool="search_rules"} 1`) ||
 		!strings.Contains(body, `krx_rule_mcp_embedding_fallback_total{reason="deadline"} 1`) ||
 		!strings.Contains(body, `krx_rule_mcp_vector_coverage_ratio 0.75`) {

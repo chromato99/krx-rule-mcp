@@ -1,10 +1,13 @@
 # Security
 
-HTTP MCP is designed for authenticated deployment.
+HTTP MCP defaults to authenticated deployment. Set `RULE_MCP_AUTH_MODE=required`
+or `--auth-mode required` to enforce the default explicitly. The only other
+mode is `disabled`, which must be limited to a trusted private network. There
+is no request-by-request optional mode.
 
-Required controls:
+Required public-deployment controls:
 
-- Bearer token for `/mcp`.
+- Hashed bearer-token registry for `/mcp`.
 - Origin allowlist for browser-originated requests.
 - Request body and complete serialized response size limits.
 - Query-length, request-concurrency, and search/embedding-concurrency limits.
@@ -12,21 +15,86 @@ Required controls:
 - Per-IP rate limit.
 - TLS termination at the ingress or reverse proxy.
 
-HTTP MCP is stateless: no SDK session is retained between requests, so replicas do not require sticky routing. The implementation exposes unauthenticated `/healthz`, `/readyz`, and `/metrics` for platform checks on the cluster-internal Service. The provided Ingress routes only `/mcp`; it does not publish probes or metrics. If you use another proxy, keep `/metrics` private or add separate authentication.
+Authentication mode does not change the other HTTP controls. In `disabled`
+mode the server skips only bearer validation and emits a startup warning.
+Unauthenticated `/healthz`, `/readyz`, and `/metrics` remain intended for the
+cluster-internal Service. The provided Ingress publishes only `/mcp`.
 
-Each POST uses a temporary request-scoped SDK session. Persistent GET/SSE session streams, replay/resumption, subscriptions that outlive a request, and server-to-client requests are not supported. Request-scoped notifications may still be delivered in the POST response. The current KRX tools/resources do not require the unsupported bidirectional features.
+## Bearer token registry
 
-`/readyz` returns ready only after a non-empty repository is loaded and, when configured, the actual canonical release generation equals `RULE_MCP_EXPECTED_RELEASE_GENERATION`. With required-vector policy it additionally requires a full-coverage vector index and performs a deadline-bounded live embedding canary whose count, dimensions, finite values, and index compatibility are validated. The generation descriptor binds corpus/index source and build hashes, artifact digests, optional vector metadata, domain lexicon, runtime vector mode, `RULE_MCP_SERVER_IMAGE_DIGEST`, and `RULE_MCP_TEI_IMAGE_DIGEST`. This catches partial or mixed artifact mounts, makes a TEI-only runtime upgrade a distinct generation, and removes replicas whose embedding service is unhealthy; use a blue/green Service switch when a rollout must guarantee that old and new generations are never simultaneously routed.
+Required mode loads one immutable registry snapshot at startup:
 
-Internal metrics include HTTP status counts, per-tool call count and duration sum, embedding fallback count by bounded reason, vector coverage, and release identity/digests. Labels are fixed server-controlled values; queries and document ids are never used as metric labels.
+```yaml
+version: 1
+tokens:
+  - id: chatgpt-production
+    sha256: <64-lowercase-hex-sha256-of-token>
+    enabled: true
+```
 
-The built-in rate limiter keys on `RemoteAddr`. A high coarse limiter runs before authentication to absorb obvious abuse, while the lower MCP quota runs only after a valid bearer token, so rejected credentials do not consume the authenticated bucket. Behind an ingress or reverse proxy, `RemoteAddr` may still be the proxy IP rather than the original user, so enforce user-facing identity quotas at the trusted proxy; the application does not trust client-supplied forwarding headers by itself.
+Generate a 256-bit token and hash the exact token string:
+
+```bash
+TOKEN="$(openssl rand -hex 32)"
+TOKEN_SHA256="$(printf '%s' "$TOKEN" | openssl dgst -sha256 -r | awk '{print $1}')"
+printf 'Bearer token (shown once): %s\nSHA-256: %s\n' "$TOKEN" "$TOKEN_SHA256"
+```
+
+Give `TOKEN` only to the client and put `TOKEN_SHA256` in the registry. The
+registry is strict YAML, limited to 1 MiB and 1,024 records. IDs and hashes
+must be unique, IDs must match `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`,
+`enabled` must be explicit, hashes must be 64 lowercase hexadecimal
+characters, and required mode needs at least one enabled record.
+The server hashes the presented bearer value and compares it against every
+enabled digest using constant-time comparison. It never logs token values,
+registry token IDs, stored token hashes, or Authorization headers.
+
+`RULE_MCP_BEARER_TOKEN` and `--token` have been removed. Use
+`RULE_MCP_BEARER_TOKEN_FILE` or `--bearer-token-file`; the old environment
+variable produces a migration error.
+
+The server does not watch or reload the file. To rotate credentials:
+
+1. Add the new digest as enabled, replace the mounted registry, restart every
+   server replica, and wait for readiness.
+2. Move clients to the new token.
+3. Set the old record to `enabled: false`, replace the registry again, restart
+   every replica, and wait for readiness.
+
+During a Kubernetes RollingUpdate, old Pods retain the old startup snapshot.
+Revocation is complete only after the rollout finishes. `/readyz`, startup
+logs, and internal metrics expose the authentication mode, active-token count,
+and whole-file registry digest so operators can compare replicas without
+exposing individual credential data. The authentication registry digest is
+not part of the RAG `release_generation`.
+
+## HTTP runtime
+
+HTTP MCP is stateless: no SDK session is retained between requests, so replicas
+do not require sticky routing. Each POST uses a temporary request-scoped SDK
+session. Persistent GET/SSE session streams, replay/resumption, subscriptions
+that outlive a request, and server-to-client requests are not supported.
+
+`/readyz` requires a non-empty repository and, when configured, the expected
+canonical release generation. Required-vector policy additionally checks full
+vector coverage and a deadline-bounded live embedding canary. Internal metrics
+include HTTP statuses, tool duration/counts, embedding fallback reasons, vector
+coverage, release identity, authentication mode, active-token count, and the
+registry digest. Queries, document IDs, and token IDs are not metric labels.
+
+The built-in rate limiter keys on `RemoteAddr`. A high coarse limiter runs
+before authentication. The lower MCP quota runs after a valid token in
+required mode and applies directly to requests in disabled mode. Rejected
+credentials therefore do not consume the authenticated bucket. Enforce
+user-facing identity quotas at a trusted proxy because the application does
+not trust client-supplied forwarding headers.
 
 Recommended environment variables:
 
 ```bash
 RULE_MCP_MODE=http
-RULE_MCP_BEARER_TOKEN=<strong-random-secret>
+RULE_MCP_AUTH_MODE=required
+RULE_MCP_BEARER_TOKEN_FILE=/run/secrets/krx-rule-mcp/bearer-tokens.yaml
 RULE_MCP_ALLOWED_ORIGINS=https://chat.openai.com,https://chatgpt.com
 RULE_MCP_EXPECTED_RELEASE_GENERATION=<64-character-release-generation>
 RULE_MCP_SERVER_IMAGE_DIGEST=sha256:<published-image-digest>
@@ -46,6 +114,7 @@ KRX_VECTOR_SEARCH_POLICY=required
 KRX_REQUIRE_VECTOR=true
 ```
 
-The server rejects known placeholder secrets such as `change-me` and `REPLACE_WITH_STRONG_RANDOM_TOKEN`. For public deployment, run behind TLS, generate a random bearer token, and rotate it as a secret. Avoid logging Authorization headers.
-
-The embeddings sidecar is an internal helper for vector search. Do not expose it publicly unless you intentionally operate it as an embeddings API. In Docker Compose it binds to `127.0.0.1` on the host and is reached by the MCP server over the compose network.
+For public deployment, keep authentication required, terminate TLS at the
+trusted ingress or reverse proxy, and rotate tokens after any suspected
+exposure. Do not expose the embeddings sidecar unless it is intentionally
+operated as a separate embeddings API.

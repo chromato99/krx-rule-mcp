@@ -2,7 +2,6 @@ package security
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 	"net"
 	"net/http"
@@ -30,6 +29,9 @@ type RuntimeInfo struct {
 	RuntimeVectorMode    string
 	ServerImageDigest    string
 	VectorCoverage       float64
+	AuthMode             string
+	AuthRegistryDigest   string
+	ActiveBearerTokens   int
 }
 
 func NewMetrics() *Metrics {
@@ -94,31 +96,14 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		)
 		_, _ = fmt.Fprintf(w, "krx_rule_mcp_vector_coverage_ratio %g\n", m.runtimeInfo.VectorCoverage)
 	}
-}
-
-func ValidateBearerToken(token string) error {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return fmt.Errorf("bearer token is required")
+	if m.runtimeInfo.AuthMode != "" {
+		_, _ = fmt.Fprintf(w,
+			"krx_rule_mcp_auth_info{mode=\"%s\",registry_digest=\"%s\"} 1\n",
+			prometheusLabel(m.runtimeInfo.AuthMode),
+			prometheusLabel(m.runtimeInfo.AuthRegistryDigest),
+		)
+		_, _ = fmt.Fprintf(w, "krx_rule_mcp_active_bearer_tokens %d\n", m.runtimeInfo.ActiveBearerTokens)
 	}
-	normalized := strings.ToLower(token)
-	knownPlaceholders := []string{
-		"change-me",
-		"changeme",
-		"replace-me",
-		"replace_with_strong_random_token",
-		"example-token",
-		"your-token-here",
-	}
-	for _, placeholder := range knownPlaceholders {
-		if normalized == placeholder {
-			return fmt.Errorf("bearer token uses a known placeholder value")
-		}
-	}
-	if strings.HasPrefix(normalized, "replace_with_") || strings.Contains(normalized, "<token>") {
-		return fmt.Errorf("bearer token uses a placeholder value")
-	}
-	return nil
 }
 
 func WithMetrics(metrics *Metrics, next http.Handler) http.Handler {
@@ -127,35 +112,6 @@ func WithMetrics(metrics *Metrics, next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 		metrics.Count(http.StatusText(rec.status))
 	})
-}
-
-func WithBearerToken(token string, next http.Handler) http.Handler {
-	configurationErr := ValidateBearerToken(token)
-	token = strings.TrimSpace(token)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if configurationErr != nil {
-			http.Error(w, "server bearer token is not configured", http.StatusInternalServerError)
-			return
-		}
-		got, ok := bearerToken(r.Header.Get("Authorization"))
-		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func bearerToken(header string) (string, bool) {
-	fields := strings.Fields(header)
-	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") || fields[1] == "" {
-		return "", false
-	}
-	return fields[1], true
 }
 
 func WithOriginAllowlist(allowlist []string, next http.Handler) http.Handler {

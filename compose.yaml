@@ -14,7 +14,8 @@ services:
     environment:
       RULE_MCP_MODE: http
       RULE_MCP_ADDR: ":8080"
-      RULE_MCP_BEARER_TOKEN: "${RULE_MCP_BEARER_TOKEN:?Set RULE_MCP_BEARER_TOKEN to a strong random value}"
+      RULE_MCP_AUTH_MODE: "${RULE_MCP_AUTH_MODE:-required}"
+      RULE_MCP_BEARER_TOKEN_FILE: "/run/secrets/krx-rule-mcp/bearer-tokens.yaml"
       RULE_MCP_ALLOWED_ORIGINS: "${RULE_MCP_ALLOWED_ORIGINS:-}"
       RULE_MCP_EXPECTED_RELEASE_GENERATION: "${RULE_MCP_EXPECTED_RELEASE_GENERATION:-}"
       RULE_MCP_SERVER_IMAGE_DIGEST: "${RULE_MCP_SERVER_IMAGE_DIGEST:-local-build}"
@@ -45,6 +46,7 @@ services:
     volumes:
       - "${KRX_RULE_DATA_DIR:?Set KRX_RULE_DATA_DIR to a generated krx-rule-markdown data directory}:/app/data:ro"
       - "${KRX_RULE_INDEX_DIR:?Set KRX_RULE_INDEX_DIR to a krx-rule-mcp index directory}:/app/index:ro"
+      - "${RULE_MCP_AUTH_CONFIG_DIR:?Set RULE_MCP_AUTH_CONFIG_DIR to a directory containing bearer-tokens.yaml}:/run/secrets/krx-rule-mcp:ro"
     read_only: true
     tmpfs:
       - /tmp

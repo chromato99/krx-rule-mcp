@@ -15,7 +15,7 @@ Do not start the server until `$KRX_RULE_INDEX_DIR/current` selects a generation
 
 ```bash
 cp .env.compose.example .env
-vi .env  # set data/index, token, and a user-selected TEI image/digest
+vi .env  # set data/index, auth registry directory, and a user-selected TEI image/digest
 # KRX_RULE_INDEX_DIR may point to this repository's ./index if it matches KRX_RULE_DATA_DIR.
 # Otherwise publish at least a BM25 generation before starting the server.
 # See "Manual Index Jobs" below for local and container commands.
@@ -24,8 +24,16 @@ curl http://localhost:8080/healthz
 ```
 
 `KRX_RULE_DATA_DIR` is mounted read-only at `/app/data`; `KRX_RULE_INDEX_DIR` is mounted read-only at `/app/index`. The server image does not contain corpus or index files, but it does include the default domain lexicon at `/app/config/domain-lexicon.yaml`.
-The host directories must be readable by the non-root container user. For local smoke tests with temporary directories, run `chmod -R a+rX "$KRX_RULE_DATA_DIR" "$KRX_RULE_INDEX_DIR"` after creating the corpus and indexes.
-Compose requires the bearer token instead of falling back to a known default,
+`RULE_MCP_AUTH_CONFIG_DIR` is mounted read-only at `/run/secrets/krx-rule-mcp`
+and, in the default required mode, must contain `bearer-tokens.yaml`. Create it
+with the version-1 registry format in [security.md](security.md); the actual
+bearer values remain with clients and only their SHA-256 digests are mounted.
+The host directories must be readable by the non-root container user. For local
+smoke tests with temporary directories, run
+`chmod -R a+rX "$KRX_RULE_DATA_DIR" "$KRX_RULE_INDEX_DIR" "$RULE_MCP_AUTH_CONFIG_DIR"`
+after creating them.
+
+Compose defaults `RULE_MCP_AUTH_MODE` to `required`,
 binds the MCP port to `127.0.0.1` unless `RULE_MCP_BIND_ADDRESS` is set, and
 gives the server 50 seconds to drain. It does not select a TEI image: the
 operator must provide `RULE_MCP_TEI_IMAGE` and its matching
@@ -37,7 +45,29 @@ set `RULE_MCP_IMAGE` to the GHCR manifest digest reference and set
 `RULE_MCP_EXPECTED_RELEASE_GENERATION` after calculating it to reject a
 mismatched release.
 
+To run without bearer authentication on a trusted private network, set
+`RULE_MCP_AUTH_MODE=disabled`. The authentication directory must still exist
+for the Compose bind mount, but `bearer-tokens.yaml` may be absent. All other
+HTTP controls remain enabled.
+
 HTTP request and complete JSON-RPC response bodies default to 1 MiB (`RULE_MCP_REQUEST_SIZE_LIMIT` and `RULE_MCP_RESPONSE_SIZE_LIMIT`, minimum 1024 bytes). Tool payload shaping has a separate 512 KiB default (`RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT`). The response limit covers the final wire representation after SDK serialization, not only `structuredContent`.
+
+## Bearer Token Rotation
+
+The registry is loaded once at process startup. Editing the host file alone
+does not change accepted credentials. For Compose, add or disable a registry
+record and then run:
+
+```bash
+docker compose restart krx-rule-mcp
+curl --fail http://localhost:8080/readyz
+```
+
+Add a replacement token and restart before moving clients. After every client
+uses it, set the old record to `enabled: false` and restart again. Compare the
+`auth_registry_generation` and `active_bearer_tokens` fields from `/readyz`
+after each restart. `RULE_MCP_BEARER_TOKEN` and `--token` are no longer
+supported.
 
 ## Manual Index Jobs
 
@@ -135,6 +165,11 @@ architecture and sidecar contract. In required mode, runtime embedding errors,
 timeouts, count/dimension mismatches, and non-finite vectors return a tool error
 instead of BM25 results. Optional mode remains available when running the
 binary directly for deployments that explicitly accept BM25 fallback.
+The ConfigMap also uses `RULE_MCP_AUTH_MODE=required`. The Secret key
+`bearer-tokens.yaml` is mounted as a file under
+`/run/secrets/krx-rule-mcp`; the server rejects a missing or invalid registry
+before listening. The Secret volume itself is optional only so an operator can
+set authentication mode to `disabled` without creating a dummy Secret.
 
 Before applying, update:
 
@@ -142,13 +177,13 @@ Before applying, update:
 - the operator-selected immutable TEI image and matching
   `RULE_MCP_TEI_IMAGE_DIGEST`, plus the same exact model commit in TEI
   `--revision`, `KRX_EMBEDDING_MODEL_REVISION`, and vector build settings
-- the rejected placeholder in `krx-rule-mcp-secret`
+- the rejected bearer-registry placeholder in `krx-rule-mcp-secret`
 - `RULE_MCP_EXPECTED_RELEASE_GENERATION`
 - ingress host and TLS secret
 - allowed origins
 - PVC/storage strategy for `krx-rule-data` and `krx-rule-index`
 
-The checked-in all-zero server/TEI image digests are intentionally non-deployable, and the placeholder bearer token/model revision must be replaced. This prevents an example manifest from silently becoming a production deployment. Compose may use a mutable tag for local development; any reproducible or required-vector rollout must pin its TEI image digest and model commit too.
+The checked-in all-zero server/TEI image digests are intentionally non-deployable, and the placeholder bearer registry/model revision must be replaced. This prevents an example manifest from silently becoming a production deployment. Compose may use a mutable tag for local development; any reproducible or required-vector rollout must pin its TEI image digest and model commit too.
 
 Calculate the release generation with the exact published image, mounted artifacts, vector settings, and server and TEI image digests that the Pod will use. The command does not call the embeddings endpoint; it only verifies that the configured runtime can adopt the loaded vector snapshot.
 
@@ -178,9 +213,23 @@ kubectl apply -f deploy/kubernetes/
 kubectl rollout status deployment/krx-rule-mcp
 ```
 
-`/readyz` returns 503 when the loaded descriptor differs from the configured generation. In required-vector mode it also performs a five-second canary embedding and validates the returned count, configured dimensions, finite values, and compatibility with the loaded vector index; a TEI outage therefore removes the replica from service and readiness automatically recovers with TEI. The public Ingress routes only `/mcp`; `/healthz`, `/readyz`, and `/metrics` remain available through the cluster-internal Service for probes and monitoring. For strict no-mixed-generation cutovers, deploy a second labeled Service/Deployment and switch the public route only after every new Pod is ready.
+`/readyz` returns 503 when the loaded descriptor differs from the configured generation. In required-vector mode it also performs a five-second canary embedding and validates the returned count, configured dimensions, finite values, and compatibility with the loaded vector index; a TEI outage therefore removes the replica from service and readiness automatically recovers with TEI. A successful response includes `auth_mode`, `auth_registry_generation`, and `active_bearer_tokens`; these values do not include individual token IDs or hashes. The public Ingress routes only `/mcp`; `/healthz`, `/readyz`, and `/metrics` remain available through the cluster-internal Service for probes and monitoring. For strict no-mixed-generation cutovers, deploy a second labeled Service/Deployment and switch the public route only after every new Pod is ready.
 
-After rollout, query each Pod directly through the Kubernetes API proxy instead of sampling the load-balanced Service. Every line must report the same configured generation:
+After changing `bearer-tokens.yaml`, update the Secret and restart all server
+Pods. The process intentionally does not watch mounted Secret updates:
+
+```bash
+kubectl apply -f deploy/kubernetes/secret.yaml
+kubectl rollout restart deployment/krx-rule-mcp
+kubectl rollout status deployment/krx-rule-mcp
+```
+
+Wait for rollout completion before considering an old token revoked. During
+the default RollingUpdate, an old Pod may continue accepting the previous
+startup snapshot. Follow the same add–restart–move clients–disable–restart
+sequence used by Compose.
+
+After rollout, query each Pod directly through the Kubernetes API proxy instead of sampling the load-balanced Service. Every line must report the same release and authentication registry generations:
 
 ```bash
 NAMESPACE=default

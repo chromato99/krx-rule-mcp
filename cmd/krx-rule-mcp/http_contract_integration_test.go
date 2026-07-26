@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -33,16 +34,19 @@ func TestStatelessHTTPContractChainWithPublishedGeneration(t *testing.T) {
 	}
 
 	const (
-		bearerToken = "integration-test-token"
-		responseCap = int64(64 << 10)
+		bearerToken       = "integration-test-token"
+		secondBearerToken = "integration-second-token"
+		responseCap       = int64(64 << 10)
 	)
 	server := mcpserver.NewServer(&mcpserver.Service{
 		Repo:               repo,
 		ReleaseGeneration:  repo.GenerationID,
 		MaxToolOutputBytes: 32 << 10,
 	}, "test")
-	handler := security.WithBearerToken(
-		bearerToken,
+	registry := loadHTTPContractBearerRegistry(t, bearerToken, secondBearerToken)
+	handler := security.WithBearerAuth(
+		security.AuthModeRequired,
+		registry,
 		withResponseSizeLimit(responseCap, statelessMCPHandler(server, nil)),
 	)
 
@@ -56,6 +60,8 @@ func TestStatelessHTTPContractChainWithPublishedGeneration(t *testing.T) {
 	if !strings.Contains(initialized.Body.String(), "official KRX") {
 		t.Fatalf("initialize response lacks legal-source instruction: %s", initialized.Body.String())
 	}
+	secondInitialized := postHTTPContractJSON(t, handler, secondBearerToken, `{"jsonrpc":"2.0","id":11,"method":"initialize","params":{}}`)
+	assertHTTPContractResponse(t, secondInitialized, responseCap)
 
 	searched := postHTTPContractJSON(t, handler, bearerToken, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_rules","arguments":{"query":"증거금 청산 의무","language":"ko","limit":5}}}`)
 	searchPayload := decodeHTTPContractStructured[struct {
@@ -105,6 +111,33 @@ func TestStatelessHTTPContractChainWithPublishedGeneration(t *testing.T) {
 	if len(resourcePayload.Contents) != 1 || resourcePayload.Contents[0].URI != "krx-rule://rules/integration-rule" || !strings.Contains(resourcePayload.Contents[0].Text, "증거금을 납부") {
 		t.Fatalf("resource/read did not return the indexed rule body: %#v", resourcePayload)
 	}
+
+	disabledHandler := security.WithBearerAuth(
+		security.AuthModeDisabled,
+		nil,
+		withResponseSizeLimit(responseCap, statelessMCPHandler(server, nil)),
+	)
+	disabledInitialized := postHTTPContractJSON(t, disabledHandler, "", `{"jsonrpc":"2.0","id":12,"method":"initialize","params":{}}`)
+	assertHTTPContractResponse(t, disabledInitialized, responseCap)
+}
+
+func loadHTTPContractBearerRegistry(t *testing.T, tokens ...string) *security.BearerTokenRegistry {
+	t.Helper()
+	var data strings.Builder
+	data.WriteString("version: 1\ntokens:\n")
+	for i, token := range tokens {
+		digest := sha256.Sum256([]byte(token))
+		_, _ = fmt.Fprintf(&data, "  - id: integration-%d\n    sha256: %x\n    enabled: true\n", i, digest)
+	}
+	path := filepath.Join(t.TempDir(), "bearer-tokens.yaml")
+	if err := os.WriteFile(path, []byte(data.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry, err := security.LoadBearerTokenRegistry(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
 }
 
 type httpContractWireResponse struct {

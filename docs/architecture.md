@@ -29,7 +29,7 @@
 - `internal/corpus`: strict schema-v2 Markdown/manifest/provenance contract loading.
 - `internal/index`: structured legal chunking, Korean tokenization, BM25/vector scoring, generation publish/load, and RRF merge.
 - `internal/mcp`: MCP tool/resource registration, strict input validation, and public response DTOs.
-- `internal/security`: bearer auth, Origin allowlist, request/query bounds, concurrency/deadline controls, rate limit, and runtime identity metrics.
+- `internal/security`: optional hashed multi-bearer auth, strict startup registry loading, Origin allowlist, request/query bounds, concurrency/deadline controls, rate limit, and runtime identity metrics.
 
 ## Embeddings
 

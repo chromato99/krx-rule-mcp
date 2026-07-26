@@ -13,8 +13,8 @@ spec:
     - host: krx-rule-mcp.example.com
       http:
         paths:
-          # Only the authenticated MCP endpoint is public. Platform probes and
-          # metrics remain reachable through the cluster-internal Service.
+          # Only the MCP endpoint is public; keep RULE_MCP_AUTH_MODE=required.
+          # Platform probes and metrics remain on the cluster-internal Service.
           - path: /mcp
             pathType: Prefix
             backend:
