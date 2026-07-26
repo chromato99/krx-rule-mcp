@@ -29,8 +29,10 @@ jobs:
           set -eu
           export KRX_RULE_DATA_DIR="$RUNNER_TEMP/krx-rule-data"
           export KRX_RULE_INDEX_DIR="$RUNNER_TEMP/krx-rule-index"
+          export RULE_MCP_AUTH_CONFIG_DIR="$RUNNER_TEMP/krx-rule-auth"
           mkdir -p "$KRX_RULE_DATA_DIR/ko/rules/sample-rule"
           mkdir -p "$KRX_RULE_INDEX_DIR"
+          mkdir -p "$RULE_MCP_AUTH_CONFIG_DIR"
           cat > "$KRX_RULE_DATA_DIR/ko/rules/sample-rule/index.md" <<'EOF'
           ---
           schema_version: 2
@@ -82,6 +84,13 @@ jobs:
             "release_hash": "674d7f47b98101626064e812202887b517f938997b8d7f4280d8a581daf990ac"
           }
           EOF
+          cat > "$RULE_MCP_AUTH_CONFIG_DIR/bearer-tokens.yaml" <<'EOF'
+          version: 1
+          tokens:
+            - id: ci
+              sha256: 948b8c2427cd29047839b8e4a27a08763f8befbafa86be5cce8e46217d75e58a
+              enabled: true
+          EOF
           go run ./cmd/krx-rule-index \
             --data-dir "$KRX_RULE_DATA_DIR" \
             --index-dir "$KRX_RULE_INDEX_DIR"
@@ -92,12 +101,24 @@ jobs:
           timeout 30s go run ./cmd/krx-rule-mcp \
             --mode http \
             --addr 127.0.0.1:18080 \
-            --token ci-token \
+            --auth-mode required \
+            --bearer-token-file "$RULE_MCP_AUTH_CONFIG_DIR/bearer-tokens.yaml" \
             --data-dir "$KRX_RULE_DATA_DIR" \
             --index-dir "$KRX_RULE_INDEX_DIR" &
           pid=$!
           for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:18080/healthz && curl -fsS http://127.0.0.1:18080/readyz; then
+            if curl -fsS http://127.0.0.1:18080/healthz &&
+              curl -fsS http://127.0.0.1:18080/readyz &&
+              curl -fsS -o /dev/null \
+                -H "Authorization: Bearer ci-token" \
+                -H "Content-Type: application/json" \
+                -H "Accept: application/json, text/event-stream" \
+                --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+                http://127.0.0.1:18080/mcp &&
+              [ "$(curl -sS -o /dev/null -w '%{http_code}' \
+                -H "Content-Type: application/json" \
+                --data '{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}' \
+                http://127.0.0.1:18080/mcp)" = "401" ]; then
               kill "$pid"
               wait "$pid" || true
               exit 0
@@ -112,7 +133,7 @@ jobs:
         env:
           KRX_RULE_DATA_DIR: /opt/krx-rule-data
           KRX_RULE_INDEX_DIR: /opt/krx-rule-index
-          RULE_MCP_BEARER_TOKEN: ci-token
+          RULE_MCP_AUTH_CONFIG_DIR: /opt/krx-rule-auth
           RULE_MCP_TEI_IMAGE: registry.example/user-selected-tei@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
           RULE_MCP_TEI_IMAGE_DIGEST: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
         run: docker compose config

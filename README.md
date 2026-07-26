@@ -16,7 +16,7 @@
 - **원자적 index generation**: BM25와 선택적 vector/metadata를 `generations/<content-id>/`에 완성·검증한 뒤 `current` 포인터 하나만 원자 교체합니다. 중단된 build는 활성 generation을 바꾸지 않습니다.
 - **구조 anchor**: 조문 소유 관계, 항·호·목, heading path를 chunk에 저장하고 인용된 조문을 owning article로 오인하지 않습니다. 수식 원본/LaTeX pair와 table row는 분리하지 않습니다.
 - **TEI sidecar 운영 예시**: Docker Compose 예시는 운영자가 선택한 호환 TEI 이미지를 embeddings sidecar로 함께 띄웁니다.
-- **안전한 stateless HTTP 배포**: 서버측 MCP session을 보관하지 않으며 Bearer token, Origin allowlist, 요청·전체 응답·질의 크기 제한, 동시성 제한, deadline, rate limit, graceful shutdown을 제공합니다.
+- **안전한 stateless HTTP 배포**: 서버측 MCP session을 보관하지 않으며 선택 가능한 Bearer 인증, 해시 기반 다중 토큰 registry, Origin allowlist, 요청·전체 응답·질의 크기 제한, 동시성 제한, deadline, rate limit, graceful shutdown을 제공합니다.
 - **배포 generation 검증**: corpus/index/vector/도메인 사전/runtime mode/server image를 묶은 canonical release descriptor의 SHA-256을 응답·로그·metrics에 기록하고 `/readyz`에서 기대값과 비교합니다.
 
 ## Corpus 준비
@@ -213,7 +213,23 @@ go run ./cmd/krx-rule-mcp \
 HTTP:
 
 ```bash
-export RULE_MCP_BEARER_TOKEN="$(openssl rand -hex 32)"
+AUTH_DIR=/opt/krx-rule-mcp-auth
+mkdir -p "$AUTH_DIR"
+chmod 700 "$AUTH_DIR"
+
+TOKEN="$(openssl rand -hex 32)"
+TOKEN_SHA256="$(printf '%s' "$TOKEN" | openssl dgst -sha256 -r | awk '{print $1}')"
+cat > "$AUTH_DIR/bearer-tokens.yaml" <<EOF
+version: 1
+tokens:
+  - id: first-client
+    sha256: $TOKEN_SHA256
+    enabled: true
+EOF
+chmod 600 "$AUTH_DIR/bearer-tokens.yaml"
+
+export RULE_MCP_AUTH_MODE=required
+export RULE_MCP_BEARER_TOKEN_FILE="$AUTH_DIR/bearer-tokens.yaml"
 KRX_VECTOR_SEARCH_ENABLED=true \
 go run ./cmd/krx-rule-mcp \
   --mode http \
@@ -223,7 +239,17 @@ go run ./cmd/krx-rule-mcp \
   --domain-lexicon config/domain-lexicon.yaml
 ```
 
-`change-me`, `REPLACE_WITH_STRONG_RANDOM_TOKEN` 같은 알려진 placeholder token은 HTTP 기동 전에 거부됩니다. HTTP transport는 stateless이므로 어느 replica로 요청이 전달되어도 서버측 session affinity가 필요하지 않습니다.
+`TOKEN` 값은 클라이언트에 한 번 전달하고 registry나 로그에는 저장하지 않습니다. Registry에는 토큰 문자열의 SHA-256만 기록되며 `id`는 운영용 식별자입니다. 파일은 1 MiB, 1,024개 token으로 제한되고 unknown field, 중복 id/hash, 잘못된 digest, 누락된 `enabled`, 활성 token이 없는 구성을 거부합니다. `RULE_MCP_BEARER_TOKEN`과 `--token`은 제거되었으며 사용하면 migration 오류 또는 unknown flag 오류가 발생합니다.
+
+HTTP의 기본 인증 모드는 `required`입니다. 신뢰된 내부망에서만 인증을 끄려면 `RULE_MCP_AUTH_MODE=disabled` 또는 `--auth-mode disabled`를 명시합니다. 이 경우 token 파일은 읽지 않지만 Origin, 크기, 동시성, deadline, rate limit은 계속 적용됩니다. HTTP transport는 stateless이므로 어느 replica로 요청이 전달되어도 서버측 session affinity가 필요하지 않습니다.
+
+Token 추가·비활성화는 registry 파일을 수정한 뒤 서버를 재시작해야 반영됩니다. 안전한 rotation 순서는 다음과 같습니다.
+
+1. 새 token의 hash를 `enabled: true`로 추가하고 모든 instance를 재시작합니다.
+2. 전체 instance의 `/readyz`에서 같은 `auth_registry_generation`을 확인한 뒤 클라이언트를 새 token으로 전환합니다.
+3. 기존 token을 `enabled: false`로 바꾸고 다시 전체 instance를 재시작합니다.
+
+Kubernetes RollingUpdate 중에는 이전 Pod가 기존 token을 계속 허용할 수 있으므로 비활성화는 rollout 완료 시점부터 완전히 적용된 것으로 봅니다. Token registry digest는 RAG artifact의 `release_generation`에는 포함되지 않습니다.
 
 Release generation을 계산하려면 운영 때와 같은 corpus/index/vector/embedding 환경, `RULE_MCP_SERVER_IMAGE_DIGEST`, `RULE_MCP_TEI_IMAGE_DIGEST`를 사용해 다음을 실행합니다.
 
@@ -253,13 +279,14 @@ Corpus sync는 compose 서비스가 아니라
 
 ```bash
 cp .env.compose.example .env
-vi .env  # data/index, token, user-selected TEI image/digest 설정
+vi .env  # data/index, auth registry directory, user-selected TEI image/digest 설정
 docker compose up -d --build
 curl http://localhost:8080/healthz
 ```
 
-`KRX_RULE_DATA_DIR` host path는 컨테이너의 `/app/data:ro`로, `KRX_RULE_INDEX_DIR` host path는 `/app/index:ro`로 mount됩니다. 로컬에서 저장소 기본 generation을 쓰려면 `KRX_RULE_INDEX_DIR`를 checkout의 `krx-rule-mcp/index`로 지정할 수 있습니다. Server image는 corpus나 index를 내장하지 않으므로 volume mount가 필요합니다. 기본 host bind는 `127.0.0.1`이며 외부 공개가 필요할 때만 `RULE_MCP_BIND_ADDRESS`를 변경합니다.
-두 경로는 non-root 컨테이너 사용자가 읽을 수 있어야 합니다. 로컬 테스트용 임시 디렉터리를 쓸 때는 `chmod -R a+rX "$KRX_RULE_DATA_DIR" "$KRX_RULE_INDEX_DIR"`처럼 읽기 권한을 열어 주세요.
+`KRX_RULE_DATA_DIR` host path는 컨테이너의 `/app/data:ro`로, `KRX_RULE_INDEX_DIR` host path는 `/app/index:ro`로, `RULE_MCP_AUTH_CONFIG_DIR`은 `/run/secrets/krx-rule-mcp:ro`로 mount됩니다. 인증 directory에는 위 형식의 `bearer-tokens.yaml`을 둡니다. 변경 후 `docker compose restart krx-rule-mcp`로 registry를 다시 로드합니다. 로컬에서 저장소 기본 generation을 쓰려면 `KRX_RULE_INDEX_DIR`를 checkout의 `krx-rule-mcp/index`로 지정할 수 있습니다. Server image는 corpus나 index를 내장하지 않으므로 volume mount가 필요합니다. 기본 host bind는 `127.0.0.1`이며 외부 공개가 필요할 때만 `RULE_MCP_BIND_ADDRESS`를 변경합니다.
+
+세 경로는 non-root 컨테이너 사용자가 읽을 수 있어야 합니다. 로컬 테스트용 임시 디렉터리를 쓸 때는 `chmod -R a+rX "$KRX_RULE_DATA_DIR" "$KRX_RULE_INDEX_DIR" "$RULE_MCP_AUTH_CONFIG_DIR"`처럼 읽기 권한을 열어 주세요.
 
 ## Embeddings 설정
 
@@ -293,7 +320,12 @@ TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 ```bash
 go test ./...
 go test -race ./...
-KRX_RULE_DATA_DIR=/opt/krx-rule-data KRX_RULE_INDEX_DIR=/opt/krx-rule-index docker compose config
+KRX_RULE_DATA_DIR=/opt/krx-rule-data \
+KRX_RULE_INDEX_DIR=/opt/krx-rule-index \
+RULE_MCP_AUTH_CONFIG_DIR=/opt/krx-rule-auth \
+RULE_MCP_TEI_IMAGE=registry.example/tei@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc \
+RULE_MCP_TEI_IMAGE_DIGEST=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc \
+docker compose config
 ```
 
 실제 KRX 포털 수집 테스트는 이 저장소가 아니라 [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)에서 수행합니다.

@@ -69,7 +69,8 @@ type vectorReleaseDescriptor struct {
 
 type httpRuntimeConfig struct {
 	Addr                  string
-	Token                 string
+	AuthMode              security.AuthMode
+	TokenRegistry         *security.BearerTokenRegistry
 	Origins               []string
 	RequestSizeLimit      int64
 	ResponseSizeLimit     int64
@@ -95,7 +96,8 @@ func main() {
 		vectorPolicy       = flag.String("vector-policy", env("KRX_VECTOR_SEARCH_POLICY", "optional"), "vector runtime policy: optional or required when vector search is enabled")
 		requireVector      = flag.Bool("require-vector", envBool("KRX_REQUIRE_VECTOR"), "require a valid full-coverage vector snapshot and embedding configuration")
 		lexiconPath        = flag.String("domain-lexicon", env("KRX_DOMAIN_LEXICON_PATH", searchindex.DefaultDomainLexiconPath), "domain lexicon YAML path for query expansion")
-		token              = flag.String("token", os.Getenv("RULE_MCP_BEARER_TOKEN"), "required bearer token for HTTP mode")
+		authModeValue      = flag.String("auth-mode", env("RULE_MCP_AUTH_MODE", string(security.AuthModeRequired)), "HTTP bearer authentication mode: required or disabled")
+		bearerTokenFile    = flag.String("bearer-token-file", os.Getenv("RULE_MCP_BEARER_TOKEN_FILE"), "YAML bearer token registry for required HTTP authentication")
 		origins            = flag.String("allowed-origins", os.Getenv("RULE_MCP_ALLOWED_ORIGINS"), "comma-separated Origin allowlist for HTTP mode")
 		requestLimit       = flag.Int64("request-size-limit", envInt64("RULE_MCP_REQUEST_SIZE_LIMIT", 1<<20), "maximum HTTP request body size in bytes")
 		responseLimit      = flag.Int64("response-size-limit", envInt64("RULE_MCP_RESPONSE_SIZE_LIMIT", 1<<20), "maximum complete HTTP MCP response body size in bytes")
@@ -112,12 +114,15 @@ func main() {
 	)
 	flag.Parse()
 	requestedMode := strings.ToLower(strings.TrimSpace(*mode))
+	var httpAuth httpAuthConfig
 	if requestedMode == "http" && !*printGeneration {
-		if err := security.ValidateBearerToken(*token); err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "invalid HTTP bearer token: %v\n", err)
+		_, legacyBearerTokenConfigured := os.LookupEnv("RULE_MCP_BEARER_TOKEN")
+		var err error
+		httpAuth, err = loadHTTPAuthConfig(*authModeValue, *bearerTokenFile, legacyBearerTokenConfigured)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "invalid HTTP authentication configuration: %v\n", err)
 			os.Exit(1)
 		}
-		*token = strings.TrimSpace(*token)
 		if *maxQueryRunes <= 0 || *maxSearches <= 0 || *maxRequests <= 0 || *requestLimit <= 0 || *toolOutputLimit <= 0 || *embedTimeout <= 0 || *readinessTimeout <= 0 || *requestTimeout <= 0 || *shutdownTimeout <= 0 {
 			_, _ = fmt.Fprintln(os.Stderr, "HTTP limits and timeouts must be greater than zero")
 			os.Exit(1)
@@ -150,6 +155,16 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	if requestedMode == "http" && !*printGeneration {
+		if httpAuth.Mode == security.AuthModeDisabled {
+			logger.Warn("HTTP bearer authentication disabled; use only on a trusted private network")
+		} else {
+			logger.Info("HTTP bearer token registry loaded",
+				"active_tokens", httpAuth.Registry.ActiveTokenCount(),
+				"registry_digest", httpAuth.Registry.Digest(),
+			)
+		}
+	}
 	embedder, vectorEnabled, embedErr := searchindex.NewEmbedderFromEnv()
 	vectorRequired, err := resolveVectorPolicy(vectorEnabled, *vectorPolicy, *requireVector)
 	if err != nil {
@@ -271,7 +286,8 @@ func main() {
 	case "http":
 		config := httpRuntimeConfig{
 			Addr:                  *addr,
-			Token:                 *token,
+			AuthMode:              httpAuth.Mode,
+			TokenRegistry:         httpAuth.Registry,
 			Origins:               splitCSV(*origins),
 			RequestSizeLimit:      *requestLimit,
 			ResponseSizeLimit:     *responseLimit,
@@ -311,8 +327,11 @@ func runHTTP(ctx context.Context, config httpRuntimeConfig, server *mcpsdk.Serve
 		RuntimeVectorMode:    config.Artifacts.RuntimeVectorMode,
 		ServerImageDigest:    config.Artifacts.ServerImageDigest,
 		VectorCoverage:       repo.VectorCoverage,
+		AuthMode:             string(config.AuthMode),
+		AuthRegistryDigest:   config.TokenRegistry.Digest(),
+		ActiveBearerTokens:   config.TokenRegistry.ActiveTokenCount(),
 	})
-	authenticated := security.WithBearerToken(config.Token,
+	authenticated := security.WithBearerAuth(config.AuthMode, config.TokenRegistry,
 		security.WithRateLimit(120, time.Minute, mcpHandler))
 	protected := security.WithMetrics(metrics,
 		security.WithRateLimit(600, time.Minute,
@@ -338,7 +357,13 @@ func runHTTP(ctx context.Context, config httpRuntimeConfig, server *mcpsdk.Serve
 	}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- httpServer.ListenAndServe() }()
-	logger.Info("HTTP MCP server listening", "addr", config.Addr, "stateless", true)
+	logger.Info("HTTP MCP server listening",
+		"addr", config.Addr,
+		"stateless", true,
+		"auth_mode", config.AuthMode,
+		"active_bearer_tokens", config.TokenRegistry.ActiveTokenCount(),
+		"auth_registry_digest", config.TokenRegistry.Digest(),
+	)
 	select {
 	case err := <-serveErr:
 		if err == nil || err == http.ErrServerClosed {
@@ -498,8 +523,43 @@ func readinessHandler(config httpRuntimeConfig, repo *searchindex.Repository) ht
 			}
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = fmt.Fprintf(w, "ready release_generation=%s\n", config.Artifacts.ReleaseGeneration)
+		registryDigest := config.TokenRegistry.Digest()
+		if registryDigest == "" {
+			registryDigest = "none"
+		}
+		_, _ = fmt.Fprintf(w,
+			"ready release_generation=%s auth_mode=%s auth_registry_generation=%s active_bearer_tokens=%d\n",
+			config.Artifacts.ReleaseGeneration,
+			config.AuthMode,
+			registryDigest,
+			config.TokenRegistry.ActiveTokenCount(),
+		)
 	})
+}
+
+type httpAuthConfig struct {
+	Mode     security.AuthMode
+	Registry *security.BearerTokenRegistry
+}
+
+func loadHTTPAuthConfig(modeValue, tokenFile string, legacyBearerTokenConfigured bool) (httpAuthConfig, error) {
+	if legacyBearerTokenConfigured {
+		return httpAuthConfig{}, fmt.Errorf("RULE_MCP_BEARER_TOKEN was removed; migrate to RULE_MCP_BEARER_TOKEN_FILE")
+	}
+	mode, err := security.ParseAuthMode(modeValue)
+	if err != nil {
+		return httpAuthConfig{}, err
+	}
+	config := httpAuthConfig{Mode: mode}
+	if mode == security.AuthModeDisabled {
+		return config, nil
+	}
+	registry, err := security.LoadBearerTokenRegistry(tokenFile)
+	if err != nil {
+		return httpAuthConfig{}, err
+	}
+	config.Registry = registry
+	return config, nil
 }
 
 func validateReadinessEmbedding(embedder searchindex.Embedder, engine *searchindex.Engine, vectors [][]float64) error {

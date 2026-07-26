@@ -5,6 +5,8 @@ metadata:
 data:
   RULE_MCP_MODE: "http"
   RULE_MCP_ADDR: ":8080"
+  RULE_MCP_AUTH_MODE: "required"
+  RULE_MCP_BEARER_TOKEN_FILE: "/run/secrets/krx-rule-mcp/bearer-tokens.yaml"
   KRX_RULE_DATA_DIR: "/app/data"
   KRX_RULE_INDEX_DIR: "/app/index"
   KRX_DOMAIN_LEXICON_PATH: "/app/config/domain-lexicon.yaml"
