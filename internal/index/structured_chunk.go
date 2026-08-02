@@ -38,6 +38,12 @@ type sectionHeading struct {
 var (
 	articleIDPattern         = regexp.MustCompile(`^제\s*([0-9]+)\s*조(?:\s*의\s*([0-9]+))?`)
 	plainArticleTitlePattern = regexp.MustCompile(`^(제\s*[0-9]+\s*조(?:\s*의\s*[0-9]+)?\s*\([^\n)]*\))`)
+	englishArticlePattern    = regexp.MustCompile(`(?i)^§\s*([0-9]+(?:\s*-\s*[0-9]+)?)\s*[.]\s*(.*)$`)
+	englishSectionPattern    = regexp.MustCompile(`(?i)^(PART|CHAPTER|SECTION)\s*[A-Z0-9IVXLC.-]*\s*(?:[.:])?\s*.*$`)
+	englishTOCHeadingPattern = regexp.MustCompile(`(?i)^TABLE\s+OF\s+CONTENTS$`)
+	englishTOCLeaderPattern  = regexp.MustCompile(`[.·]{2,}\s*[0-9ivxlc]*\s*$`)
+	englishPageMarkerPattern = regexp.MustCompile(`(?i)^(?:[0-9]{1,4}|[ivxlc]{1,8})$`)
+
 	plainArticleOnlyPattern  = regexp.MustCompile(`^제\s*[0-9]+\s*조(?:\s*의\s*[0-9]+)?\s*$`)
 	legalSectionPattern      = regexp.MustCompile(`^제\s*[0-9]+\s*(장|절|관)(?:\s*의\s*[0-9]+)?(?:\s+.*)?$`)
 	supplementHeadingPattern = regexp.MustCompile(`^부\s*칙(?:\([^)]*\))?\s*(?:<[^>]+>)?$`)
@@ -61,6 +67,7 @@ func ChunkTextWithAnchors(text string, maxRunes int) []AnchoredChunk {
 	}
 
 	blocks := parseSourceBlocks(text)
+	englishBodyStart := detectEnglishArticleBodyStart(blocks)
 	state := anchorState{}
 	chunks := make([]AnchoredChunk, 0, len(blocks))
 	var current *AnchoredChunk
@@ -74,8 +81,22 @@ func ChunkTextWithAnchors(text string, maxRunes int) []AnchoredChunk {
 		current = nil
 	}
 
-	for _, block := range blocks {
+	for blockIndex, block := range blocks {
+		if englishBodyStart > 0 && blockIndex < englishBodyStart {
+			firstLine := strings.TrimSpace(strings.SplitN(block.text, "\n", 2)[0])
+			if englishTOCHeadingPattern.MatchString(firstLine) {
+				state = anchorState{}
+				continue
+			}
+			if level, label, ok := extractSectionHeading(block.text); ok {
+				state.setSection(level, label)
+			}
+			continue
+		}
 		articleID, articleLabel, articleRemainder, isArticle := extractArticleHeading(block.text)
+		if isArticle && strings.HasPrefix(articleID, "§") && blockIndex < englishBodyStart {
+			isArticle = false
+		}
 		isHeading := false
 		if isArticle {
 			flush()
@@ -320,6 +341,15 @@ func extractArticleHeading(text string) (id, label, remainder string, ok bool) {
 	if plainArticleOnlyPattern.MatchString(firstLine) {
 		return normalizeArticleID(firstLine), normalizeHeadingLabel(firstLine), strings.TrimSpace(candidateText[len(firstLine):]), true
 	}
+	if match := englishArticlePattern.FindStringSubmatch(candidateText); len(match) == 3 {
+		if englishTOCLeaderPattern.MatchString(match[2]) {
+			return "", "", "", false
+		}
+		id := "§" + strings.ReplaceAll(match[1], " ", "")
+		label := normalizeHeadingLabel(strings.TrimSpace(candidateText))
+		return id, label, "", true
+	}
+
 	return "", "", "", false
 }
 
@@ -342,6 +372,43 @@ func normalizeArticleID(value string) string {
 		id += "의" + match[2]
 	}
 	return id
+}
+
+func detectEnglishArticleBodyStart(blocks []sourceBlock) int {
+	toc := -1
+	for i, block := range blocks {
+		firstLine := strings.TrimSpace(strings.SplitN(block.text, "\n", 2)[0])
+		if englishTOCHeadingPattern.MatchString(firstLine) {
+			toc = i
+			break
+		}
+	}
+	if toc < 0 {
+		return 0
+	}
+	for i := toc + 1; i < len(blocks); i++ {
+		id, _, _, ok := extractArticleHeading(blocks[i].text)
+		if !ok || !strings.HasPrefix(id, "§") {
+			continue
+		}
+		for j := i + 1; j < len(blocks); j++ {
+			next := strings.TrimSpace(blocks[j].text)
+			if next == "" || englishPageMarkerPattern.MatchString(next) {
+				continue
+			}
+			if nextID, _, _, nextArticle := extractArticleHeading(next); nextArticle && strings.HasPrefix(nextID, "§") {
+				break
+			}
+			if _, _, section := extractSectionHeading(next); section {
+				break
+			}
+			if runeLen(next) >= 24 {
+				return i
+			}
+			break
+		}
+	}
+	return len(blocks)
 }
 
 func extractSectionHeading(text string) (level int, label string, ok bool) {
@@ -367,6 +434,20 @@ func extractSectionHeading(text string) (level int, label string, ok bool) {
 	}
 	if supplementHeadingPattern.MatchString(plain) {
 		return 1, normalizeHeadingLabel(plain), true
+	}
+	if englishTOCHeadingPattern.MatchString(plain) {
+		return 1, "TABLE OF CONTENTS", true
+	}
+	if match := englishSectionPattern.FindStringSubmatch(plain); len(match) == 2 {
+		switch strings.ToUpper(match[1]) {
+		case "PART":
+			level = 1
+		case "CHAPTER":
+			level = 2
+		default:
+			level = 3
+		}
+		return level, normalizeHeadingLabel(plain), true
 	}
 	return 0, "", false
 }

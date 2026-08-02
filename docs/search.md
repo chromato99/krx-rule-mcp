@@ -18,6 +18,7 @@ These files are generated from the maintained `krx-rule-markdown/data` corpus wi
 | Dimensions | `384` |
 | Document prefix | `passage: ` |
 | Query prefix | `query: ` |
+| Embedding input | `structured-v1` |
 
 `krx-rule-index` requires the producer's strict schema-v2 `manifest.json`. It verifies manifest/document parity and both `index_source_hash` and `release_hash` before building. A non-blocking single-writer lock prevents concurrent publishers. BM25, vector, metadata, and `generation.json` are completed and validated in a sibling staging directory before `current` is replaced atomically, so a failed or killed build leaves the previous generation selected.
 
@@ -57,7 +58,7 @@ The tokenizer extracts Korean, Latin, and numeric tokens, and adds Korean 2-gram
 
 ### Structured legal chunks
 
-Snapshot format v6 treats the 1,600-rune chunk size as a target rather than a destructive hard limit. The chunker recognizes chapter/section headings, owning article headings, and Korean 항·호·목 markers. Index-layer search results and chunk context carry:
+Snapshot format v7 treats the 1,600-rune chunk size as a target rather than a destructive hard limit. The chunker recognizes chapter/section headings, owning Korean article headings, English body `§N`/`§N-N` headings, and Korean 항·호·목 markers. English table-of-contents entries and inline `[§N]` citations cannot become owning articles. Index-layer search results and chunk context carry:
 
 - `article_id`: the owning heading such as `제5조` or `제11조의2`.
 - `heading_path`: the ordered chapter, section, full article heading, 항, 호, and 목 path.
@@ -74,6 +75,10 @@ The hermetic retrieval benchmark runs in ordinary Go CI and gates Recall@5, atta
 
 Converted attachments are indexed as chunks attached to their parent rule or notice. If an attachment chunk is the best match, the result returns the parent document and includes `matched_source: "attachment"` plus `attachment_matches`.
 Each search result includes `matched_chunk_id` and the zero-based `matched_chunk_index`. Attachment matches include their own `chunk_id` and zero-based `chunk_index`; index 0 is serialized explicitly. The public API does not expose heuristic article-range guesses. Domain lexicon expansion terms are scored with lower BM25 weight than the original query terms. Use these ids with `get_context` to fetch the exact matched chunk and neighboring chunks before writing an answer.
+
+BM25 and vector retrieval keep bounded chunk candidates independently. Reciprocal-rank fusion is keyed by chunk ID, not document ID; only after fusion are up to three diverse evidence chunks grouped into each document. `matched_chunk_id`, `article_id`, and `heading_path` always mirror the first `evidence_matches` item. A bounded lexical-coverage signal breaks weak RRF ties without treating a ranking score as confidence. Filter eligibility is computed once before both channel scans, and vector norms are precomputed when the generation is loaded.
+문서 안의 최종 evidence 순서는 원 질의의 lexical coverage와 `curated-corpus`로 검토된 intent expansion만 사용해 다시 정렬합니다. Expansion phrase가 조문 heading에 직접 나타나면 간접 인용보다 우선하고, 구체적인 expansion phrase가 첨부 본문에 나타나면 일반 조문보다 우선할 수 있습니다. 이 신호들은 bounded retrieval 후보 안에서만 순서를 바꾸며 answerability confidence로 사용하지 않습니다.
+
 
 `score`, `bm25_score`, and `vector_score` are ranking signals. They are useful for ordering and debugging retrieval, but they are not confidence probabilities.
 
@@ -132,6 +137,19 @@ Set `before_chunks` or `after_chunks` to `0` when only the target chunk is neede
 Inputs are validated strictly: `query` is required and bounded, `document_type` must be `rule` or `notice`, dates must be real `YYYY-MM-DD` values in ascending range, and negative or oversized limits/offsets are rejected rather than silently coerced. Public document and attachment DTOs omit local paths and converter error strings. A verified `official_source` contains only the KRX source page, POST endpoint, whitelisted stable parameters, and source-content hash. Each source reports `searchable`; false sources are excluded from text indexing. A document or matched attachment with degraded conversion metadata carries a `quality_notice` so the warning stays attached to the exact source.
 
 Search results are discovery aids from a collected derivative snapshot. Ranking scores are not confidence probabilities, English text is not a substitute for the Korean legal text, and converted attachments may lose tables, images, or formula semantics. For current or compliance-sensitive answers, follow `source_url` and verify the effective Korean document on the official KRX portal.
+
+## Answerability contract
+
+`search_rules` classifies retrieval evidence independently from legal truth:
+
+- `supported`: the active release returned directly addressable evidence. `answerable` is `true`.
+- `insufficient`: evidence failed the versioned gate. `results` is empty.
+- `ambiguous`: the query is too broad or evidence is not sufficiently anchored. A bounded diverse result set and `clarification` are returned, but `answerable` is `false`.
+- `unknown`: the loaded retrieval/index contract is incompatible. It fails closed with empty results.
+
+The `answerability` object contains `reason_codes`, `gate_version`, selected `evidence_chunk_ids`, and observable features such as original-query lexical coverage, BM25/vector agreement, structural anchors, filter state, quantitative-claim checks, explicit-source checks, and category diversity. These are deterministic gate inputs, not confidence probabilities. Numeric limits, named external laws, obligation subjects, and composite claims must be present in the selected evidence rather than inferred from unrelated high-scoring chunks.
+
+Clients should answer only when `answerable=true`, then fetch the returned evidence chunk with `get_context`. For `ambiguous`, ask the user for the provided clarification. For `insufficient` or `unknown`, state that the current corpus did not supply answerable evidence; do not reinterpret ranking scores as permission to answer.
 
 ## Formula-Aware Retrieval
 
@@ -204,7 +222,7 @@ Vector search is optional. It is enabled only when all of these are true:
 - `KRX_VECTOR_SEARCH_ENABLED=true`
 - the active immutable generation contains a vector artifact and metadata
 - the vector snapshot matches the current corpus/index generation
-- vector metadata matches model, dimensions, query prefix, and document prefix
+- vector metadata matches model, revision, dimensions, query/document prefixes, and embedding input format
 - query embeddings can be created at runtime
 
 Build a vector snapshot with the local TEI sidecar:
@@ -217,6 +235,7 @@ KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
 KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small \
 KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
 KRX_EMBEDDING_DIMENSIONS=384 \
+KRX_EMBEDDING_INPUT_FORMAT=text-v1 \
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
   --index-dir "$KRX_RULE_INDEX_DIR" \
@@ -245,7 +264,7 @@ go run ./cmd/krx-rule-index \
   --force
 ```
 
-Use the prefixes recommended by the model. E5 uses `query: ` and `passage: `; many non-E5 models use no prefix, which can be represented by setting the prefix environment variables to empty strings.
+Use the prefixes and document format recommended by the model. E5 uses `query: ` and `passage: `; the maintained generation's `text-v1` embeds only raw chunk text. `structured-v1` prepends fixed `title`, `category`, `article`, `path`, and `source` fields and remains available for controlled comparisons. Any format change requires a full vector rebuild because `input_format` is validated in vector metadata and the immutable generation descriptor.
 
 ## External Embeddings API
 
@@ -258,6 +277,7 @@ export KRX_EMBEDDING_MODEL=text-embedding-3-small
 export KRX_EMBEDDING_DIMENSIONS=1536
 export KRX_EMBEDDING_QUERY_PREFIX=""
 export KRX_EMBEDDING_DOCUMENT_PREFIX=""
+export KRX_EMBEDDING_INPUT_FORMAT=structured-v1
 ```
 
 Rebuild the vector snapshot after changing any embedding setting:
@@ -275,6 +295,7 @@ Use the same settings for vector indexing and MCP serving. E5 defaults are:
 ```bash
 export KRX_EMBEDDING_QUERY_PREFIX="query: "
 export KRX_EMBEDDING_DOCUMENT_PREFIX="passage: "
+export KRX_EMBEDDING_INPUT_FORMAT=text-v1
 ```
 
-When both BM25 and vector scores are available, results are merged with reciprocal rank fusion. Under the `optional` policy, an unavailable runtime embedder is logged and the server returns BM25 results. Under the `required` policy, embedding failures and invalid vectors return a tool error and `/readyz` returns 503 until a valid canary embedding succeeds.
+When both BM25 and vector scores are available, bounded chunk candidates are merged with reciprocal rank fusion before document grouping. The query embedding always uses the original user query; reviewed lexicon expansion remains a lower-weight BM25 signal and does not overwrite the vector query. Under the `optional` policy, an unavailable runtime embedder is logged and the server returns BM25 results. Under the `required` policy, embedding failures and invalid vectors return a tool error and `/readyz` returns 503 until a valid canary embedding succeeds.

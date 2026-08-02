@@ -58,6 +58,58 @@ func TestServiceTools(t *testing.T) {
 	}
 }
 
+func TestEnglishDocumentLinksCanonicalKoreanSource(t *testing.T) {
+	korean := model.Document{
+		ID: "210199976", Title: "파생상품시장 업무규정", Language: model.LanguageKorean,
+		DocumentType: model.DocumentTypeRule, SourceURL: "https://rule.krx.co.kr/rule/detail",
+		EffectiveDate: "2026-06-29",
+	}
+	english := model.Document{
+		ID: "210199976-en", SourceID: korean.ID, Title: "Derivatives Market Business Regulation",
+		Language: model.LanguageEnglish, DocumentType: model.DocumentTypeRule,
+	}
+	service := &Service{Repo: &searchindex.Repository{Documents: map[string]model.Document{
+		korean.ID: korean, english.ID: english,
+	}}}
+	source := service.canonicalKoreanSource(english)
+	if source == nil || source.ID != korean.ID || source.Title != korean.Title || source.SourceURL != korean.SourceURL {
+		t.Fatalf("canonical Korean source = %#v", source)
+	}
+	if source.URI != "krx-rule://rules/"+korean.ID || source.AuthorityNote == "" {
+		t.Fatalf("canonical Korean source omitted authority contract: %#v", source)
+	}
+	if service.canonicalKoreanSource(korean) != nil {
+		t.Fatal("Korean document unexpectedly linked itself as canonical source")
+	}
+	dto := service.documentDetailDTO(english)
+	if dto.CanonicalKoreanSource == nil || dto.CanonicalKoreanSource.ID != korean.ID {
+		t.Fatalf("document DTO omitted canonical Korean source: %#v", dto)
+	}
+}
+
+func TestSearchRulesFailsClosedOnRetrievalContractMismatch(t *testing.T) {
+	doc := model.Document{
+		ID: "rule-old-index", Title: "상장규정", CollectedAt: time.Now(),
+		DocumentType: model.DocumentTypeRule, Body: "**제1조(상장)** 상장 요건을 정한다.",
+	}
+	service := &Service{Repo: &searchindex.Repository{
+		Documents:    map[string]model.Document{doc.ID: doc},
+		Engine:       searchindex.BuildWithAttachments([]model.Document{doc}, nil, nil),
+		GenerationID: "loaded-generation", BM25ArtifactDigest: strings.Repeat("a", 64),
+		IndexerVersion: "obsolete-contract",
+	}}
+	_, output, err := service.searchRules(context.Background(), &mcpsdk.CallToolRequest{}, SearchRulesInput{Query: "상장 요건", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output.Answerable || output.Answerability.Status != searchindex.AnswerabilityUnknown || len(output.Results) != 0 {
+		t.Fatalf("contract mismatch did not fail closed: %#v", output)
+	}
+	if len(output.Answerability.ReasonCodes) == 0 || output.Answerability.ReasonCodes[0] != "retrieval_contract_mismatch" {
+		t.Fatalf("contract mismatch reason omitted: %#v", output.Answerability)
+	}
+}
+
 func TestNewServerBuildsPublicToolSchemas(t *testing.T) {
 	service := &Service{Repo: &searchindex.Repository{
 		Documents:   map[string]model.Document{},
@@ -670,7 +722,7 @@ func TestSearchRulesExpandsDomainTerms(t *testing.T) {
 	}
 }
 
-func TestSearchRulesEmbedsExpandedDomainQuery(t *testing.T) {
+func TestSearchRulesEmbedsOriginalQueryBeforeDomainExpansion(t *testing.T) {
 	doc := model.Document{
 		ID:           "derivatives-rule",
 		Title:        "파생상품시장 업무규정 시행세칙",
@@ -689,8 +741,8 @@ func TestSearchRulesEmbedsExpandedDomainQuery(t *testing.T) {
 	if out.Mode != "bm25+vector-rrf+domain-expansion" {
 		t.Fatalf("mode = %q, want domain-expanded vector mode", out.Mode)
 	}
-	if len(embedder.inputs) != 1 || !strings.Contains(embedder.inputs[0][0], "실시간 가격제한") {
-		t.Fatalf("embedder did not receive expanded query: %#v", embedder.inputs)
+	if len(embedder.inputs) != 1 || len(embedder.inputs[0]) != 1 || embedder.inputs[0][0] != "dynamic price limit" {
+		t.Fatalf("embedder did not receive the original query: %#v", embedder.inputs)
 	}
 }
 

@@ -1,4 +1,28 @@
 entries:
+  - id: dynamic_price_limit_alias
+    canonical: 동적상하한가
+    aliases:
+      - 동적상하한가
+      - 동적 상하한가
+    expansions:
+      - 실시간 가격제한의 가격변동폭
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: mixed_realtime_price_limit
+    canonical: futures 실시간 price limit 변동폭
+    aliases:
+      - futures 실시간 price limit 변동폭
+      - KRX futures real-time 상하한가 폭
+    expansions:
+      - 실시간 가격제한의 가격변동폭
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
   - id: derivatives_realtime_price_limit
     canonical: 실시간가격제한제도
     aliases:
@@ -19,6 +43,8 @@ entries:
       - 가격제한폭
       - 파생상품시장 업무규정 시행세칙
       - 별표25
+      - real-time upper and lower price limits of quotations
+      - quotation price fluctuation limit
     source_urls:
       - https://regulation.krx.co.kr/contents/RGL/03/03050600/RGL03050600.jsp
       - https://rule.krx.co.kr/out/index.do
@@ -40,6 +66,9 @@ entries:
       - 기준가격
       - 상한가
       - 하한가
+      - 실시간 가격제한의 가격변동폭
+      - real-time price limit of quotations
+      - real-time upper and lower price limits of quotations
     source_urls:
       - https://regulation.krx.co.kr/contents/RGL/03/03020201/RGL03020201.jsp
       - https://regulation.krx.co.kr/contents/RGL/03/03050600/RGL03050600.jsp
@@ -227,6 +256,8 @@ entries:
       - premium/discount
       - 시장가격 순자산가치 차이
       - 시장가격과 순자산가치
+      - NAV에서 너무 벌어
+      - LP 호가 의무
     expansions:
       - ETF
       - 상장지수펀드
@@ -235,11 +266,17 @@ entries:
       - 시장가격
       - 순자산가치
       - 상장규정
+      - 유동성공급호가 제출의무
+      - 종가와 순자산가치의 괴리
+      - 3%
+      - 6%
+      - 가격이 좌수 또는 주수당의 순자산가치에 수렴
+      - 괴리율이 3% 해외기초자산의 경우 6%를 초과하지 않도록
     source_urls:
       - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500.jsp
       - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
     confidence: high
-    review_status: official-glossary
+    review_status: curated-corpus
 
   - id: etf_tracking_error
     canonical: 추적오차율
@@ -256,3 +293,167 @@ entries:
       - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
     confidence: high
     review_status: official-glossary
+
+  - id: listing_prior_consultation
+    canonical: 사전협의 의무
+    aliases:
+      - 사전 협의
+      - 먼저 상의
+      - 절차와 시기
+      - 일정과 절차를 협의
+      - prior consultation
+      - 사전 햡의
+      - 아무 협의도 하지 않아도
+    expansions:
+      - 사전협의
+      - 사전협의 의무
+      - 상장예비심사
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: customer_margin_use_restriction
+    canonical: 위탁증거금 사용제한
+    aliases:
+      - 증거금을 회원사 돈
+      - 증거금을 자기 자금
+      - 위탁증거금을 아무 용도
+      - 위탁증거금을 자유롭게
+      - use customer margin
+    expansions:
+      - 위탁증거금
+      - 사용제한
+      - 다른 목적
+      - restrictions on use of customer margins
+      - use of customer margins for another purpose
+      - 위탁자로부터 예탁받은 현금 대용증권 외화 외화증권
+      - 해당 위탁자의 거래와 관련한 결제
+      - 정하는 방법 이외에는 사용하지 못한다
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: final_settlement_recalculation
+    canonical: 최종결제가격 재산출
+    aliases:
+      - 다시 계산
+      - 재계산
+      - recalculate final settlement
+    expansions:
+      - 최종결제가격
+      - 재산출
+      - 정정
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: intraday_margin_deadline
+    canonical: 일중청산위탁증거금 예탁시한
+    aliases:
+      - 예탁 마감
+      - 예탁시한
+      - 마감시각
+      - intraday clearing margin due
+      - 장중에 추가 증거금
+      - 통보를 받으면 언제까지
+    expansions:
+      - 일중청산위탁증거금
+      - 예탁시한
+      - 14:00
+      - 오후 2시
+      - 14시
+      - deposit of intraday client margins
+      - due time for intraday clearing margin
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: trade_reporting_lei
+    canonical: LEI의 사용의무
+    aliases:
+      - LEI
+      - 법인식별기호
+      - 국제 법인식별기호
+    expansions:
+      - LEI의 사용의무
+      - 거래당사자에 관한 식별정보
+      - 거래상대방에 관한 식별정보
+      - 법인식별기호
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: trade_reporting_uti
+    canonical: UTI의 사용의무
+    aliases:
+      - UTI
+      - 거래고유식별기호
+      - UTI를 적으면
+    expansions:
+      - UTI의 사용의무
+      - 거래정보를 보고할 때
+      - 보고대상거래 건별
+      - UTI를 반드시 포함
+      - UTI use obligation
+      - use of UTI
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: fair_disclosure_indirect_provision
+    canonical: 공정공시 대상정보의 우회제공 금지
+    aliases:
+      - 우회해서 제공
+      - 우회 제공
+      - 간접 제공
+    expansions:
+      - 공정공시 대상정보
+      - 우회제공 금지
+      - 정보제공대상자를 통한 제공
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: margin_reduction_variables
+    canonical: 증거금 감면액 산출변수
+    aliases:
+      - 상품군 가격상관율
+      - 상대적규모비율
+      - 상대적 규모비율
+      - 증거금 감면액 계산
+    expansions:
+      - 증거금 감면액
+      - 상품군별 가격상관율
+      - 상대적 규모비율
+      - 증거금 감면액 산출변수
+      - 상품군의 가격상관율 산정
+      - 가격상관율을 기초자산별로 산술평균한 값 중 최솟값
+      - 기초자산의 상대적 규모비율 산정
+      - 선물상품 평균계약가치
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: market_maker_short_evaluation_period
+    canonical: 시장조성일수 5일 미만 평가제외
+    aliases:
+      - 닷새보다 적
+      - 5일보다 적
+      - 시장조성일수가 닷새
+    expansions:
+      - 시장조성일수가 5일 미만
+      - 평가대상에서 제외
+      - 기간의무이행률
+      - 의무충족일수
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus

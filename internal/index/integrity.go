@@ -120,6 +120,9 @@ func inferVectorScope(expectedIDs []string, vectors map[string][]float64) Vector
 
 func normalizeVectorWriteOptions(snap Snapshot, vectors map[string][]float64, modelName string, dimensions int, option VectorWriteOptions) VectorWriteOptions {
 	option.ModelRevision = strings.TrimSpace(option.ModelRevision)
+	if option.InputFormat == "" {
+		option.InputFormat = DefaultEmbeddingInputFormat
+	}
 	if option.Scope == "" {
 		option.Scope = inferVectorScope(snapshotChunkIDs(snap.Chunks), vectors)
 	}
@@ -148,6 +151,7 @@ func vectorGenerationID(snap Snapshot, vectors map[string][]float64, modelName s
 		"corpus_release_hash": snap.CorpusReleaseHash,
 		"dimensions":          dimensions,
 		"document_prefix":     option.DocumentPrefix,
+		"input_format":        option.InputFormat,
 		"index_build_hash":    snap.IndexBuildHash,
 		"model":               modelName,
 		"model_revision":      option.ModelRevision,
@@ -336,6 +340,7 @@ func BuildVectorMetadata(snap Snapshot, vectors map[string][]float64, modelName 
 		Dimensions:           dimensions,
 		QueryPrefix:          option.QueryPrefix,
 		DocumentPrefix:       option.DocumentPrefix,
+		InputFormat:          option.InputFormat,
 		Scope:                option.Scope,
 		ExpectedChunkCount:   len(expectedIDs),
 		StoredVectorCount:    len(vectors),

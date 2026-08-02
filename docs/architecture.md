@@ -19,8 +19,9 @@
 4. A completed content-addressed `generations/<id>/generation.json` records fixed artifact names, byte sizes and SHA-256 digests. Publication atomically replaces only the `current` pointer.
 5. `krx-rule-mcp` resolves `current` once, reads only that immutable directory, and compares the digest of the exact decoded bytes with the descriptor. It refuses to start without a valid matching BM25 artifact.
 6. When vector search is disabled, vector files are not opened. Optional mode falls back to BM25 with a bounded reason; required mode rejects missing, sample, partial, stale, malformed, or incompatible vector data.
-7. Legal chunking records owning `article_id` and `heading_path`, keeps cited articles distinct, and treats formula pairs and table rows as atomic semantic units.
-8. At runtime, a canonical release descriptor binds corpus release, index source/build hashes, fixed artifact digests, optional vector metadata, domain lexicon, active vector mode, and the server and TEI runtime image digests. Its SHA-256 is exposed as `release_generation`; HTTP readiness optionally requires an exact configured match and, in required-vector mode, a valid live canary embedding.
+7. Legal chunking records owning Korean and English `article_id` plus `heading_path`, keeps citations distinct, and treats formula pairs and table rows as atomic semantic units. BM25/vector retrieve bounded chunk candidates, fuse by chunk ID, select diverse evidence, and group documents only afterward.
+8. `search_rules` applies a versioned answerability gate to original-query coverage, channel agreement, structural anchors, filter constraints, and claim-specific evidence checks. `insufficient` and incompatible `unknown` outcomes fail closed; scores remain ranking signals.
+9. At runtime, a canonical release descriptor binds corpus release, index source/build hashes, fixed artifact digests, optional vector metadata and input format, domain lexicon, active vector mode, and the server and TEI runtime image digests. Its SHA-256 is exposed as `release_generation`; HTTP readiness optionally requires an exact configured match and, in required-vector mode, a valid live canary embedding.
 
 ## Packages
 
@@ -36,8 +37,8 @@
 The local deployment examples expect an operator-selected TEI image that exposes
 the compatible embeddings and health endpoints. The project does not choose,
 publish, or endorse a particular TEI image. The repository-provided vector
-snapshot records the model, revision, dimensions, and prefix settings that the
-selected runtime must match.
+snapshot records the model, revision, dimensions, prefix settings, and embedding
+input format that the selected runtime must match.
 
 Default settings:
 
@@ -45,10 +46,11 @@ Default settings:
 - dimensions: `384`
 - document prefix: `passage: `
 - query prefix: `query: `
+- document input: `structured-v1`
 
-Other OpenAI-compatible embedding models can be used, but vector indexing and serving must use identical model, dimension, and prefix settings. Prefix-free models should set both prefix environment variables to empty strings before rebuilding the vector snapshot.
+Other OpenAI-compatible embedding models can be used, but vector indexing and serving must use identical model, revision, dimension, prefix, and input-format settings. Prefix-free models should set both prefix environment variables to empty strings before rebuilding the vector snapshot. `structured-v1` embeds fixed title/category/article/path/source fields with the chunk; `text-v1` is the raw-text ablation format.
 
-Indexing failures are strict: if vector indexing is explicitly requested and the embeddings API fails, `krx-rule-index` exits non-zero. Runtime query embedding failures are non-fatal and search falls back to BM25 results.
+Indexing failures are strict: if vector indexing is explicitly requested and the embeddings API fails, `krx-rule-index` exits non-zero. Runtime query embedding failure falls back to BM25 only under the optional vector policy; required-vector mode returns a tool error and fails its readiness canary.
 
 ## Language-Aware RAG
 

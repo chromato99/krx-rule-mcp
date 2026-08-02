@@ -177,6 +177,33 @@ func TestVectorSnapshotIgnoresEmbeddingConfigMismatch(t *testing.T) {
 	}
 }
 
+func TestVectorSnapshotRejectsEmbeddingInputFormatMismatch(t *testing.T) {
+	t.Setenv("KRX_EMBEDDING_MODEL", "test-model")
+	t.Setenv("KRX_EMBEDDING_MODEL_REVISION", "test-revision")
+	t.Setenv("KRX_EMBEDDING_DIMENSIONS", "2")
+	t.Setenv("KRX_EMBEDDING_INPUT_FORMAT", "structured-v1")
+	root := t.TempDir()
+	doc := model.Document{
+		ID: "rule-1", Title: "상장규정", SourceURL: "https://example.test/rule",
+		CollectedAt: time.Now().UTC(), ContentHash: "hash-rule-1",
+		DocumentType: model.DocumentTypeRule, Body: "상장 심사",
+	}
+	writeIndexTestDocument(t, root, doc)
+	writeTestIndexSnapshot(t, root)
+	vectorPath := filepath.Join(root, "index", "vectors.krxvec")
+	writeTestVectorSnapshot(t, root, vectorPath, map[string][]float64{"rule-1#0": {1, 0}})
+	repo, err := LoadRepository(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath)
+	if err != nil {
+		t.Fatalf("load repository: %v", err)
+	}
+	if repo.Engine.HasVectors() {
+		t.Fatal("repository loaded vectors with mismatched embedding input format")
+	}
+	if len(repo.VectorIndexes) != 1 || repo.VectorIndexes[0].RejectedReason != "embedding_input_format_mismatch" {
+		t.Fatalf("unexpected vector status: %#v", repo.VectorIndexes)
+	}
+}
+
 func TestVectorSnapshotIgnoresModelRevisionMismatch(t *testing.T) {
 	t.Setenv("KRX_EMBEDDING_MODEL", "test-model")
 	t.Setenv("KRX_EMBEDDING_MODEL_REVISION", "other-revision")

@@ -62,6 +62,7 @@ type vectorReleaseDescriptor struct {
 	Dimensions         int    `json:"dimensions"`
 	QueryPrefix        string `json:"query_prefix"`
 	DocumentPrefix     string `json:"document_prefix"`
+	InputFormat        string `json:"input_format"`
 	Scope              string `json:"scope"`
 	ExpectedChunkCount int    `json:"expected_chunk_count"`
 	StoredVectorCount  int    `json:"stored_vector_count"`
@@ -675,13 +676,14 @@ func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtime
 			Dimensions:         metadata.Dimensions,
 			QueryPrefix:        metadata.QueryPrefix,
 			DocumentPrefix:     metadata.DocumentPrefix,
+			InputFormat:        string(metadata.InputFormat),
 			Scope:              string(metadata.Scope),
 			ExpectedChunkCount: metadata.ExpectedChunkCount,
 			StoredVectorCount:  metadata.StoredVectorCount,
 		}
 	}
 	descriptor := releaseDescriptor{
-		Schema:              "krx-rule-mcp-release-v3",
+		Schema:              "krx-rule-mcp-release-v4",
 		CorpusReleaseHash:   repo.CorpusReleaseHash,
 		IndexSourceHash:     repo.IndexSourceHash,
 		IndexBuildHash:      repo.IndexBuildHash,

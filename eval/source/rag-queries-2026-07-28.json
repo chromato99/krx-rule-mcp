@@ -1,0 +1,424 @@
+{
+  "schema_version": 1,
+  "name": "KRX Rule MCP live RAG quality evaluation queries",
+  "evaluation_date": "2026-07-28",
+  "endpoint": "https://krx-rule-mcp.chromato99.com/mcp",
+  "release_generation": "daa720758d7bfc93ffad51dd1b87bce080e14d8077b1449e417791af32f0b6a4",
+  "notes": [
+    "All search_rules calls used limit=5.",
+    "Expected document, article, and attachment IDs were checked against the deployed release corpus before evaluation.",
+    "Chunk IDs are intentionally omitted because they are release-specific.",
+    "Scores are ranking signals, not confidence probabilities."
+  ],
+  "cases": [
+    {
+      "id": "exact-listing-consult",
+      "group": "exact",
+      "answerability": "answerable",
+      "query": "상장예비심사 신청 전 사전협의 의무",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210220143"], "article_ids": ["제20조"], "attachment_ids": []}
+    },
+    {
+      "id": "exact-realtime-limit",
+      "group": "exact",
+      "answerability": "answerable",
+      "query": "실시간 가격제한의 가격변동폭 별표 25",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210228709"], "article_ids": ["제60조의4"], "attachment_ids": ["210228709-210217359-hwp"]}
+    },
+    {
+      "id": "exact-margin-use",
+      "group": "exact",
+      "answerability": "answerable",
+      "query": "위탁증거금의 사용제한 대용증권 외화",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210199976"], "article_ids": ["제139조"], "attachment_ids": []}
+    },
+    {
+      "id": "exact-settlement-recalc",
+      "group": "exact",
+      "answerability": "answerable",
+      "query": "최종결제가격 재산출 손해배상청구권 배제",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210199976"], "article_ids": ["제165조"], "attachment_ids": []}
+    },
+    {
+      "id": "exact-intraday-margin",
+      "group": "exact",
+      "answerability": "answerable",
+      "query": "일중청산위탁증거금 예탁시한",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210124485"], "article_ids": ["제88조"], "attachment_ids": []}
+    },
+    {
+      "id": "exact-lei",
+      "group": "exact",
+      "answerability": "answerable",
+      "query": "거래당사자 식별정보 LEI 사용의무",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["204847960"], "article_ids": ["제17조"], "attachment_ids": []}
+    },
+    {
+      "id": "exact-uti",
+      "group": "exact",
+      "answerability": "answerable",
+      "query": "보고대상거래 건별 UTI 포함",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["204847960"], "article_ids": ["제18조"], "attachment_ids": []}
+    },
+    {
+      "id": "exact-fair-disclosure",
+      "group": "exact",
+      "answerability": "answerable",
+      "query": "공정공시 대상정보 우회제공 금지",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["204844930", "204844585"], "article_ids": ["제5조"], "attachment_ids": []}
+    },
+    {
+      "id": "semantic-listing-consult",
+      "group": "semantic",
+      "answerability": "answerable",
+      "query": "상장 신청 전에 거래소랑 절차와 시기를 먼저 상의해야 하나",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210220143"], "article_ids": ["제20조"], "attachment_ids": []}
+    },
+    {
+      "id": "semantic-nav",
+      "group": "semantic",
+      "answerability": "answerable",
+      "query": "ETF 종가가 NAV에서 너무 벌어지면 LP는 어떤 호가를 내야 하나",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210225665"], "article_ids": ["제20조의4"], "attachment_ids": []}
+    },
+    {
+      "id": "semantic-margin-use",
+      "group": "semantic",
+      "answerability": "answerable",
+      "query": "고객이 맡긴 증거금을 회원사 돈처럼 다른 데 써도 되나",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210199976"], "article_ids": ["제139조"], "attachment_ids": []}
+    },
+    {
+      "id": "semantic-settlement",
+      "group": "semantic",
+      "answerability": "answerable",
+      "query": "결제 전에 선물 최종가격이 잘못된 걸 발견하면 거래소가 다시 계산할 수 있나",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210199976"], "article_ids": ["제165조"], "attachment_ids": []}
+    },
+    {
+      "id": "semantic-intraday",
+      "group": "semantic",
+      "answerability": "answerable",
+      "query": "청산회원이 장중에 추가 증거금 내라는 통보를 받으면 언제까지 받아야 하나",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210124485"], "article_ids": ["제88조"], "attachment_ids": []}
+    },
+    {
+      "id": "semantic-typo",
+      "group": "semantic",
+      "answerability": "answerable",
+      "query": "상장예비심사 사전 햡의",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210220143"], "article_ids": ["제20조"], "attachment_ids": []}
+    },
+    {
+      "id": "semantic-mixed-limit",
+      "group": "semantic",
+      "answerability": "answerable",
+      "query": "KRX futures real-time 상하한가 폭",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210228709", "210199976"], "article_ids": ["제60조의4", "제70조의2"], "attachment_ids": []}
+    },
+    {
+      "id": "semantic-lei",
+      "group": "semantic",
+      "answerability": "answerable",
+      "query": "거래 상대방을 보고할 때 법인 식별번호 뭐 써야 해",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["204847960"], "article_ids": ["제17조"], "attachment_ids": []}
+    },
+    {
+      "id": "alias-dynamic-limit",
+      "group": "alias",
+      "answerability": "answerable",
+      "query": "동적상하한가",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210228709", "210199976"], "article_ids": ["제60조의4", "제70조의2"], "attachment_ids": []}
+    },
+    {
+      "id": "alias-nav",
+      "group": "alias",
+      "answerability": "answerable",
+      "query": "NAV 괴리율 순자산가치",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210225665", "210222644", "210049902"], "article_ids": ["제20조의4", "제96조", "제18조"], "attachment_ids": []}
+    },
+    {
+      "id": "alias-lp",
+      "group": "alias",
+      "answerability": "answerable",
+      "query": "LP 유동성공급자 의무",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210225665", "210225129", "210220143", "210223538", "210223624"], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "alias-clearing",
+      "group": "alias",
+      "answerability": "answerable",
+      "query": "clearing settlement 최종결제가격",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210228709", "210199976"], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "alias-margin",
+      "group": "alias",
+      "answerability": "answerable",
+      "query": "margin collateral 증거금",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210210269", "210217736", "210199976", "210124485"], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "english-listing",
+      "group": "english",
+      "answerability": "answerable",
+      "query": "preliminary listing review prior consultation",
+      "search_arguments": {"language": "en", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210220143-en"], "article_ids": ["§20"], "attachment_ids": []}
+    },
+    {
+      "id": "english-limit",
+      "group": "english",
+      "answerability": "answerable",
+      "query": "real-time price limit of quotations",
+      "search_arguments": {"language": "en", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210199976-en"], "article_ids": ["§70-2"], "attachment_ids": []}
+    },
+    {
+      "id": "english-margin-use",
+      "group": "english",
+      "answerability": "answerable",
+      "query": "restriction on use of customer margin",
+      "search_arguments": {"language": "en", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210199976-en"], "article_ids": ["§139"], "attachment_ids": []}
+    },
+    {
+      "id": "english-intraday",
+      "group": "english",
+      "answerability": "answerable",
+      "query": "intraday customer clearing margin deposit deadline",
+      "search_arguments": {"language": "en", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210124485-en"], "article_ids": ["§88"], "attachment_ids": []}
+    },
+    {
+      "id": "english-lei",
+      "group": "english",
+      "answerability": "answerable",
+      "query": "legal entity identifier reporting counterparty",
+      "search_arguments": {"language": "en", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["204847960-en"], "article_ids": ["§17"], "attachment_ids": []}
+    },
+    {
+      "id": "attachment-duty-rate",
+      "group": "attachment",
+      "answerability": "answerable",
+      "query": "의무충족일수 시장조성일수 기간의무이행률",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210202173"], "article_ids": [], "attachment_ids": ["210202173-210219676-hwp"]}
+    },
+    {
+      "id": "attachment-latex",
+      "group": "attachment",
+      "answerability": "answerable",
+      "query": "\\frac 의무충족일수 시장조성일수 기간의무이행률",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210202173"], "article_ids": [], "attachment_ids": ["210202173-210219676-hwp"]}
+    },
+    {
+      "id": "attachment-score",
+      "group": "attachment",
+      "answerability": "answerable",
+      "query": "상품별 평가항목 점수 min 10 거래실적 평가기준",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210202173"], "article_ids": [], "attachment_ids": ["210202173-210134238-hwp"]}
+    },
+    {
+      "id": "attachment-margin-vars",
+      "group": "attachment",
+      "answerability": "answerable",
+      "query": "증거금 감면액 산출변수 상품군 가격상관율 상대적규모비율",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210210269"], "article_ids": [], "attachment_ids": ["210210269-210113201-hwp"]}
+    },
+    {
+      "id": "attachment-quote-duty",
+      "group": "attachment",
+      "answerability": "answerable",
+      "query": "의무호가 제시시간 의무발생시간 일중의무이행률",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {
+        "document_ids": ["210202173", "210205830", "210223538", "210225129"],
+        "article_ids": [],
+        "attachment_ids": ["210202173-210219676-hwp", "210205830-210219860-hwp"]
+      }
+    },
+    {
+      "id": "notice-dual-listing",
+      "group": "filter",
+      "answerability": "answerable",
+      "query": "중복상장 규제 회피 우회상장 위약금",
+      "search_arguments": {"language": "ko", "document_type": "notice", "limit": 5},
+      "expected": {"document_ids": ["210231017", "210231020", "210231033"], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "notice-short-selling",
+      "group": "filter",
+      "answerability": "answerable",
+      "query": "차입공매도 업틱룰 예외 개정 예고",
+      "search_arguments": {"language": "ko", "document_type": "notice", "limit": 5},
+      "expected": {"document_ids": ["210224396"], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "filter-rule-listing",
+      "group": "filter",
+      "answerability": "answerable",
+      "query": "상장 사전협의",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210220143"], "article_ids": ["제20조"], "attachment_ids": []}
+    },
+    {
+      "id": "filter-category-limit",
+      "group": "filter",
+      "answerability": "answerable",
+      "query": "가격제한폭",
+      "search_arguments": {
+        "language": "ko",
+        "document_type": "rule",
+        "category": "업무규정 / 파생상품시장규정",
+        "limit": 5
+      },
+      "expected": {"document_ids": ["210228709", "210199976"], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "fact-nav-threshold",
+      "group": "fact",
+      "answerability": "answerable",
+      "query": "ETF ETN 종가가 순자산가치에서 3퍼센트 6퍼센트 벌어질 때 유동성공급호가",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210225665"], "article_ids": ["제20조의4"], "attachment_ids": []}
+    },
+    {
+      "id": "fact-intraday-1400",
+      "group": "fact",
+      "answerability": "answerable",
+      "query": "일중청산위탁증거금 오후 2시 14:00 예탁시한",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210124485"], "article_ids": ["제88조"], "attachment_ids": []}
+    },
+    {
+      "id": "fact-listing-scope",
+      "group": "fact",
+      "answerability": "answerable",
+      "query": "상장신청 전 절차와 시기 및 우회상장 해당 여부 사전협의",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210220143"], "article_ids": ["제20조"], "attachment_ids": []}
+    },
+    {
+      "id": "fact-five-days",
+      "group": "fact",
+      "answerability": "answerable",
+      "query": "시장조성일수가 5일 미만이면 평가대상에서 제외",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210202173"], "article_ids": [], "attachment_ids": ["210202173-210219676-hwp"]}
+    },
+    {
+      "id": "false-listing-no-consult",
+      "group": "false-premise",
+      "answerability": "answerable",
+      "query": "상장 신청 전에는 거래소와 사전협의할 필요가 없다는 규정",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210220143"], "article_ids": ["제20조"], "attachment_ids": []}
+    },
+    {
+      "id": "false-margin-any-use",
+      "group": "false-premise",
+      "answerability": "answerable",
+      "query": "회원은 고객 위탁증거금을 아무 용도로나 사용할 수 있다는 규정",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["210199976"], "article_ids": ["제139조"], "attachment_ids": []}
+    },
+    {
+      "id": "false-uti-forbidden",
+      "group": "false-premise",
+      "answerability": "answerable",
+      "query": "보고대상거래에는 UTI를 포함하면 안 된다는 규정",
+      "search_arguments": {"language": "ko", "document_type": "rule", "limit": 5},
+      "expected": {"document_ids": ["204847960"], "article_ids": ["제18조"], "attachment_ids": []}
+    },
+    {
+      "id": "ood-eiffel",
+      "group": "out-of-domain",
+      "answerability": "unanswerable",
+      "query": "파리의 에펠탑 높이는 얼마인가",
+      "search_arguments": {"language": "ko", "limit": 5},
+      "expected": {"document_ids": [], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "ood-space",
+      "group": "out-of-domain",
+      "answerability": "unanswerable",
+      "query": "ZXQJ-99182 외계행성 채굴 허가 규정",
+      "search_arguments": {"language": "ko", "limit": 5},
+      "expected": {"document_ids": [], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "ood-license",
+      "group": "out-of-domain",
+      "answerability": "unanswerable",
+      "query": "대한민국 운전면허 갱신 준비물",
+      "search_arguments": {"language": "ko", "limit": 5},
+      "expected": {"document_ids": [], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "ood-quantum",
+      "group": "out-of-domain",
+      "answerability": "unanswerable",
+      "query": "양자컴퓨터 큐비트 오류정정 규칙",
+      "search_arguments": {"language": "ko", "limit": 5},
+      "expected": {"document_ids": [], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "ood-mars",
+      "group": "out-of-domain",
+      "answerability": "unanswerable",
+      "query": "KRX 규정에 화성 토지 소유권 조항이 있는가",
+      "search_arguments": {"language": "ko", "limit": 5},
+      "expected": {"document_ids": [], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "broad-limit",
+      "group": "broad",
+      "answerability": "ambiguous",
+      "query": "가격제한폭",
+      "search_arguments": {"language": "ko", "limit": 5},
+      "expected": {"document_ids": [], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "broad-margin",
+      "group": "broad",
+      "answerability": "ambiguous",
+      "query": "증거금",
+      "search_arguments": {"language": "ko", "limit": 5},
+      "expected": {"document_ids": [], "article_ids": [], "attachment_ids": []}
+    },
+    {
+      "id": "broad-listing",
+      "group": "broad",
+      "answerability": "ambiguous",
+      "query": "상장",
+      "search_arguments": {"language": "ko", "limit": 5},
+      "expected": {"document_ids": [], "article_ids": [], "attachment_ids": []}
+    }
+  ]
+}

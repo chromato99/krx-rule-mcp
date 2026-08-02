@@ -18,10 +18,11 @@ import (
 
 const (
 	indexSnapshotFormatVersion  uint16 = 6
-	indexerVersion                     = "tokenizer-ko-2gram-3gram-script-html-alias-structured-anchor-v1-asset-ref-v1-chunk1600-md-html-table-row-equation-pair-bm25-k1-1.4-b-0.75"
+	IndexerVersion                     = "tokenizer-ko-2gram-3gram-script-html-alias-structured-anchor-v2-en-section-evidence-only-chunk1600-md-html-table-row-equation-pair-bm25-k1-1.4-b-0.75-chunk-rrf-v1"
+	indexerVersion                     = IndexerVersion
 	vectorSnapshotFormatVersion uint16 = VectorSnapshotFormatVersion
 	VectorSnapshotFormatVersion uint16 = 3
-	VectorMetadataFormatVersion        = 3
+	VectorMetadataFormatVersion        = 4
 )
 
 type VectorScope string
@@ -32,23 +33,24 @@ const (
 )
 
 type VectorMetadata struct {
-	Version              int         `json:"version"`
-	GeneratedAt          string      `json:"generated_at"`
-	GenerationID         string      `json:"generation_id"`
-	IndexSourceHash      string      `json:"index_source_hash"`
-	IndexBuildHash       string      `json:"index_build_hash"`
-	CorpusReleaseHash    string      `json:"corpus_release_hash,omitempty"`
-	CorpusHash           string      `json:"corpus_hash,omitempty"`
-	Model                string      `json:"model"`
-	ModelRevision        string      `json:"model_revision,omitempty"`
-	Dimensions           int         `json:"dimensions"`
-	QueryPrefix          string      `json:"query_prefix"`
-	DocumentPrefix       string      `json:"document_prefix"`
-	Scope                VectorScope `json:"scope"`
-	ExpectedChunkCount   int         `json:"expected_chunk_count"`
-	StoredVectorCount    int         `json:"stored_vector_count"`
-	ChunkIDSetHash       string      `json:"chunk_id_set_hash"`
-	StoredChunkIDSetHash string      `json:"stored_chunk_id_set_hash"`
+	Version              int                  `json:"version"`
+	GeneratedAt          string               `json:"generated_at"`
+	GenerationID         string               `json:"generation_id"`
+	IndexSourceHash      string               `json:"index_source_hash"`
+	IndexBuildHash       string               `json:"index_build_hash"`
+	CorpusReleaseHash    string               `json:"corpus_release_hash,omitempty"`
+	CorpusHash           string               `json:"corpus_hash,omitempty"`
+	Model                string               `json:"model"`
+	ModelRevision        string               `json:"model_revision,omitempty"`
+	Dimensions           int                  `json:"dimensions"`
+	QueryPrefix          string               `json:"query_prefix"`
+	DocumentPrefix       string               `json:"document_prefix"`
+	InputFormat          EmbeddingInputFormat `json:"input_format"`
+	Scope                VectorScope          `json:"scope"`
+	ExpectedChunkCount   int                  `json:"expected_chunk_count"`
+	StoredVectorCount    int                  `json:"stored_vector_count"`
+	ChunkIDSetHash       string               `json:"chunk_id_set_hash"`
+	StoredChunkIDSetHash string               `json:"stored_chunk_id_set_hash"`
 }
 
 func BuildSnapshot(dataRoot string) (Snapshot, []model.Document, error) {
@@ -168,6 +170,7 @@ type VectorWriteOptions struct {
 	ModelRevision  string
 	QueryPrefix    string
 	DocumentPrefix string
+	InputFormat    EmbeddingInputFormat
 	GenerationID   string
 }
 
@@ -270,6 +273,9 @@ func LoadVectorMetadataWithDigest(path string) (VectorMetadata, string, error) {
 			err = fmt.Errorf("unexpected second JSON value")
 		}
 		return VectorMetadata{}, digest, fmt.Errorf("vector metadata contains trailing data: %w", err)
+	}
+	if metadata.Version == 3 && metadata.InputFormat == "" {
+		metadata.InputFormat = EmbeddingInputTextV1
 	}
 	return metadata, digest, nil
 }

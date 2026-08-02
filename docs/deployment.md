@@ -123,6 +123,7 @@ docker run --rm --network krx-rule-mcp_default \
   -e KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small \
   -e KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
   -e KRX_EMBEDDING_DIMENSIONS=384 \
+  -e KRX_EMBEDDING_INPUT_FORMAT=text-v1 \
   krx-rule-mcp:local \
   --data-dir /app/data \
   --index-dir /app/index \
@@ -138,7 +139,7 @@ docker run --rm \
 ```
 
 The vector command builds the full corpus by default. For a cheap smoke test, add `--vector-sample-query "상장 심사" --vector-sample-per-query 16`.
-`--vector-index` is retained as the vector-inclusion selector; BM25, vector, metadata, and `generation.json` are published together below `generations/<id>/`. The default vector settings are `intfloat/multilingual-e5-small`, 384 dimensions, `query: ` query prefix, and `passage: ` document prefix. If you use another embedding model, set the matching indexing/serving variables and publish a new generation.
+`--vector-index` is retained as the vector-inclusion selector; BM25, vector, metadata, and `generation.json` are published together below `generations/<id>/`. The default vector settings are `intfloat/multilingual-e5-small`, 384 dimensions, `query: ` query prefix, `passage: ` document prefix, and `text-v1` document input. If you use another embedding model or input format, set the matching indexing/serving variables and publish a new full generation.
 
 ## Images
 

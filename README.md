@@ -73,6 +73,7 @@ Vector를 포함한 generation은 현재 관리 중인 `krx-rule-markdown/data` 
 | dimensions | `384` |
 | document prefix | `passage: ` |
 | query prefix | `query: ` |
+| document input | `structured-v1` (`title/category/article/heading/source` + text) |
 
 같은 corpus와 같은 embedding 설정을 사용한다면 먼저 최신성만 확인하세요.
 
@@ -85,7 +86,7 @@ go run ./cmd/krx-rule-index \
   --check
 ```
 
-새 checkout의 기본 generation이 현재 corpus와 맞지 않거나 corpus를 재생성했다면 서버를 올리기 전에 `krx-rule-index`를 실행하세요. Schema-v2 manifest, strict release profile, frontmatter parity, corpus hash가 먼저 검증됩니다. BM25가 없거나 맞지 않으면 서버는 기동을 실패합니다. Vector는 같은 generation 안에서 corpus/build hash, model, dimensions, prefix, chunk-id coverage와 metadata digest가 모두 맞을 때만 채택됩니다.
+새 checkout의 기본 generation이 현재 corpus와 맞지 않거나 corpus를 재생성했다면 서버를 올리기 전에 `krx-rule-index`를 실행하세요. Schema-v2 manifest, strict release profile, frontmatter parity, corpus hash가 먼저 검증됩니다. BM25가 없거나 맞지 않으면 서버는 기동을 실패합니다. Vector는 같은 generation 안에서 corpus/build hash, model, dimensions, prefix, embedding input format, chunk-id coverage와 metadata digest가 모두 맞을 때만 채택됩니다.
 
 ```bash
 go run ./cmd/krx-rule-index \
@@ -95,7 +96,7 @@ go run ./cmd/krx-rule-index \
 
 이미 최신이면 활성 generation id를 출력하고 종료합니다. 강제로 새 generation을 만들려면 `--force`, 쓰기 없이 활성 descriptor와 모든 artifact digest까지 확인하려면 `--check`를 사용합니다. 저장소 기본 index를 갱신할 때는 `--index-dir ./index`로 생성한 `current`와 해당 `generations/<id>/`를 함께 커밋합니다.
 
-Vector index는 선택입니다. 기본 예시는 기본 제공 index와 같은 `intfloat/multilingual-e5-small`, 384차원, E5 prefix를 사용합니다.
+Vector index는 선택입니다. 아래 재현 예시는 기본 제공 generation과 같은 `intfloat/multilingual-e5-small`, 384차원, E5 prefix, `text-v1` 입력을 사용합니다.
 
 ```bash
 docker compose up -d krx-rule-embeddings
@@ -105,6 +106,7 @@ KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
 KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small \
 KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
 KRX_EMBEDDING_DIMENSIONS=384 \
+KRX_EMBEDDING_INPUT_FORMAT=text-v1 \
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
   --index-dir "$KRX_RULE_INDEX_DIR" \
@@ -113,7 +115,7 @@ go run ./cmd/krx-rule-index \
 
 `--vector-index`는 기존 CLI 호환을 위한 “vector 포함” 선택자입니다. 실제 BM25, vector, metadata는 지정한 index 디렉터리의 같은 immutable generation 안에 기록되며 root의 개별 파일을 차례로 덮어쓰지 않습니다.
 
-`KRX_EMBEDDING_QUERY_PREFIX` 기본값은 `query: `, `KRX_EMBEDDING_DOCUMENT_PREFIX` 기본값은 `passage: `입니다. Vector freshness는 corpus hash, model과 revision, dimensions, query/document prefix가 모두 같을 때만 최신으로 봅니다.
+`KRX_EMBEDDING_QUERY_PREFIX` 기본값은 `query: `, `KRX_EMBEDDING_DOCUMENT_PREFIX` 기본값은 `passage: `, `KRX_EMBEDDING_INPUT_FORMAT` 기본값은 `text-v1`입니다. `structured-v1`은 청크 본문 앞에 문서 제목·카테고리·조문·heading path·source를 고정 순서의 field로 넣고, `text-v1`은 본문만 넣습니다. 현재 유지 generation은 두 형식의 고정 evaluator 비교에서 채택한 `text-v1`을 사용합니다. Vector freshness는 corpus hash, model과 revision, dimensions, query/document prefix, input format이 모두 같을 때만 최신으로 봅니다.
 
 다른 embedding 모델을 쓰려면 index 생성과 서버 실행에 같은 embedding 설정을 사용해야 합니다. 예를 들어 OpenAI 호환 외부 API로 `text-embedding-3-small`을 쓰는 경우:
 
@@ -124,6 +126,7 @@ export KRX_EMBEDDING_MODEL=text-embedding-3-small
 export KRX_EMBEDDING_DIMENSIONS=1536
 export KRX_EMBEDDING_QUERY_PREFIX=""
 export KRX_EMBEDDING_DOCUMENT_PREFIX=""
+export KRX_EMBEDDING_INPUT_FORMAT=structured-v1
 
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
@@ -299,8 +302,9 @@ curl http://localhost:8080/healthz
 - `OPENAI_API_KEY=local`
 - `KRX_EMBEDDING_QUERY_PREFIX=query: `
 - `KRX_EMBEDDING_DOCUMENT_PREFIX=passage: `
+- `KRX_EMBEDDING_INPUT_FORMAT=text-v1`
 
-외부 OpenAI 호환 embeddings API나 다른 TEI 모델을 쓰려면 vector 포함 generation을 새 설정으로 재생성하고, 서버 실행 환경에도 같은 `KRX_EMBEDDING_*` 값을 지정하세요. Vector metadata에는 corpus/index hash, model/revision, dimensions, query/document prefix, scope와 chunk-id coverage가 기록되며 하나라도 다르면 vector 검색은 비활성화되거나 required 정책에서 기동을 실패합니다.
+외부 OpenAI 호환 embeddings API나 다른 TEI 모델을 쓰려면 vector 포함 generation을 새 설정으로 재생성하고, 서버 실행 환경에도 같은 `KRX_EMBEDDING_*` 값을 지정하세요. Vector metadata에는 corpus/index hash, model/revision, dimensions, query/document prefix, embedding input format, scope와 chunk-id coverage가 기록되며 하나라도 다르면 vector 검색은 비활성화되거나 required 정책에서 기동을 실패합니다.
 
 TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 아키텍처에서 동작하고 이 Compose의 CLI·HTTP 계약과 호환되는 이미지를
@@ -314,6 +318,31 @@ TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 기본 사전 파일은 [config/domain-lexicon.yaml](config/domain-lexicon.yaml)입니다. 서버는 시작할 때 이 YAML을 읽고, 파싱/검증에 실패하면 설정 오류로 종료합니다. 다른 파일을 쓰려면 `--domain-lexicon` 또는 `KRX_DOMAIN_LEXICON_PATH`를 지정하세요.
 
 사전은 KRX 법무포털 corpus, KRX 제도 설명 페이지, KRX ETF 용어사전, KRX Global 영문 페이지를 근거로 관리합니다. 자세한 출처와 운영 원칙은 [docs/domain-lexicon.md](docs/domain-lexicon.md)를 참고하세요.
+
+## RAG 품질 평가
+
+`eval/golden/rag-v1.json`은 checksum으로 고정한 원본 50건과 regression/development/holdout을 합친 120건 fixture입니다. Evaluator는 실제 `search_rules`와 `get_context`를 호출해 문서 순위, 근거 조문·첨부, answerability, 필터 누출, 영문 canonical source, HWP 첨부를 판정하고 corpus/index/vector/lexicon provenance를 report에 기록합니다.
+
+```bash
+# 빠른 BM25 진단
+go run ./cmd/krx-rule-eval \
+  --data-dir "$KRX_RULE_DATA_DIR" \
+  --index-dir "$KRX_RULE_INDEX_DIR" \
+  --output eval/results/rag-v1-bm25.json
+
+# release용 full-vector gate
+KRX_VECTOR_SEARCH_ENABLED=true \
+go run ./cmd/krx-rule-eval \
+  --data-dir "$KRX_RULE_DATA_DIR" \
+  --index-dir "$KRX_RULE_INDEX_DIR" \
+  --vector --require-vector --fail-on-gate \
+  --output eval/results/rag-v1-vector.json
+```
+
+Golden expectation은 실행 결과와 분리되어 있습니다. `eval/source/`의 원본 case 수나 SHA-256이 fixture provenance와 다르면 evaluator는 실행을 거부합니다. Release gate에는 full-coverage vector generation과 동일한 embedding 환경변수가 필요합니다.
+Release CI에서 Go build metadata가 제공되지 않는 실행 방식이면 `KRX_RULE_SERVER_COMMIT`에 검증할 source revision을 명시해 report의 `server_commit`을 고정합니다.
+Release gate 기준은 `Document Hit@5 >= 95%`, `MRR@5 >= 0.90`, 전체 및 semantic 계열 `evidence Hit@1 >= 90%`, `evidence Recall@3 >= 95%`, false-premise `evidence Hit@1 >= 90%`, `insufficient refusal >= 95%`, `ambiguous clarification >= 90%`, `filter_leaks = 0`, `context consistency = 100%`, `p95 < 300ms`입니다. Generation `eeac326e54f9d2369979930af4bec1fd2d89f83639b8e0562980183bcac88b01`의 full-vector 기준선은 120건에서 Document Hit@5 `100%`, MRR@5 `0.950`, evidence Hit@1/Recall@3 `95.8%`, semantic/semantic-variant Hit@1 `100%`, false-premise Hit@1 `100%`, refusal/clarification/context `100%`, filter leak `0`, p95 `271.89ms`를 기록하며 `eval/baselines/rag-v1-text-vector.json`에 보존됩니다.
+
 
 ## 테스트
 

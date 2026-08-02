@@ -177,7 +177,7 @@ func LoadRepositoryGeneration(dataRoot, indexDir string, options RepositoryLoadO
 		if status.MetadataDigest != descriptor.Vector.Metadata.SHA256 {
 			return nil, fmt.Errorf("generation vector metadata digest mismatch: descriptor=%s loaded=%s", descriptor.Vector.Metadata.SHA256, status.MetadataDigest)
 		}
-		if status.RejectedReason == "" && status.LoadedVectors > 0 && (status.Metadata.Model != descriptor.Vector.Model || status.Metadata.ModelRevision != descriptor.Vector.Revision || status.Metadata.StoredVectorCount != descriptor.Vector.Vectors) {
+		if status.RejectedReason == "" && status.LoadedVectors > 0 && (status.Metadata.Model != descriptor.Vector.Model || status.Metadata.ModelRevision != descriptor.Vector.Revision || status.Metadata.InputFormat != descriptor.Vector.InputFormat || status.Metadata.StoredVectorCount != descriptor.Vector.Vectors) {
 			return nil, fmt.Errorf("generation vector descriptor does not match loaded metadata")
 		}
 	}
@@ -702,6 +702,10 @@ func vectorMetadataRejectReason(metadata VectorMetadata, snap VectorSnapshot) st
 	if err != nil {
 		return "embedding_config_invalid: " + err.Error()
 	}
+	inputFormat, err := ParseEmbeddingInputFormat(os.Getenv("KRX_EMBEDDING_INPUT_FORMAT"))
+	if err != nil {
+		return "embedding_input_format_invalid: " + err.Error()
+	}
 	switch {
 	case metadata.Model != embedder.Model:
 		return "embedding_model_mismatch"
@@ -713,6 +717,8 @@ func vectorMetadataRejectReason(metadata VectorMetadata, snap VectorSnapshot) st
 		return "embedding_query_prefix_mismatch"
 	case metadata.DocumentPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: "):
 		return "embedding_document_prefix_mismatch"
+	case metadata.InputFormat != inputFormat:
+		return "embedding_input_format_mismatch"
 	default:
 		return ""
 	}
@@ -720,7 +726,7 @@ func vectorMetadataRejectReason(metadata VectorMetadata, snap VectorSnapshot) st
 
 func vectorMetadataRejectReasonWithoutEnvironment(metadata VectorMetadata, snap VectorSnapshot) string {
 	switch {
-	case metadata.Version != VectorMetadataFormatVersion:
+	case metadata.Version != VectorMetadataFormatVersion && !(metadata.Version == 3 && metadata.InputFormat == EmbeddingInputTextV1):
 		return "metadata_version_mismatch"
 	case metadata.GenerationID != snap.GenerationID:
 		return "metadata_generation_mismatch"
@@ -786,6 +792,7 @@ func engineFromSnapshot(docs []model.Document, snap Snapshot, vectors map[string
 			tokenMap:         countTokens(item.Tokens),
 			Vector:           vectors[item.ID],
 		}
+		c.vectorNorm = finiteVectorNorm(c.Vector)
 		index := len(e.chunks)
 		e.chunks = append(e.chunks, c)
 		e.chunkByID[c.ID] = index

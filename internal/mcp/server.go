@@ -45,11 +45,13 @@ const (
 // DocumentDTO is the stable public representation of a corpus document. It
 // deliberately omits local paths, raw-file hashes, and conversion errors.
 type DocumentDTO struct {
-	ID              string             `json:"id"`
-	Title           string             `json:"title"`
-	Category        string             `json:"category,omitempty"`
-	SourceURL       string             `json:"source_url"`
-	OfficialSource  *OfficialSourceDTO `json:"official_source,omitempty"`
+	ID                    string                    `json:"id"`
+	Title                 string                    `json:"title"`
+	Category              string                    `json:"category,omitempty"`
+	SourceURL             string                    `json:"source_url"`
+	OfficialSource        *OfficialSourceDTO        `json:"official_source,omitempty"`
+	CanonicalKoreanSource *CanonicalKoreanSourceDTO `json:"canonical_korean_source,omitempty"`
+
 	EffectiveDate   string             `json:"effective_date,omitempty"`
 	PublishedDate   string             `json:"published_date,omitempty"`
 	CollectedAt     time.Time          `json:"collected_at"`
@@ -118,6 +120,19 @@ type QualityNotice struct {
 	Searchable bool     `json:"searchable"`
 }
 
+// CanonicalKoreanSourceDTO links an English discovery document to the
+// corresponding Korean corpus document. The English text remains a discovery
+// aid; current legal use must verify the Korean official source.
+type CanonicalKoreanSourceDTO struct {
+	ID             string             `json:"id"`
+	Title          string             `json:"title"`
+	SourceURL      string             `json:"source_url"`
+	OfficialSource *OfficialSourceDTO `json:"official_source,omitempty"`
+	EffectiveDate  string             `json:"effective_date,omitempty"`
+	URI            string             `json:"uri"`
+	AuthorityNote  string             `json:"authority_note"`
+}
+
 // OfficialSourceDTO describes how to reopen the official KRX source without
 // exposing collection credentials or local preservation paths. A fresh portal
 // session/CSRF value may still be required by the official site.
@@ -130,14 +145,16 @@ type OfficialSourceDTO struct {
 }
 
 type SearchResultDTO struct {
-	ID                string               `json:"id"`
-	Title             string               `json:"title"`
-	Category          string               `json:"category,omitempty"`
-	DocumentType      model.DocumentType   `json:"document_type"`
-	Language          string               `json:"language"`
-	SourceID          string               `json:"source_id,omitempty"`
-	SourceURL         string               `json:"source_url"`
-	OfficialSource    *OfficialSourceDTO   `json:"official_source,omitempty"`
+	ID                    string                    `json:"id"`
+	Title                 string                    `json:"title"`
+	Category              string                    `json:"category,omitempty"`
+	DocumentType          model.DocumentType        `json:"document_type"`
+	Language              string                    `json:"language"`
+	SourceID              string                    `json:"source_id,omitempty"`
+	SourceURL             string                    `json:"source_url"`
+	OfficialSource        *OfficialSourceDTO        `json:"official_source,omitempty"`
+	CanonicalKoreanSource *CanonicalKoreanSourceDTO `json:"canonical_korean_source,omitempty"`
+
 	EffectiveDate     string               `json:"effective_date,omitempty"`
 	PublishedDate     string               `json:"published_date,omitempty"`
 	Score             float64              `json:"score"`
@@ -151,9 +168,11 @@ type SearchResultDTO struct {
 	ArticleID         string               `json:"article_id,omitempty"`
 	HeadingPath       []string             `json:"heading_path,omitempty"`
 	AttachmentMatches []AttachmentMatchDTO `json:"attachment_matches,omitempty"`
-	FormulaNotice     *model.FormulaNotice `json:"formula_notice,omitempty"`
-	QualityNotice     *QualityNotice       `json:"quality_notice,omitempty"`
-	URI               string               `json:"uri"`
+	EvidenceMatches   []EvidenceMatchDTO   `json:"evidence_matches,omitempty"`
+
+	FormulaNotice *model.FormulaNotice `json:"formula_notice,omitempty"`
+	QualityNotice *QualityNotice       `json:"quality_notice,omitempty"`
+	URI           string               `json:"uri"`
 }
 
 type AttachmentMatchDTO struct {
@@ -172,6 +191,25 @@ type AttachmentMatchDTO struct {
 	Snippet       string                 `json:"snippet,omitempty"`
 	QualityNotice *QualityNotice         `json:"quality_notice,omitempty"`
 	FormulaNotice *model.FormulaNotice   `json:"formula_notice,omitempty"`
+}
+type EvidenceMatchDTO struct {
+	ChunkID          string                 `json:"chunk_id"`
+	ChunkIndex       int                    `json:"chunk_index"`
+	Source           string                 `json:"source"`
+	AttachmentID     string                 `json:"attachment_id,omitempty"`
+	AttachmentTitle  string                 `json:"attachment_title,omitempty"`
+	AttachmentFile   string                 `json:"attachment_file,omitempty"`
+	AttachmentStatus model.AttachmentStatus `json:"attachment_status,omitempty"`
+	SourceURL        string                 `json:"source_url,omitempty"`
+	Searchable       bool                   `json:"searchable"`
+	Score            float64                `json:"score"`
+	BM25Score        float64                `json:"bm25_score,omitempty"`
+	VectorScore      float64                `json:"vector_score,omitempty"`
+	LexicalCoverage  float64                `json:"lexical_coverage"`
+	Snippet          string                 `json:"snippet,omitempty"`
+	ArticleID        string                 `json:"article_id,omitempty"`
+	HeadingPath      []string               `json:"heading_path,omitempty"`
+	QualityNotice    *QualityNotice         `json:"quality_notice,omitempty"`
 }
 
 type ChunkDTO struct {
@@ -202,6 +240,9 @@ type SearchRulesInput struct {
 }
 
 type SearchRulesOutput struct {
+	Answerable    bool                              `json:"answerable"`
+	Answerability searchindex.AnswerabilityDecision `json:"answerability"`
+
 	ReleaseGeneration string                            `json:"release_generation,omitempty"`
 	Mode              string                            `json:"mode"`
 	ScoreNote         string                            `json:"score_note"`
@@ -412,6 +453,14 @@ func validateToolOutput(output any, maxBytes int) error {
 	return nil
 }
 
+// SearchRules runs the same validation, retrieval, and public-contract path as
+// the MCP search_rules tool. It exists for the versioned offline evaluator so
+// evaluation cannot drift into a second search implementation.
+func (s *Service) SearchRules(ctx context.Context, in SearchRulesInput) (SearchRulesOutput, error) {
+	_, out, err := s.searchRules(ctx, &mcpsdk.CallToolRequest{}, in)
+	return out, err
+}
+
 func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in SearchRulesInput) (*mcpsdk.CallToolResult, SearchRulesOutput, error) {
 	started := time.Now()
 	defer func() { s.observeTool("search_rules", started) }()
@@ -448,9 +497,25 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	searchQuery := query
 	var queryExpansion *searchindex.DomainQueryExpansion
 	var tokenWeights map[string]float64
+	var evidenceTokenWeights map[string]float64
+	var evidenceTerms []string
+	trustedExpansion := false
+	evidenceExpansion := searchindex.DomainQueryExpansion{OriginalQuery: query}
 	if expansion.Applied() {
 		searchQuery = expansion.ExpandedQuery
 		tokenWeights = expansion.TokenWeights(0.4)
+		for _, match := range expansion.AppliedTerms {
+			if strings.EqualFold(strings.TrimSpace(match.ReviewStatus), "curated-corpus") {
+				evidenceExpansion.AppliedTerms = append(evidenceExpansion.AppliedTerms, match)
+				evidenceTerms = append(evidenceTerms, match.AddedTerms...)
+			}
+			if strings.EqualFold(strings.TrimSpace(match.Confidence), "high") {
+				trustedExpansion = true
+			}
+		}
+		if len(evidenceExpansion.AppliedTerms) > 0 {
+			evidenceTokenWeights = evidenceExpansion.TokenWeights(0.4)
+		}
 		queryExpansion = &expansion
 	}
 	filter := searchindex.Filter{
@@ -466,13 +531,13 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	if s.VectorRequired && !vectorAvailable {
 		return nil, SearchRulesOutput{}, fmt.Errorf("vector search is required but the embedder or vector index is unavailable")
 	}
-	if vectorAvailable && strings.TrimSpace(searchQuery) != "" {
+	if vectorAvailable && query != "" {
 		embeddingTimeout := s.EmbeddingTimeout
 		if embeddingTimeout <= 0 {
 			embeddingTimeout = 3 * time.Second
 		}
 		embedCtx, cancel := context.WithTimeout(ctx, embeddingTimeout)
-		vectors, err := s.Embedder.Embed(embedCtx, []string{searchQuery})
+		vectors, err := s.Embedder.Embed(embedCtx, []string{query})
 		cancel()
 		if err != nil {
 			reason := "embedding_error"
@@ -510,24 +575,55 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 		}
 	}
 	results := s.Repo.Engine.Search(searchindex.SearchOptions{
-		Query:        searchQuery,
-		Limit:        in.Limit,
-		Filter:       filter,
-		QueryVector:  queryVector,
-		TokenWeights: tokenWeights,
+		Query:                searchQuery,
+		OriginalQuery:        query,
+		Limit:                in.Limit,
+		Filter:               filter,
+		QueryVector:          queryVector,
+		TokenWeights:         tokenWeights,
+		EvidenceTokenWeights: evidenceTokenWeights,
+		EvidenceTerms:        evidenceTerms,
+		EvidenceLimit:        3,
 	})
 	mode, vectorScored := refineSearchMode(queryExpansion != nil, queryVectorAdopted, results)
 	if queryVectorAdopted && !vectorScored {
 		s.countEmbeddingFallback("no_vector_scores")
 	}
+	contractValid := s.Repo != nil && s.Repo.IndexerVersion == searchindex.IndexerVersion
+	if s.Repo != nil && s.Repo.IndexerVersion == "" && s.Repo.GenerationID == "" && s.Repo.BM25ArtifactDigest == "" {
+		// Hermetic in-memory repositories used by callers/tests have no artifact
+		// identity. Loaded generations must always match the versioned contract.
+		contractValid = true
+	}
+	unknownSpecificTerms := 0
+	if s.Repo != nil && s.Repo.Engine != nil {
+		unknownSpecificTerms = s.Repo.Engine.UnknownSpecificTermCount(query)
+	}
+	answerability := searchindex.EvaluateAnswerability(searchindex.AnswerabilityInput{
+		Query:                    query,
+		Filter:                   filter,
+		DomainExpansionApplied:   trustedExpansion || (queryExpansion != nil && unknownSpecificTerms <= 1),
+		ContractValid:            contractValid,
+		UnknownSpecificTermCount: unknownSpecificTerms,
+		Results:                  results,
+	})
+	switch answerability.Status {
+	case searchindex.AnswerabilityInsufficient, searchindex.AnswerabilityUnknown:
+		results = nil
+	case searchindex.AnswerabilityAmbiguous:
+		results = diverseResults(results, 3)
+	}
 	s.addFormulaNotices(results)
 	return nil, SearchRulesOutput{
 		ReleaseGeneration: s.ReleaseGeneration,
+		Answerable:        answerability.Status == searchindex.AnswerabilitySupported,
+		Answerability:     answerability,
 		Mode:              mode,
-		ScoreNote:         "Scores are ranking signals for ordering results; they are not confidence probabilities. Verify current Korean text at source_url for authoritative use.",
+		ScoreNote:         "Scores are ranking signals for ordering results; they are not confidence probabilities. Answerable means this release returned direct evidence, not that a legal claim is true. Verify current Korean text at source_url for authoritative use.",
 		QueryExpansion:    queryExpansion,
 		Results:           s.searchResultDTOs(results),
 	}, nil
+
 }
 
 func validateQueryVector(embedder searchindex.Embedder, engine *searchindex.Engine, vector []float64) string {
@@ -598,13 +694,20 @@ func (s *Service) getRule(_ context.Context, _ *mcpsdk.CallToolRequest, in GetRu
 	}
 	return nil, RuleOutput{
 		ReleaseGeneration: s.ReleaseGeneration,
-		Document:          documentDetailDTO(doc),
+		Document:          s.documentDetailDTO(doc),
 		Content:           content,
 		Offset:            in.Offset,
 		NextOffset:        nextOffset,
 		TotalChars:        total,
 		Truncated:         truncated,
 	}, nil
+}
+
+// GetContext runs the same context lookup used by the MCP get_context tool.
+// The evaluator follows every observed evidence chunk through this method.
+func (s *Service) GetContext(ctx context.Context, in GetContextInput) (ContextOutput, error) {
+	_, out, err := s.getContext(ctx, &mcpsdk.CallToolRequest{}, in)
+	return out, err
 }
 
 func (s *Service) getContext(_ context.Context, _ *mcpsdk.CallToolRequest, in GetContextInput) (*mcpsdk.CallToolResult, ContextOutput, error) {
@@ -650,7 +753,7 @@ func (s *Service) getContext(_ context.Context, _ *mcpsdk.CallToolRequest, in Ge
 	}
 	return nil, ContextOutput{
 		ReleaseGeneration: s.ReleaseGeneration,
-		Document:          documentDTO(doc),
+		Document:          s.documentDTO(doc),
 		Chunks:            s.chunkDTOs(chunks, maxChars),
 		Content:           content,
 		TotalChars:        totalChars,
@@ -681,7 +784,7 @@ func (s *Service) listRules(_ context.Context, _ *mcpsdk.CallToolRequest, in Lis
 	}, limit, offset)
 	return nil, ListRulesOutput{
 		ReleaseGeneration: s.ReleaseGeneration,
-		Documents:         documentDTOs(docs),
+		Documents:         s.documentDTOs(docs),
 		Total:             total,
 		Limit:             limit,
 		Offset:            offset,
@@ -742,7 +845,7 @@ func (s *Service) listRecentChanges(_ context.Context, _ *mcpsdk.CallToolRequest
 	docs, total := s.Repo.Engine.DocumentsPage(searchindex.Filter{DocumentType: documentType, Language: language}, limit, offset)
 	return nil, ListRulesOutput{
 		ReleaseGeneration: s.ReleaseGeneration,
-		Documents:         documentDTOs(docs),
+		Documents:         s.documentDTOs(docs),
 		Total:             total,
 		Limit:             limit,
 		Offset:            offset,
@@ -1022,44 +1125,63 @@ func (s *Service) countEmbeddingFallback(reason string) {
 	}
 }
 
-func documentDTO(doc model.Document) DocumentDTO {
+func (s *Service) documentDTO(doc model.Document) DocumentDTO {
 	return DocumentDTO{
-		ID:              doc.ID,
-		Title:           doc.Title,
-		Category:        doc.Category,
-		SourceURL:       publicDocumentSourceURL(doc.SourceURL),
-		OfficialSource:  officialSourceDTO(doc),
-		EffectiveDate:   doc.EffectiveDate,
-		PublishedDate:   doc.PublishedDate,
-		CollectedAt:     doc.CollectedAt,
-		ContentHash:     doc.ContentHash,
-		Searchable:      doc.IsSearchable(),
-		QualityStatus:   doc.QualityStatus,
-		QualityCodes:    doc.EffectiveQualityCodes(),
-		QualityNotice:   documentQualityNotice(doc),
-		Language:        doc.Language,
-		SourceID:        doc.SourceID,
-		FileName:        publicFileName(doc.FileName),
-		DocumentType:    doc.DocumentType,
-		URI:             doc.URI(),
-		AssetCount:      len(doc.Assets),
-		AttachmentCount: len(doc.Attachments),
+		ID:                    doc.ID,
+		Title:                 doc.Title,
+		Category:              doc.Category,
+		SourceURL:             publicDocumentSourceURL(doc.SourceURL),
+		OfficialSource:        officialSourceDTO(doc),
+		CanonicalKoreanSource: s.canonicalKoreanSource(doc),
+		EffectiveDate:         doc.EffectiveDate,
+		PublishedDate:         doc.PublishedDate,
+		CollectedAt:           doc.CollectedAt,
+		ContentHash:           doc.ContentHash,
+		Searchable:            doc.IsSearchable(),
+		QualityStatus:         doc.QualityStatus,
+		QualityCodes:          doc.EffectiveQualityCodes(),
+		QualityNotice:         documentQualityNotice(doc),
+		Language:              doc.Language,
+		SourceID:              doc.SourceID,
+		FileName:              publicFileName(doc.FileName),
+		DocumentType:          doc.DocumentType,
+		URI:                   doc.URI(),
+		AssetCount:            len(doc.Assets),
+		AttachmentCount:       len(doc.Attachments),
 	}
 }
 
-func documentDetailDTO(doc model.Document) DocumentDTO {
-	dto := documentDTO(doc)
+func (s *Service) documentDetailDTO(doc model.Document) DocumentDTO {
+	dto := s.documentDTO(doc)
 	dto.Assets = assetDTOs(doc.Assets)
 	dto.Attachments = attachmentDTOs(doc.Attachments, doc)
 	return dto
 }
 
-func documentDTOs(docs []model.Document) []DocumentDTO {
+func (s *Service) documentDTOs(docs []model.Document) []DocumentDTO {
 	out := make([]DocumentDTO, 0, len(docs))
 	for _, doc := range docs {
-		out = append(out, documentDTO(doc))
+		out = append(out, s.documentDTO(doc))
 	}
 	return out
+}
+func (s *Service) canonicalKoreanSource(doc model.Document) *CanonicalKoreanSourceDTO {
+	if s == nil || s.Repo == nil || doc.Language != model.LanguageEnglish || strings.TrimSpace(doc.SourceID) == "" {
+		return nil
+	}
+	korean, ok := s.Repo.Documents[doc.SourceID]
+	if !ok || korean.Language != model.LanguageKorean {
+		return nil
+	}
+	return &CanonicalKoreanSourceDTO{
+		ID:             korean.ID,
+		Title:          korean.Title,
+		SourceURL:      publicDocumentSourceURL(korean.SourceURL),
+		OfficialSource: officialSourceDTO(korean),
+		EffectiveDate:  korean.EffectiveDate,
+		URI:            korean.URI(),
+		AuthorityNote:  "English text is a discovery aid. Verify current legal meaning against this Korean official source.",
+	}
 }
 
 func attachmentDTO(att model.Attachment, parent model.Document) AttachmentDTO {
@@ -1244,9 +1366,81 @@ func qualityStatusWarns(status string) bool {
 	return status != "" && status != "pass" && status != "passed" && status != "ok" && status != "good"
 }
 
+func diverseResults(results []searchindex.SearchResult, limit int) []searchindex.SearchResult {
+	if limit <= 0 || len(results) <= limit {
+		return results
+	}
+	out := make([]searchindex.SearchResult, 0, limit)
+	categories := map[string]struct{}{}
+	for _, result := range results {
+		category := strings.TrimSpace(result.Category)
+		if _, exists := categories[category]; exists {
+			continue
+		}
+		categories[category] = struct{}{}
+		out = append(out, result)
+		if len(out) == limit {
+			return out
+		}
+	}
+	for _, result := range results {
+		found := false
+		for _, existing := range out {
+			if existing.ID == result.ID {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		out = append(out, result)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out
+}
+
 func (s *Service) searchResultDTOs(results []searchindex.SearchResult) []SearchResultDTO {
 	out := make([]SearchResultDTO, 0, len(results))
 	for _, result := range results {
+		evidence := make([]EvidenceMatchDTO, 0, len(result.EvidenceMatches))
+		for _, match := range result.EvidenceMatches {
+			searchable := true
+			sourceURL := publicDocumentSourceURL(result.SourceURL)
+			var notice *QualityNotice
+			if match.AttachmentID != "" {
+				if att, ok := s.Repo.Attachments[match.AttachmentID]; ok {
+					searchable = att.Attachment.IsSearchable()
+					sourceURL = publicAttachmentSourceURL(att.Attachment.SourceURL, result.SourceURL)
+					notice = qualityNotice(att.Attachment)
+				}
+			} else if doc, ok := s.Repo.Documents[result.ID]; ok {
+				searchable = doc.IsSearchable()
+				notice = documentQualityNotice(doc)
+			}
+			evidence = append(evidence, EvidenceMatchDTO{
+				ChunkID:          match.ChunkID,
+				ChunkIndex:       match.ChunkIndex,
+				Source:           match.Source,
+				AttachmentID:     match.AttachmentID,
+				AttachmentTitle:  match.AttachmentTitle,
+				AttachmentFile:   publicFileName(match.AttachmentFile),
+				AttachmentStatus: match.AttachmentStatus,
+				SourceURL:        sourceURL,
+				Searchable:       searchable,
+				Score:            match.Score,
+				BM25Score:        match.BM25Score,
+				VectorScore:      match.VectorScore,
+				LexicalCoverage:  match.LexicalCoverage,
+				Snippet:          match.Snippet,
+				ArticleID:        match.ArticleID,
+				HeadingPath:      append([]string(nil), match.HeadingPath...),
+				QualityNotice:    notice,
+			})
+		}
+
 		matches := make([]AttachmentMatchDTO, 0, len(result.AttachmentMatches))
 		for _, match := range result.AttachmentMatches {
 			var notice *QualityNotice
@@ -1277,37 +1471,41 @@ func (s *Service) searchResultDTOs(results []searchindex.SearchResult) []SearchR
 		}
 		var resultNotice *QualityNotice
 		var resultOfficialSource *OfficialSourceDTO
+		var resultCanonicalKoreanSource *CanonicalKoreanSourceDTO
 		if doc, ok := s.Repo.Documents[result.ID]; ok {
 			resultOfficialSource = officialSourceDTO(doc)
+			resultCanonicalKoreanSource = s.canonicalKoreanSource(doc)
 			if result.MatchedSource != "attachment" {
 				resultNotice = documentQualityNotice(doc)
 			}
 		}
 		out = append(out, SearchResultDTO{
-			ID:                result.ID,
-			Title:             result.Title,
-			Category:          result.Category,
-			DocumentType:      result.DocumentType,
-			Language:          result.Language,
-			SourceID:          result.SourceID,
-			SourceURL:         publicDocumentSourceURL(result.SourceURL),
-			OfficialSource:    resultOfficialSource,
-			EffectiveDate:     result.EffectiveDate,
-			PublishedDate:     result.PublishedDate,
-			Score:             result.Score,
-			Searchable:        true,
-			BM25Score:         result.BM25Score,
-			VectorScore:       result.VectorScore,
-			Snippet:           result.Snippet,
-			MatchedSource:     result.MatchedSource,
-			MatchedChunkID:    result.MatchedChunkID,
-			MatchedChunkIndex: result.MatchedChunkIndex,
-			ArticleID:         result.ArticleID,
-			HeadingPath:       append([]string(nil), result.HeadingPath...),
-			AttachmentMatches: matches,
-			FormulaNotice:     result.FormulaNotice,
-			QualityNotice:     resultNotice,
-			URI:               result.URI,
+			ID:                    result.ID,
+			Title:                 result.Title,
+			Category:              result.Category,
+			DocumentType:          result.DocumentType,
+			Language:              result.Language,
+			SourceID:              result.SourceID,
+			SourceURL:             publicDocumentSourceURL(result.SourceURL),
+			OfficialSource:        resultOfficialSource,
+			CanonicalKoreanSource: resultCanonicalKoreanSource,
+			EffectiveDate:         result.EffectiveDate,
+			PublishedDate:         result.PublishedDate,
+			Score:                 result.Score,
+			Searchable:            true,
+			BM25Score:             result.BM25Score,
+			VectorScore:           result.VectorScore,
+			Snippet:               result.Snippet,
+			MatchedSource:         result.MatchedSource,
+			MatchedChunkID:        result.MatchedChunkID,
+			MatchedChunkIndex:     result.MatchedChunkIndex,
+			ArticleID:             result.ArticleID,
+			HeadingPath:           append([]string(nil), result.HeadingPath...),
+			AttachmentMatches:     matches,
+			EvidenceMatches:       evidence,
+			FormulaNotice:         result.FormulaNotice,
+			QualityNotice:         resultNotice,
+			URI:                   result.URI,
 		})
 	}
 	return out

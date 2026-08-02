@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/chromato99/krx-rule-mcp/internal/model"
 )
 
 type Embedder interface {
@@ -18,6 +20,76 @@ type Embedder interface {
 
 type EmbedderInfo interface {
 	EmbeddingInfo() (model string, dimensions int)
+}
+
+type EmbeddingInputFormat string
+
+const (
+	EmbeddingInputTextV1        EmbeddingInputFormat = "text-v1"
+	EmbeddingInputStructuredV1  EmbeddingInputFormat = "structured-v1"
+	DefaultEmbeddingInputFormat                      = EmbeddingInputTextV1
+)
+
+func ParseEmbeddingInputFormat(value string) (EmbeddingInputFormat, error) {
+	format := EmbeddingInputFormat(strings.TrimSpace(value))
+	if format == "" {
+		return DefaultEmbeddingInputFormat, nil
+	}
+	switch format {
+	case EmbeddingInputTextV1, EmbeddingInputStructuredV1:
+		return format, nil
+	default:
+		return "", fmt.Errorf("unsupported embedding input format %q", value)
+	}
+}
+
+// PrepareEmbeddingChunks builds the text sent to the document embedder without
+// changing the canonical chunk text stored in the BM25/vector snapshots.
+func PrepareEmbeddingChunks(chunks []SnapshotChunk, documents []model.Document, format EmbeddingInputFormat) ([]SnapshotChunk, error) {
+	if format == EmbeddingInputTextV1 {
+		return chunks, nil
+	}
+	if format != EmbeddingInputStructuredV1 {
+		return nil, fmt.Errorf("unsupported embedding input format %q", format)
+	}
+	byID := make(map[string]model.Document, len(documents))
+	for _, document := range documents {
+		byID[document.ID] = document
+	}
+	prepared := make([]SnapshotChunk, len(chunks))
+	for index, chunk := range chunks {
+		document, ok := byID[chunk.DocID]
+		if !ok {
+			return nil, fmt.Errorf("embedding chunk %q references unknown document %q", chunk.ID, chunk.DocID)
+		}
+		prepared[index] = chunk
+		prepared[index].Text = structuredEmbeddingText(document, chunk)
+	}
+	return prepared, nil
+}
+
+func structuredEmbeddingText(document model.Document, chunk SnapshotChunk) string {
+	fields := make([]string, 0, 8)
+	fields = append(fields, "document: "+document.Title)
+	if document.Category != "" {
+		fields = append(fields, "category: "+document.Category)
+	}
+	if document.Language != "" {
+		fields = append(fields, "language: "+document.Language)
+	}
+	source := chunk.Source
+	if chunk.AttachmentTitle != "" {
+		source += " / " + chunk.AttachmentTitle
+	}
+	fields = append(fields, "source: "+source)
+	if chunk.ArticleID != "" {
+		fields = append(fields, "article: "+chunk.ArticleID)
+	}
+	if len(chunk.HeadingPath) > 0 {
+		fields = append(fields, "path: "+strings.Join(chunk.HeadingPath, " > "))
+	}
+	fields = append(fields, "text:\n"+chunk.Text)
+	return strings.Join(fields, "\n")
 }
 
 type OpenAIEmbedder struct {

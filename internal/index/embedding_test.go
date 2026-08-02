@@ -8,7 +8,52 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/chromato99/krx-rule-mcp/internal/model"
 )
+
+func TestPrepareEmbeddingChunksSeparatesStructuredInputFromCanonicalText(t *testing.T) {
+	chunks := []SnapshotChunk{{
+		ID: "rule-en#1", DocID: "rule-en", Source: "body", ArticleID: "§818",
+		HeadingPath: []string{"CHAPTER I", "§818. Settlement Quantity"}, Text: "The quantity is multiplied.",
+	}}
+	documents := []model.Document{{
+		ID: "rule-en", Title: "Derivatives Market Business Regulation",
+		Category: "Derivatives", Language: model.LanguageEnglish,
+	}}
+	prepared, err := PrepareEmbeddingChunks(chunks, documents, EmbeddingInputStructuredV1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"document: Derivatives Market Business Regulation",
+		"category: Derivatives",
+		"article: §818",
+		"path: CHAPTER I > §818. Settlement Quantity",
+		"text:\nThe quantity is multiplied.",
+	} {
+		if !strings.Contains(prepared[0].Text, want) {
+			t.Fatalf("structured embedding text missing %q: %q", want, prepared[0].Text)
+		}
+	}
+	if chunks[0].Text != "The quantity is multiplied." {
+		t.Fatalf("canonical chunk text was mutated: %q", chunks[0].Text)
+	}
+	textOnly, err := PrepareEmbeddingChunks(chunks, documents, EmbeddingInputTextV1)
+	if err != nil || textOnly[0].Text != chunks[0].Text {
+		t.Fatalf("text-v1 changed canonical input: %#v, %v", textOnly, err)
+	}
+}
+
+func TestDefaultEmbeddingInputMatchesMaintainedGeneration(t *testing.T) {
+	format, err := ParseEmbeddingInputFormat("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != EmbeddingInputTextV1 {
+		t.Fatalf("default format = %q, want %q", format, EmbeddingInputTextV1)
+	}
+}
 
 func TestOpenAIEmbedderAppliesInputPrefix(t *testing.T) {
 	var captured struct {

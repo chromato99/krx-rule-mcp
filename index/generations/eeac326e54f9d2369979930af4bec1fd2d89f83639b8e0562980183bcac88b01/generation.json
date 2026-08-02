@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "generation_id": "eeac326e54f9d2369979930af4bec1fd2d89f83639b8e0562980183bcac88b01",
+  "created_at": "2026-08-01T14:38:42.770052219Z",
+  "corpus_release_hash": "cb9c80f4717b63afd9cde0eecea8064a1dab789d622f8158a110513bf9d4b7af",
+  "index_source_hash": "97ffb13c1ec9625b4269301e2bcd3f900e610813f3977d0cd68532383c4560ae",
+  "index_build_hash": "928b4f078ece26482fc27ea16d70373c280ccbd3208fc7ecfa6992a8638bda08",
+  "bm25": {
+    "file": "bm25.krxidx",
+    "sha256": "d2d5847b5096f0528d1f8934eea5516c5c6a617053fd6a4b33db7389852229be",
+    "size": 10915868
+  },
+  "vector": {
+    "artifact": {
+      "file": "vectors.krxvec",
+      "sha256": "0b3329edf21e3675f81631df4fd9f8f95869cce3f65eba424418a1125d9aa729",
+      "size": 72264816
+    },
+    "metadata": {
+      "file": "vectors.krxvec.meta.json",
+      "sha256": "d1f31356cde47bbc05da7cd51bc8489cb4a56b138b69e44abc487fc69c221697",
+      "size": 1012
+    },
+    "scope": "full",
+    "model": "intfloat/multilingual-e5-small",
+    "revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+    "input_format": "text-v1",
+    "vectors": 52189
+  }
+}

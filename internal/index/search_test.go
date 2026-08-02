@@ -100,6 +100,50 @@ func TestVectorRRF(t *testing.T) {
 	}
 }
 
+func TestBM25AndVectorCandidatesFromDifferentChunksRemainEvidence(t *testing.T) {
+	doc := model.Document{
+		ID: "mixed-channel", Title: "복합 규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule,
+		Body: "**제1조(상장심사)** 상장 심사 요건을 정한다.\n\n**제2조(결제수량)** 결제 수량을 정한다.",
+	}
+	engine := BuildWithAttachments([]model.Document{doc}, nil, map[string][]float64{
+		"mixed-channel#0": {0, 1},
+		"mixed-channel#1": {1, 0},
+	})
+	results := engine.Search(SearchOptions{Query: "상장 심사", OriginalQuery: "상장 심사", QueryVector: []float64{1, 0}, Limit: 1})
+	if len(results) != 1 || len(results[0].EvidenceMatches) < 2 {
+		t.Fatalf("channel-specific evidence was collapsed: %#v", results)
+	}
+	var bm25Only, vectorOnly bool
+	for _, evidence := range results[0].EvidenceMatches {
+		bm25Only = bm25Only || evidence.BM25Score > 0 && evidence.VectorScore == 0
+		vectorOnly = vectorOnly || evidence.VectorScore > 0 && evidence.BM25Score == 0
+	}
+	if !bm25Only || !vectorOnly {
+		t.Fatalf("BM25/vector evidence provenance was lost: %#v", results[0].EvidenceMatches)
+	}
+	if results[0].MatchedChunkID != results[0].EvidenceMatches[0].ChunkID {
+		t.Fatalf("representative chunk is not the highest-ranked evidence: %#v", results[0])
+	}
+}
+
+func TestArticleEvidenceOutranksTitleOnlyMetadataMatch(t *testing.T) {
+	now := time.Now()
+	titleOnly := model.Document{
+		ID: "title-only", Title: "고유 결제 수량 계산", CollectedAt: now,
+		DocumentType: model.DocumentTypeRule, Body: "일반 사항만 정한다.",
+	}
+	evidence := model.Document{
+		ID: "article-evidence", Title: "파생상품 업무규정", CollectedAt: now,
+		DocumentType: model.DocumentTypeRule, Body: "**제818조(결제수량)** 고유 결제 수량 계산 방법을 정한다.",
+	}
+	results := BuildWithAttachments([]model.Document{titleOnly, evidence}, nil, nil).Search(SearchOptions{
+		Query: "고유 결제 수량 계산", OriginalQuery: "고유 결제 수량 계산", Limit: 2,
+	})
+	if len(results) != 2 || results[0].ID != evidence.ID || results[0].ArticleID != "제818조" {
+		t.Fatalf("title metadata displaced direct article evidence: %#v", results)
+	}
+}
+
 func TestInvalidQueryVectorFallsBackToBM25(t *testing.T) {
 	doc := model.Document{ID: "a", Title: "상장규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "상장 심사"}
 	engine := BuildWithAttachments([]model.Document{doc}, nil, map[string][]float64{"a#0": {1, 0}})
@@ -365,6 +409,81 @@ func TestStructuredChunksPreserveOwningArticleAndHeadingPath(t *testing.T) {
 	}
 }
 
+func TestStructuredChunksSkipEnglishTOCAndPreserveSectionArticleAnchors(t *testing.T) {
+	doc := model.Document{
+		ID:           "rule-english-structure",
+		Title:        "Derivatives Market Business Regulation",
+		CollectedAt:  time.Now(),
+		DocumentType: model.DocumentTypeRule,
+		Language:     model.LanguageEnglish,
+		Body: strings.Join([]string{
+			"TABLE OF CONTENTS",
+			"",
+			"§818. Calculation of Settlement Quantity ........ 42",
+			"",
+			"CHAPTER I. GENERAL PROVISIONS",
+			"",
+			"Section 1. Settlement",
+			"",
+			"§818. Calculation of Settlement Quantity",
+			"",
+			"(1) The settlement quantity equals the exercise quantity multiplied by the multiplier.",
+			"",
+			"§819. Settlement Payment",
+			"",
+			"The Exchange pays the settlement amount.",
+		}, "\n"),
+	}
+	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
+	results := engine.Search(SearchOptions{Query: "exercise quantity multiplier", Limit: 3})
+	wantPath := []string{"CHAPTER I. GENERAL PROVISIONS", "Section 1. Settlement", "§818. Calculation of Settlement Quantity"}
+	if len(results) != 1 || results[0].ArticleID != "§818" || !stringSlicesEqual(results[0].HeadingPath, wantPath) {
+		t.Fatalf("unexpected English structural anchor: %#v", results)
+	}
+	for _, chunk := range engine.chunks {
+		if strings.Contains(chunk.Text, "........ 42") {
+			t.Fatalf("English table of contents row was indexed as evidence: %#v", chunk)
+		}
+	}
+}
+
+func TestChunkCandidatesRemainIndependentUntilDocumentAggregation(t *testing.T) {
+	doc := model.Document{
+		ID: "rule-candidates", Title: "청크 후보 규정", CollectedAt: time.Now(),
+		DocumentType: model.DocumentTypeRule,
+		Body: strings.Join([]string{
+			"**제1조(사전절차)** 사전 신고 절차를 정한다.",
+			"",
+			"**제2조(협의절차)** 협의 요청 절차를 정한다.",
+			"",
+			"**제3조(공동절차)** 사전 협의 결과를 기록한다.",
+		}, "\n"),
+	}
+	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
+	query := "사전 협의"
+	candidates := engine.bm25ChunkCandidates(Tokenize(query), meaningfulQueryTerms(query), Filter{}, nil, 10)
+	if len(candidates) < 3 {
+		t.Fatalf("chunk candidates collapsed before fusion: %#v", candidates)
+	}
+	seen := map[string]struct{}{}
+	for _, candidate := range candidates {
+		if candidate.DocumentID != doc.ID {
+			t.Fatalf("candidate document = %q, want %q", candidate.DocumentID, doc.ID)
+		}
+		seen[candidate.ChunkID] = struct{}{}
+	}
+	if len(seen) != len(candidates) {
+		t.Fatalf("chunk candidates contain duplicate IDs: %#v", candidates)
+	}
+	results := engine.Search(SearchOptions{Query: query, OriginalQuery: query, Limit: 1})
+	if len(results) != 1 || len(results[0].EvidenceMatches) != 3 {
+		t.Fatalf("document aggregation lost top evidence candidates: %#v", results)
+	}
+	if results[0].MatchedChunkID != results[0].EvidenceMatches[0].ChunkID {
+		t.Fatalf("matched chunk %q is not top evidence %q", results[0].MatchedChunkID, results[0].EvidenceMatches[0].ChunkID)
+	}
+}
+
 func TestChunkTextKeepsHWPEquationMathPairAtomic(t *testing.T) {
 	text := strings.Join([]string{
 		"## HWP 수식",
@@ -604,6 +723,58 @@ func TestDomainExpansionTokenWeightsPreferOriginalQuery(t *testing.T) {
 	}
 	if results[0].ID != "original" {
 		t.Fatalf("weighted expansion should prefer original query match, got %#v", results)
+	}
+}
+func TestExpandedEvidencePrefersDirectHeadingPhrase(t *testing.T) {
+	terms := []string{"실시간 가격제한의 가격변동폭"}
+	candidates := []ChunkCandidate{
+		{
+			ChunkID:    "indirect",
+			DocumentID: "rule",
+			FusedScore: 0.040,
+			Text:       "실시간 가격제한의 가격변동폭을 인용한다.",
+			HeadingPath: []string{
+				"제62조(상·하한 단일가호가의 우선순위)",
+			},
+		},
+		{
+			ChunkID:    "direct",
+			DocumentID: "rule",
+			FusedScore: 0.030,
+			HeadingPath: []string{
+				"제60조의4(실시간 가격제한의 가격변동폭)",
+			},
+		},
+	}
+	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms)
+	if len(selected) != 2 || selected[0].ChunkID != "direct" {
+		t.Fatalf("direct heading was not preferred: %#v", selected)
+	}
+}
+
+func TestExpandedEvidenceRewardsMatchingAttachmentPhrase(t *testing.T) {
+	terms := []string{
+		"증거금 감면액 산출변수",
+		"가격상관율을 기초자산별로 산술평균한 값 중 최솟값",
+	}
+	candidates := []ChunkCandidate{
+		{
+			ChunkID:    "body",
+			DocumentID: "rule",
+			FusedScore: 0.035,
+			Text:       "증거금 감면액 산출변수를 변경한다.",
+		},
+		{
+			ChunkID:      "attachment",
+			DocumentID:   "rule",
+			AttachmentID: "att-1",
+			FusedScore:   0.020,
+			Text:         "가격상관율을 기초자산별로 산술평균한 값 중 최솟값으로 한다.",
+		},
+	}
+	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms)
+	if len(selected) != 2 || selected[0].ChunkID != "attachment" {
+		t.Fatalf("matching attachment was not preferred: %#v", selected)
 	}
 }
 

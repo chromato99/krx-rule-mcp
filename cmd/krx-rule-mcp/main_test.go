@@ -179,7 +179,7 @@ func TestReleaseGenerationBindsCanonicalDescriptor(t *testing.T) {
 	if first.ReleaseGeneration != second.ReleaseGeneration || first.ReleaseGeneration == serverChanged.ReleaseGeneration || first.ReleaseGeneration == teiChanged.ReleaseGeneration {
 		t.Fatalf("release generation is not deterministic or runtime-image-bound: first=%s second=%s server_changed=%s tei_changed=%s", first.ReleaseGeneration, second.ReleaseGeneration, serverChanged.ReleaseGeneration, teiChanged.ReleaseGeneration)
 	}
-	if descriptor.Schema != "krx-rule-mcp-release-v3" || descriptor.CorpusReleaseHash == "" || descriptor.CorpusReleaseHash != repo.CorpusReleaseHash || descriptor.IndexSourceHash == "" || descriptor.IndexBuildHash == "" || descriptor.DomainLexiconDigest == "" || descriptor.RuntimeVectorMode != "bm25" || descriptor.ServerImageDigest != "sha256:image-a" || descriptor.TEIImageDigest != "sha256:tei-a" {
+	if descriptor.Schema != "krx-rule-mcp-release-v4" || descriptor.CorpusReleaseHash == "" || descriptor.CorpusReleaseHash != repo.CorpusReleaseHash || descriptor.IndexSourceHash == "" || descriptor.IndexBuildHash == "" || descriptor.DomainLexiconDigest == "" || descriptor.RuntimeVectorMode != "bm25" || descriptor.ServerImageDigest != "sha256:image-a" || descriptor.TEIImageDigest != "sha256:tei-a" {
 		t.Fatalf("canonical descriptor is incomplete: %#v", descriptor)
 	}
 }

@@ -35,12 +35,13 @@ type ArtifactDescriptor struct {
 }
 
 type VectorGenerationDescriptor struct {
-	Artifact ArtifactDescriptor `json:"artifact"`
-	Metadata ArtifactDescriptor `json:"metadata"`
-	Scope    VectorScope        `json:"scope"`
-	Model    string             `json:"model"`
-	Revision string             `json:"revision,omitempty"`
-	Vectors  int                `json:"vectors"`
+	Artifact    ArtifactDescriptor   `json:"artifact"`
+	Metadata    ArtifactDescriptor   `json:"metadata"`
+	Scope       VectorScope          `json:"scope"`
+	Model       string               `json:"model"`
+	Revision    string               `json:"revision,omitempty"`
+	InputFormat EmbeddingInputFormat `json:"input_format,omitempty"`
+	Vectors     int                  `json:"vectors"`
 }
 
 type GenerationDescriptor struct {
@@ -182,12 +183,13 @@ func (lock *GenerationBuildLock) Publish(build GenerationBuild) (GenerationDescr
 			return GenerationDescriptor{}, err
 		}
 		descriptor.Vector = &VectorGenerationDescriptor{
-			Artifact: vectorArtifact,
-			Metadata: metadataArtifact,
-			Scope:    vectorSnapshot.Scope,
-			Model:    vectorSnapshot.Model,
-			Revision: vectorSnapshot.ModelRevision,
-			Vectors:  len(vectorSnapshot.Vectors),
+			Artifact:    vectorArtifact,
+			Metadata:    metadataArtifact,
+			Scope:       vectorSnapshot.Scope,
+			Model:       vectorSnapshot.Model,
+			Revision:    vectorSnapshot.ModelRevision,
+			InputFormat: loadedMetadata.InputFormat,
+			Vectors:     len(vectorSnapshot.Vectors),
 		}
 	}
 
@@ -284,9 +286,17 @@ func validateGenerationDirectory(dir, expectedID string) (GenerationDescriptor, 
 	if err := validateArtifactDescriptor(dir, descriptor.BM25, BM25SnapshotFile); err != nil {
 		return GenerationDescriptor{}, fmt.Errorf("BM25 artifact: %w", err)
 	}
+	if descriptor.Vector != nil && descriptor.Vector.InputFormat == "" {
+		// Generation descriptors predating structured-v1 only embedded raw
+		// chunk text. Preserve their hashed JSON while making that provenance explicit.
+		descriptor.Vector.InputFormat = EmbeddingInputTextV1
+	}
 	if descriptor.Vector != nil {
 		if descriptor.Vector.Vectors < 0 {
 			return GenerationDescriptor{}, fmt.Errorf("negative vector count")
+		}
+		if _, err := ParseEmbeddingInputFormat(string(descriptor.Vector.InputFormat)); err != nil || descriptor.Vector.InputFormat == "" {
+			return GenerationDescriptor{}, fmt.Errorf("invalid vector input format %q", descriptor.Vector.InputFormat)
 		}
 		if err := validateArtifactDescriptor(dir, descriptor.Vector.Artifact, VectorSnapshotFile); err != nil {
 			return GenerationDescriptor{}, fmt.Errorf("vector artifact: %w", err)
