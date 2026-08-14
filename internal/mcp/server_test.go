@@ -698,7 +698,7 @@ func TestSearchRulesExpandsDomainTerms(t *testing.T) {
 		CollectedAt:  time.Now(),
 		DocumentType: model.DocumentTypeRule,
 		Language:     model.LanguageKorean,
-		Body:         "별표25 실시간 가격제한의 가격변동폭은 선물거래와 옵션거래에 적용한다.",
+		Body:         "# 별표25\n실시간 가격제한의 가격변동폭은 선물거래와 옵션거래에 적용한다.",
 	}
 	repo := &searchindex.Repository{
 		Documents:   map[string]model.Document{doc.ID: doc},
@@ -719,6 +719,54 @@ func TestSearchRulesExpandsDomainTerms(t *testing.T) {
 	}
 	if len(out.Results) != 1 || out.Results[0].ID != doc.ID {
 		t.Fatalf("domain expansion should retrieve realtime price limit rule: %#v", out.Results)
+	}
+}
+
+func TestSearchRulesExpansionDoesNotOverrideUnknownTerms(t *testing.T) {
+	documents := []model.Document{
+		{
+			ID: "uti-rule", Title: "거래정보저장업무규정", CollectedAt: time.Now(),
+			DocumentType: model.DocumentTypeRule, Language: model.LanguageKorean,
+			Body: "# 제18조(UTI의 사용의무)\n보고대상거래 건별로 UTI를 반드시 포함하여 보고하여야 한다.",
+		},
+		{
+			ID: "nav-rule", Title: "유가증권시장 상장규정", CollectedAt: time.Now(),
+			DocumentType: model.DocumentTypeRule, Language: model.LanguageKorean,
+			Body: "# 제20조의4\nETF 종가와 순자산가치 NAV의 괴리율에 관한 유동성공급자 호가 규정",
+		},
+		{
+			ID: "price-limit-rule", Title: "파생상품시장 업무규정 시행세칙", CollectedAt: time.Now(),
+			DocumentType: model.DocumentTypeRule, Language: model.LanguageKorean,
+			Body: "# 별표25\n실시간 가격제한의 가격변동폭은 선물거래와 옵션거래에 적용한다.",
+		},
+	}
+	repo := &searchindex.Repository{
+		Documents: map[string]model.Document{}, Attachments: map[string]searchindex.AttachmentDocument{},
+		Engine: searchindex.BuildWithAttachments(documents, nil, nil),
+	}
+	for _, document := range documents {
+		repo.Documents[document.ID] = document
+	}
+	service := &Service{Repo: repo, DomainLexicon: testDomainLexicon(t)}
+	queries := []string{
+		"UTI 외계행성 채굴 허가",
+		"NAV 화성 토지 소유권",
+		"동적상하한가 운전면허 갱신",
+		"UTI 아니라 여권번호로 보고대상거래를 신고해야 하나",
+	}
+	for _, query := range queries {
+		t.Run(query, func(t *testing.T) {
+			_, out, err := service.searchRules(context.Background(), &mcpsdk.CallToolRequest{}, SearchRulesInput{Query: query, Limit: 5})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.QueryExpansion == nil {
+				t.Fatalf("expected domain expansion: %#v", out)
+			}
+			if out.Answerable || out.Answerability.Status != searchindex.AnswerabilityInsufficient || len(out.Results) != 0 {
+				t.Fatalf("mixed query was answerable: %#v", out)
+			}
+		})
 	}
 }
 

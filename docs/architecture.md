@@ -46,9 +46,9 @@ Default settings:
 - dimensions: `384`
 - document prefix: `passage: `
 - query prefix: `query: `
-- document input: `structured-v1`
+- document input: `text-v1`
 
-Other OpenAI-compatible embedding models can be used, but vector indexing and serving must use identical model, revision, dimension, prefix, and input-format settings. Prefix-free models should set both prefix environment variables to empty strings before rebuilding the vector snapshot. `structured-v1` embeds fixed title/category/article/path/source fields with the chunk; `text-v1` is the raw-text ablation format.
+Other OpenAI-compatible embedding models can be used, but vector indexing and serving must use identical model, revision, dimension, prefix, and input-format settings. Prefix-free models should set both prefix environment variables to empty strings before rebuilding the vector snapshot. The maintained generation uses raw chunk text with `text-v1`; `structured-v1` remains available for controlled comparisons and embeds fixed title/category/article/path/source fields with the chunk.
 
 Indexing failures are strict: if vector indexing is explicitly requested and the embeddings API fails, `krx-rule-index` exits non-zero. Runtime query embedding failure falls back to BM25 only under the optional vector policy; required-vector mode returns a tool error and fails its readiness canary.
 

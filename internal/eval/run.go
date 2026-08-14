@@ -200,8 +200,11 @@ func contextMatchesExpectation(expectation Expectation, observed mcpserver.Evide
 		if target.AttachmentID != "" && target.AttachmentID != observed.AttachmentID {
 			continue
 		}
-		if target.Evidence != nil && !evidenceTextMatches(*target.Evidence, contextOutput.Content) {
-			continue
+		if target.Evidence != nil {
+			if !evidenceTextMatches(*target.Evidence, contextOutput.Content) ||
+				!claimRelationEvidenceMatches(expectation.ClaimRelation, *target.Evidence, contextOutput.Content) {
+				continue
+			}
 		}
 		matched++
 	}
@@ -213,6 +216,19 @@ func contextMatchesExpectation(expectation Expectation, observed mcpserver.Evide
 	default:
 		return matched > 0
 	}
+}
+
+func claimRelationEvidenceMatches(relation string, expectation EvidenceExpectation, text string) bool {
+	if relation != "contradicts" {
+		return true
+	}
+	text = strings.ToLower(text)
+	for _, required := range expectation.RelationMustContainAny {
+		if strings.Contains(text, strings.ToLower(required)) {
+			return true
+		}
+	}
+	return false
 }
 
 func evidenceTextMatches(expectation EvidenceExpectation, text string) bool {
@@ -281,13 +297,17 @@ func expansionMatches(expectation QueryExpansionExpectation, search mcpserver.Se
 			return false
 		}
 	}
-	expanded := strings.ToLower(search.QueryExpansion.ExpandedQuery)
+	expanded := normalizeExpansionExpectation(search.QueryExpansion.ExpandedQuery)
 	for _, required := range expectation.RequiredTerms {
-		if !strings.Contains(expanded, strings.ToLower(required)) {
+		if !strings.Contains(expanded, normalizeExpansionExpectation(required)) {
 			return false
 		}
 	}
 	return true
+}
+
+func normalizeExpansionExpectation(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(value), ""))
 }
 
 func automaticCasePass(item Case, result CaseResult) bool {

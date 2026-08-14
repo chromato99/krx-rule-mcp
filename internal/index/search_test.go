@@ -680,6 +680,32 @@ func TestExpandDomainQueryDynamicPriceLimit(t *testing.T) {
 	}
 }
 
+func TestReviewedExactMatchRejectsSubstringExpansion(t *testing.T) {
+	exact := ExpandDomainQueryWithLexicon("동적상하한가", loadTestDomainLexicon(t))
+	if !exact.Reviewed() || !exact.ReviewedExactMatch() {
+		t.Fatalf("exact reviewed alias was not recognized: %#v", exact)
+	}
+	if exact.MatchedTermCount() == 0 || exact.ReviewedMatchCount() == 0 {
+		t.Fatalf("reviewed match counts were not recorded: %#v", exact)
+	}
+	if len(exact.ReviewedAppliedTerms()) == 0 {
+		t.Fatalf("reviewed applied terms were not exposed: %#v", exact)
+	}
+	mixed := ExpandDomainQueryWithLexicon("동적상하한가 운전면허 갱신", loadTestDomainLexicon(t))
+	if mixed.ReviewedExactMatch() {
+		t.Fatalf("substring expansion covered a mixed query: %#v", mixed)
+	}
+	unreviewed := DomainQueryExpansion{
+		OriginalQuery: "동적상하한가",
+		AppliedTerms: []DomainLexiconMatch{{
+			MatchedTerms: []string{"동적상하한가"}, Confidence: "high", ReviewStatus: "draft",
+		}},
+	}
+	if unreviewed.Reviewed() || unreviewed.ReviewedExactMatch() {
+		t.Fatalf("unknown review status was trusted: %#v", unreviewed)
+	}
+}
+
 func TestExpandDomainQueryDoesNotTreatBarePDFAsETFPortfolioFile(t *testing.T) {
 	expansion := ExpandDomainQueryWithLexicon("PDF 첨부 파일", loadTestDomainLexicon(t))
 	for _, applied := range expansion.AppliedTerms {
@@ -746,9 +772,12 @@ func TestExpandedEvidencePrefersDirectHeadingPhrase(t *testing.T) {
 			},
 		},
 	}
-	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms)
+	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms, nil)
 	if len(selected) != 2 || selected[0].ChunkID != "direct" {
 		t.Fatalf("direct heading was not preferred: %#v", selected)
+	}
+	if selected[0].Score <= selected[1].Score {
+		t.Fatalf("public evidence scores do not explain order: %#v", selected)
 	}
 }
 
@@ -772,9 +801,21 @@ func TestExpandedEvidenceRewardsMatchingAttachmentPhrase(t *testing.T) {
 			Text:         "가격상관율을 기초자산별로 산술평균한 값 중 최솟값으로 한다.",
 		},
 	}
-	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms)
+	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms, nil)
 	if len(selected) != 2 || selected[0].ChunkID != "attachment" {
 		t.Fatalf("matching attachment was not preferred: %#v", selected)
+	}
+}
+
+func TestExpandedEvidenceKeepsQuantitativeClaimsInSelectedBundle(t *testing.T) {
+	candidates := []ChunkCandidate{
+		{ChunkID: "generic", DocumentID: "rule", ChunkIndex: 1, ArticleID: "제18조", FusedScore: 0.04, Text: "유동성공급호가 제출의무"},
+		{ChunkID: "three", DocumentID: "rule", ChunkIndex: 10, ArticleID: "제18조", FusedScore: 0.02, Text: "괴리율 3퍼센트"},
+		{ChunkID: "six", DocumentID: "rule", ChunkIndex: 20, ArticleID: "제19조", FusedScore: 0.02, Text: "괴리율 6퍼센트"},
+	}
+	selected := selectExpandedEvidenceCandidates(candidates, 3, nil, nil, []string{"3퍼센트", "6퍼센트"})
+	if len(selected) != 3 || selected[0].ChunkID == "generic" {
+		t.Fatalf("quantitative evidence was not promoted: %#v", selected)
 	}
 }
 

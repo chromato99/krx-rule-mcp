@@ -29,6 +29,7 @@ func main() {
 	requireVector := flag.Bool("require-vector", false, "fail unless full vector generation and query embedder are available")
 	failOnGate := flag.Bool("fail-on-gate", false, "exit non-zero when release quality gates fail")
 	flag.Parse()
+	fatalIf(validateEvalOptions(*split, *failOnGate))
 
 	fixture, fixtureHash, err := evaluation.LoadFixture(*fixturePath)
 	fatalIf(err)
@@ -97,6 +98,13 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func validateEvalOptions(split string, failOnGate bool) error {
+	if strings.TrimSpace(split) != "" && failOnGate {
+		return fmt.Errorf("--fail-on-gate cannot be combined with --split; split runs are diagnostic")
+	}
+	return nil
 }
 
 type releaseVectorDescriptor struct {
@@ -255,7 +263,7 @@ func qualityGateFailures(report evaluation.Report) []string {
 		}
 	}
 	if falsePremiseCases > 0 && float64(falsePremiseHitAt1)/float64(falsePremiseCases) < 0.90 {
-		failures = append(failures, "false-premise evidence Hit@1 < 90%")
+		failures = append(failures, "false-premise target-evidence Hit@1 < 90%")
 	}
 	if report.Summary.InsufficientRefusalRate < 0.95 {
 		failures = append(failures, "insufficient refusal < 95%")

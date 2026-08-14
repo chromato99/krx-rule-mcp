@@ -142,6 +142,10 @@ func validateCase(item Case) error {
 		if target.Evidence != nil && target.ArticleID == "" && target.AttachmentID == "" {
 			return fmt.Errorf("evidence text conditions require article_id or attachment_id")
 		}
+		if item.Expectation.ClaimRelation == "contradicts" &&
+			(target.Evidence == nil || len(target.Evidence.RelationMustContainAny) == 0) {
+			return fmt.Errorf("contradicts target requires relation_must_contain_any evidence")
+		}
 	}
 	return nil
 }

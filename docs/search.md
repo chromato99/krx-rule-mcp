@@ -18,7 +18,7 @@ These files are generated from the maintained `krx-rule-markdown/data` corpus wi
 | Dimensions | `384` |
 | Document prefix | `passage: ` |
 | Query prefix | `query: ` |
-| Embedding input | `structured-v1` |
+| Embedding input | `text-v1` |
 
 `krx-rule-index` requires the producer's strict schema-v2 `manifest.json`. It verifies manifest/document parity and both `index_source_hash` and `release_hash` before building. A non-blocking single-writer lock prevents concurrent publishers. BM25, vector, metadata, and `generation.json` are completed and validated in a sibling staging directory before `current` is replaced atomically, so a failed or killed build leaves the previous generation selected.
 
@@ -77,7 +77,7 @@ Converted attachments are indexed as chunks attached to their parent rule or not
 Each search result includes `matched_chunk_id` and the zero-based `matched_chunk_index`. Attachment matches include their own `chunk_id` and zero-based `chunk_index`; index 0 is serialized explicitly. The public API does not expose heuristic article-range guesses. Domain lexicon expansion terms are scored with lower BM25 weight than the original query terms. Use these ids with `get_context` to fetch the exact matched chunk and neighboring chunks before writing an answer.
 
 BM25 and vector retrieval keep bounded chunk candidates independently. Reciprocal-rank fusion is keyed by chunk ID, not document ID; only after fusion are up to three diverse evidence chunks grouped into each document. `matched_chunk_id`, `article_id`, and `heading_path` always mirror the first `evidence_matches` item. A bounded lexical-coverage signal breaks weak RRF ties without treating a ranking score as confidence. Filter eligibility is computed once before both channel scans, and vector norms are precomputed when the generation is loaded.
-문서 안의 최종 evidence 순서는 원 질의의 lexical coverage와 `curated-corpus`로 검토된 intent expansion만 사용해 다시 정렬합니다. Expansion phrase가 조문 heading에 직접 나타나면 간접 인용보다 우선하고, 구체적인 expansion phrase가 첨부 본문에 나타나면 일반 조문보다 우선할 수 있습니다. 이 신호들은 bounded retrieval 후보 안에서만 순서를 바꾸며 answerability confidence로 사용하지 않습니다.
+문서 안의 최종 evidence 순서는 원 질의의 lexical coverage, high-confidence reviewed intent expansion, BM25/vector 채널 일치, 질의에 명시된 수치 claim을 사용해 다시 정렬합니다. Expansion phrase가 조문 heading에 직접 나타나면 간접 인용보다 우선하고, 구체적인 expansion phrase가 첨부 본문에 나타나면 일반 조문보다 우선할 수 있습니다. 각 evidence의 `score`는 이 최종 순서에 사용된 점수이고, `bm25_score`와 `vector_score`는 retrieval channel 진단값입니다. 이 신호들은 bounded retrieval 후보 안에서만 순서를 바꾸며 answerability confidence로 사용하지 않습니다.
 
 
 `score`, `bm25_score`, and `vector_score` are ranking signals. They are useful for ordering and debugging retrieval, but they are not confidence probabilities.
@@ -87,6 +87,8 @@ BM25 and vector retrieval keep bounded chunk candidates independently. Reciproca
 Before BM25/vector search, `search_rules` applies the KRX domain lexicon loaded at server startup. The default file is `config/domain-lexicon.yaml`. It is based on KRX official pages and corpus-derived rule terminology, and is meant to bridge user wording to official terms.
 
 Example: `동적상하한가` is expanded with terms such as `실시간가격제한제도`, `실시간 가격제한의 가격변동폭`, `가격변동폭`, `파생상품시장 업무규정 시행세칙`, and `별표25`.
+
+Expansion은 recall과 evidence 재정렬 신호입니다. high-confidence reviewed alias가 정규화된 질의 전체와 정확히 일치하면 짧은 전문용어 질의를 직접 지지할 수 있습니다. 그 밖의 expansion은 원 질의 lexical coverage, 미지어 비율, 복수 alias 또는 BM25/vector 일치가 함께 확인될 때만 `supported` 판정에 기여합니다. 알려진 alias와 설명되지 않은 추가 용어가 함께 있는 질의는 expansion만으로 answerable이 되지 않습니다.
 
 When expansion is applied, the response includes `query_expansion`:
 
@@ -147,7 +149,7 @@ Search results are discovery aids from a collected derivative snapshot. Ranking 
 - `ambiguous`: the query is too broad or evidence is not sufficiently anchored. A bounded diverse result set and `clarification` are returned, but `answerable` is `false`.
 - `unknown`: the loaded retrieval/index contract is incompatible. It fails closed with empty results.
 
-The `answerability` object contains `reason_codes`, `gate_version`, selected `evidence_chunk_ids`, and observable features such as original-query lexical coverage, BM25/vector agreement, structural anchors, filter state, quantitative-claim checks, explicit-source checks, and category diversity. These are deterministic gate inputs, not confidence probabilities. Numeric limits, named external laws, obligation subjects, and composite claims must be present in the selected evidence rather than inferred from unrelated high-scoring chunks.
+The `answerability` object contains `reason_codes`, `gate_version`, selected `evidence_chunk_ids`, and observable features such as original-query lexical coverage, BM25/vector agreement, structural anchors, filter state, quantitative-claim checks, explicit-source checks, exception-condition checks, and category diversity. These are deterministic gate inputs, not confidence probabilities. Numeric limits, named external laws, obligation subjects, composite claims, conditional exceptions, and contrastive alternatives are verified only against the selected top-result evidence bundle. Every chunk used by those checks is included in `evidence_chunk_ids`; unrelated lower-ranked documents cannot make a claim pass.
 
 Clients should answer only when `answerable=true`, then fetch the returned evidence chunk with `get_context`. For `ambiguous`, ask the user for the provided clarification. For `insufficient` or `unknown`, state that the current corpus did not supply answerable evidence; do not reinterpret ranking scores as permission to answer.
 

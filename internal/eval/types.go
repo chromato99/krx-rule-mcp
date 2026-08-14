@@ -79,11 +79,12 @@ type Target struct {
 }
 
 type EvidenceExpectation struct {
-	MustContainAll   []string `json:"must_contain_all,omitempty"`
-	MustContainAny   []string `json:"must_contain_any,omitempty"`
-	MustNotContain   []string `json:"must_not_contain,omitempty"`
-	NormalizedValues []any    `json:"normalized_values,omitempty"`
-	ManualReview     bool     `json:"manual_review,omitempty"`
+	MustContainAll         []string `json:"must_contain_all,omitempty"`
+	MustContainAny         []string `json:"must_contain_any,omitempty"`
+	MustNotContain         []string `json:"must_not_contain,omitempty"`
+	RelationMustContainAny []string `json:"relation_must_contain_any,omitempty"`
+	NormalizedValues       []any    `json:"normalized_values,omitempty"`
+	ManualReview           bool     `json:"manual_review,omitempty"`
 }
 
 type QueryExpansionExpectation struct {

@@ -1017,7 +1017,9 @@
               "must_contain_all": [
                 "사전협의"
               ],
-              "manual_review": true
+              "relation_must_contain_any": [
+                "미리 거래소와 협의해야 한다"
+              ]
             }
           }
         ]
@@ -1046,7 +1048,9 @@
                 "위탁증거금",
                 "사용"
               ],
-              "manual_review": true
+              "relation_must_contain_any": [
+                "이외에는 사용하지 못한다"
+              ]
             }
           }
         ]
@@ -1075,7 +1079,9 @@
                 "UTI",
                 "포함"
               ],
-              "manual_review": true
+              "relation_must_contain_any": [
+                "반드시 포함하여 보고하여야 한다"
+              ]
             }
           }
         ]
@@ -2195,7 +2201,7 @@
     {
       "id": "false-listing-no-consult-variant",
       "group": "false-premise-variant",
-      "split": "holdout",
+      "split": "development",
       "input": {
         "query": "상장 신청 전 거래소와 아무 협의도 하지 않아도 되는가",
         "language": "ko",
@@ -2214,7 +2220,9 @@
               "must_contain_all": [
                 "사전협의"
               ],
-              "manual_review": true
+              "relation_must_contain_any": [
+                "미리 거래소와 협의해야 한다"
+              ]
             }
           }
         ]
@@ -2223,7 +2231,7 @@
     {
       "id": "false-margin-any-use-variant",
       "group": "false-premise-variant",
-      "split": "holdout",
+      "split": "development",
       "input": {
         "query": "회원이 고객 위탁증거금을 자유롭게 다른 용도에 써도 되는가",
         "language": "ko",
@@ -2243,7 +2251,9 @@
                 "위탁증거금",
                 "사용"
               ],
-              "manual_review": true
+              "relation_must_contain_any": [
+                "이외에는 사용하지 못한다"
+              ]
             }
           }
         ]
@@ -2252,7 +2262,7 @@
     {
       "id": "false-uti-forbidden-variant",
       "group": "false-premise-variant",
-      "split": "holdout",
+      "split": "development",
       "input": {
         "query": "보고대상거래에 UTI를 적으면 안 되는가",
         "language": "ko",
@@ -2272,10 +2282,97 @@
                 "UTI",
                 "포함"
               ],
-              "manual_review": true
+              "relation_must_contain_any": [
+                "반드시 포함하여 보고하여야 한다"
+              ]
             }
           }
         ]
+      }
+    },
+    {
+      "id": "hard-alias-uti-space",
+      "group": "hard-negative-adversarial",
+      "split": "development",
+      "input": {
+        "query": "UTI 외계행성 채굴 허가",
+        "language": "ko",
+        "limit": 5
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": [],
+        "allow_results": false
+      }
+    },
+    {
+      "id": "hard-alias-nav-space",
+      "group": "hard-negative-adversarial",
+      "split": "development",
+      "input": {
+        "query": "NAV 화성 토지 소유권",
+        "language": "ko",
+        "limit": 5
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": [],
+        "allow_results": false
+      }
+    },
+    {
+      "id": "hard-alias-price-limit-license",
+      "group": "hard-negative-adversarial",
+      "split": "development",
+      "input": {
+        "query": "동적상하한가 운전면허 갱신",
+        "language": "ko",
+        "limit": 5
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": [],
+        "allow_results": false
+      }
+    },
+    {
+      "id": "hard-uti-passport-alternative",
+      "group": "hard-negative-adversarial",
+      "split": "development",
+      "input": {
+        "query": "UTI 아니라 여권번호로 보고대상거래를 신고해야 하나",
+        "language": "ko",
+        "limit": 5
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": [],
+        "allow_results": false
+      }
+    },
+    {
+      "id": "hard-margin-consent-exception",
+      "group": "hard-negative-adversarial",
+      "split": "development",
+      "input": {
+        "query": "고객이 동의하면 회원 임직원이 위탁증거금을 개인 투자에 사용할 수 있나",
+        "language": "ko",
+        "limit": 5
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": [],
+        "allow_results": false
       }
     },
     {

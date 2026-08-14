@@ -115,3 +115,64 @@ func TestValidateFixtureRejectsDuplicateIDsAndUnanchoredEvidence(t *testing.T) {
 		t.Fatal("ValidateFixture() accepted duplicate IDs and unanchored evidence")
 	}
 }
+
+func TestContradictionRequiresReviewedPolarityPhrase(t *testing.T) {
+	expectation := Expectation{
+		EvidenceStatus: "supported", ClaimRelation: "contradicts", TargetPolicy: "any",
+		Targets: []Target{{
+			DocumentID: "rule-1", ArticleID: "제139조",
+			Evidence: &EvidenceExpectation{
+				MustContainAll:         []string{"위탁증거금", "사용"},
+				RelationMustContainAny: []string{"이외에는 사용하지 못한다"},
+			},
+		}},
+	}
+	observed := mcpserver.EvidenceMatchDTO{ArticleID: "제139조"}
+	contradiction := mcpserver.ContextOutput{
+		Document: mcpserver.DocumentDTO{ID: "rule-1"},
+		Content:  "위탁증거금은 정하는 방법 이외에는 사용하지 못한다.",
+	}
+	if !contextMatchesExpectation(expectation, observed, contradiction) {
+		t.Fatal("reviewed contradiction phrase did not match")
+	}
+	opposite := contradiction
+	opposite.Content = "회원은 위탁증거금을 자유롭게 사용할 수 있다."
+	if contextMatchesExpectation(expectation, observed, opposite) {
+		t.Fatal("opposite-polarity sentence matched a contradiction expectation")
+	}
+}
+
+func TestValidateCaseRequiresContradictionPolarityEvidence(t *testing.T) {
+	item := Case{
+		ID: "false-premise", Group: "false-premise", Split: "regression",
+		Input: CaseInput{Query: "자유롭게 사용할 수 있다"},
+		Expectation: Expectation{
+			EvidenceStatus: "supported", ClaimRelation: "contradicts", TargetPolicy: "any",
+			Targets: []Target{
+				{DocumentID: "rule-reviewed", ArticleID: "제1조", Evidence: &EvidenceExpectation{
+					RelationMustContainAny: []string{"사용하지 못한다"},
+				}},
+				{DocumentID: "rule-unreviewed", ArticleID: "제2조", Evidence: &EvidenceExpectation{
+					MustContainAny: []string{"사용"},
+				}},
+			},
+		},
+	}
+	if err := validateCase(item); err == nil {
+		t.Fatal("validateCase accepted contradicts without relation evidence")
+	}
+}
+
+func TestExpansionTermsUseLexiconWhitespaceNormalization(t *testing.T) {
+	search := mcpserver.SearchRulesOutput{QueryExpansion: &searchindex.DomainQueryExpansion{
+		ExpandedQuery: "ETF 순자산 가치와 NAV 괴리",
+		AppliedTerms:  []searchindex.DomainLexiconMatch{{ID: "etf_nav"}},
+	}}
+	expectation := QueryExpansionExpectation{
+		RequiredEntryIDs: []string{"etf_nav"},
+		RequiredTerms:    []string{"순자산가치"},
+	}
+	if !expansionMatches(expectation, search) {
+		t.Fatal("spacing-only lexicon equivalent did not satisfy expansion expectation")
+	}
+}

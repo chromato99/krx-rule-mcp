@@ -17,6 +17,8 @@ const (
 	evidencePhraseCoverageWeight    = 0.020
 	evidenceAttachmentPhraseWeight  = 0.016
 	evidenceHeadingPhraseWeight     = 0.032
+	evidenceChannelAgreementWeight  = 0.002
+	evidenceClaimCoverageWeight     = 0.048
 	documentIntentTermWeight        = 0.008
 	documentIntentPhraseWeight      = 0.008
 )
@@ -41,6 +43,7 @@ type SearchOptions struct {
 	TokenWeights         map[string]float64
 	EvidenceTokenWeights map[string]float64
 	EvidenceTerms        []string
+	EvidenceClaims       []string
 	EvidenceLimit        int
 }
 
@@ -672,7 +675,9 @@ func (e *Engine) groupChunkCandidates(opts SearchOptions, fused []ChunkCandidate
 				result.Score += 0.10 * candidate.FusedScore
 			}
 		}
-		selected := selectExpandedEvidenceCandidates(aggregate.candidates, evidenceLimit, opts.EvidenceTokenWeights, opts.EvidenceTerms)
+		selected := selectExpandedEvidenceCandidates(
+			aggregate.candidates, evidenceLimit, opts.EvidenceTokenWeights, opts.EvidenceTerms, opts.EvidenceClaims,
+		)
 		matches := make([]EvidenceMatch, 0, len(selected))
 		for _, candidate := range selected {
 			matches = append(matches, evidenceMatch(candidate, query))
@@ -693,25 +698,49 @@ func selectEvidenceCandidates(candidates []ChunkCandidate, limit int) []ChunkCan
 	return selectRankedEvidenceCandidates(candidates, limit, chunkCandidateBetter)
 }
 
-func selectExpandedEvidenceCandidates(candidates []ChunkCandidate, limit int, tokenWeights map[string]float64, evidenceTerms []string) []ChunkCandidate {
-	scores := make(map[string]float64, len(candidates))
-	for _, candidate := range candidates {
-		score := candidate.FusedScore +
+func selectExpandedEvidenceCandidates(
+	candidates []ChunkCandidate,
+	limit int,
+	tokenWeights map[string]float64,
+	evidenceTerms []string,
+	evidenceClaims []string,
+) []ChunkCandidate {
+	ranked := append([]ChunkCandidate(nil), candidates...)
+	for index := range ranked {
+		candidate := &ranked[index]
+		candidate.Score = candidate.FusedScore +
 			evidenceOriginalCoverageWeight*candidate.LexicalCoverage +
-			evidenceExpansionCoverageWeight*expandedTermCoverage(candidate, tokenWeights) +
-			evidencePhraseCoverageWeight*expandedPhraseCoverage(candidate, evidenceTerms)
-		score += evidenceHeadingPhraseWeight * expandedHeadingPhraseCoverage(candidate, evidenceTerms)
-		if candidate.AttachmentID != "" {
-			score += evidenceAttachmentPhraseWeight * expandedPhraseCoverage(candidate, evidenceTerms)
+			evidenceExpansionCoverageWeight*expandedTermCoverage(*candidate, tokenWeights) +
+			evidencePhraseCoverageWeight*expandedPhraseCoverage(*candidate, evidenceTerms) +
+			evidenceClaimCoverageWeight*evidenceClaimCoverage(*candidate, evidenceClaims)
+		if candidate.BM25Score > 0 && candidate.VectorScore > 0 {
+			candidate.Score += evidenceChannelAgreementWeight
 		}
-		scores[candidate.ChunkID] = score
+		candidate.Score += evidenceHeadingPhraseWeight * expandedHeadingPhraseCoverage(*candidate, evidenceTerms)
+		if candidate.AttachmentID != "" {
+			candidate.Score += evidenceAttachmentPhraseWeight * expandedPhraseCoverage(*candidate, evidenceTerms)
+		}
 	}
-	return selectRankedEvidenceCandidates(candidates, limit, func(left, right ChunkCandidate) bool {
-		if !sameScore(scores[left.ChunkID], scores[right.ChunkID]) {
-			return scores[left.ChunkID] > scores[right.ChunkID]
+	return selectRankedEvidenceCandidates(ranked, limit, func(left, right ChunkCandidate) bool {
+		if !sameScore(left.Score, right.Score) {
+			return left.Score > right.Score
 		}
 		return chunkCandidateBetter(left, right)
 	})
+}
+
+func evidenceClaimCoverage(candidate ChunkCandidate, claims []string) float64 {
+	if len(claims) == 0 {
+		return 0
+	}
+	evidence := normalizeClaimText(candidate.Text + " " + strings.Join(candidate.HeadingPath, " "))
+	matched := 0
+	for _, claim := range claims {
+		if strings.Contains(evidence, normalizeClaimText(claim)) {
+			matched++
+		}
+	}
+	return float64(matched) / float64(len(claims))
 }
 
 func selectRankedEvidenceCandidates(candidates []ChunkCandidate, limit int, better func(ChunkCandidate, ChunkCandidate) bool) []ChunkCandidate {
@@ -847,7 +876,7 @@ func evidenceMatch(candidate ChunkCandidate, query string) EvidenceMatch {
 		AttachmentTitle:  candidate.AttachmentTitle,
 		AttachmentFile:   candidate.AttachmentFile,
 		AttachmentStatus: candidate.AttachmentStatus,
-		Score:            candidate.FusedScore,
+		Score:            candidate.Score,
 		BM25Score:        candidate.BM25Score,
 		VectorScore:      candidate.VectorScore,
 		LexicalCoverage:  candidate.LexicalCoverage,
@@ -987,6 +1016,7 @@ func meaningfulQueryTerms(query string) []string {
 	seen := map[string]struct{}{}
 	terms := make([]string, 0, len(raw))
 	for _, term := range raw {
+		term = normalizeMeaningfulQueryTerm(term)
 		if _, stop := queryStopWords[term]; stop || runeLen(term) < 2 {
 			continue
 		}
@@ -999,10 +1029,28 @@ func meaningfulQueryTerms(query string) []string {
 	return terms
 }
 
+func normalizeMeaningfulQueryTerm(term string) string {
+	for _, suffix := range []string{
+		"에서도", "에서는", "에게서", "에서", "에게", "에는", "으로", "까지", "부터", "처럼",
+		"은", "는", "이", "가", "을", "를", "의", "에", "도",
+	} {
+		if !strings.HasSuffix(term, suffix) {
+			continue
+		}
+		base := strings.TrimSuffix(term, suffix)
+		if runeLen(base) >= 2 {
+			return base
+		}
+	}
+	return term
+}
+
 var queryStopWords = map[string]struct{}{
 	"krx": {}, "규정": {}, "규정상": {}, "근거": {}, "관련": {}, "대한": {},
 	"무엇": {}, "어떤": {}, "얼마": {}, "있는가": {}, "없는가": {}, "하나": {},
 	"해야": {}, "하는가": {}, "되나": {}, "인가": {}, "때": {}, "경우": {},
+	"아무": {}, "너무": {}, "하지": {}, "않아도": {}, "되는가": {}, "가능한가": {},
+	"써도": {}, "해도": {},
 }
 
 func termCoverage(terms []string, text string) float64 {

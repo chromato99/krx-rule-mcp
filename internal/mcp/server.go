@@ -499,24 +499,26 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	var tokenWeights map[string]float64
 	var evidenceTokenWeights map[string]float64
 	var evidenceTerms []string
-	trustedExpansion := false
+	domainExpansionMatchedTerms := 0
+	reviewedExpansionApplied := false
+	reviewedExpansionMatchedTerms := 0
+	reviewedExpansionExactMatch := false
 	evidenceExpansion := searchindex.DomainQueryExpansion{OriginalQuery: query}
 	if expansion.Applied() {
 		searchQuery = expansion.ExpandedQuery
 		tokenWeights = expansion.TokenWeights(0.4)
-		for _, match := range expansion.AppliedTerms {
-			if strings.EqualFold(strings.TrimSpace(match.ReviewStatus), "curated-corpus") {
-				evidenceExpansion.AppliedTerms = append(evidenceExpansion.AppliedTerms, match)
-				evidenceTerms = append(evidenceTerms, match.AddedTerms...)
-			}
-			if strings.EqualFold(strings.TrimSpace(match.Confidence), "high") {
-				trustedExpansion = true
-			}
+		for _, match := range expansion.ReviewedAppliedTerms() {
+			evidenceExpansion.AppliedTerms = append(evidenceExpansion.AppliedTerms, match)
+			evidenceTerms = append(evidenceTerms, match.AddedTerms...)
 		}
 		if len(evidenceExpansion.AppliedTerms) > 0 {
 			evidenceTokenWeights = evidenceExpansion.TokenWeights(0.4)
 		}
 		queryExpansion = &expansion
+		domainExpansionMatchedTerms = expansion.MatchedTermCount()
+		reviewedExpansionApplied = expansion.Reviewed()
+		reviewedExpansionMatchedTerms = expansion.ReviewedMatchCount()
+		reviewedExpansionExactMatch = expansion.ReviewedExactMatch()
 	}
 	filter := searchindex.Filter{
 		DocumentType:  documentType,
@@ -583,6 +585,7 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 		TokenWeights:         tokenWeights,
 		EvidenceTokenWeights: evidenceTokenWeights,
 		EvidenceTerms:        evidenceTerms,
+		EvidenceClaims:       searchindex.QuantitativeEvidenceTerms(query),
 		EvidenceLimit:        3,
 	})
 	mode, vectorScored := refineSearchMode(queryExpansion != nil, queryVectorAdopted, results)
@@ -600,12 +603,16 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 		unknownSpecificTerms = s.Repo.Engine.UnknownSpecificTermCount(query)
 	}
 	answerability := searchindex.EvaluateAnswerability(searchindex.AnswerabilityInput{
-		Query:                    query,
-		Filter:                   filter,
-		DomainExpansionApplied:   trustedExpansion || (queryExpansion != nil && unknownSpecificTerms <= 1),
-		ContractValid:            contractValid,
-		UnknownSpecificTermCount: unknownSpecificTerms,
-		Results:                  results,
+		Query:                         query,
+		Filter:                        filter,
+		DomainExpansionApplied:        queryExpansion != nil,
+		DomainExpansionMatchedTerms:   domainExpansionMatchedTerms,
+		ReviewedExpansionApplied:      reviewedExpansionApplied,
+		ReviewedExpansionMatchedTerms: reviewedExpansionMatchedTerms,
+		ReviewedExpansionExactMatch:   reviewedExpansionExactMatch,
+		ContractValid:                 contractValid,
+		UnknownSpecificTermCount:      unknownSpecificTerms,
+		Results:                       results,
 	})
 	switch answerability.Status {
 	case searchindex.AnswerabilityInsufficient, searchindex.AnswerabilityUnknown:

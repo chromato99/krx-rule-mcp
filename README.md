@@ -73,7 +73,7 @@ Vector를 포함한 generation은 현재 관리 중인 `krx-rule-markdown/data` 
 | dimensions | `384` |
 | document prefix | `passage: ` |
 | query prefix | `query: ` |
-| document input | `structured-v1` (`title/category/article/heading/source` + text) |
+| document input | `text-v1` (chunk text) |
 
 같은 corpus와 같은 embedding 설정을 사용한다면 먼저 최신성만 확인하세요.
 
@@ -321,7 +321,7 @@ TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 
 ## RAG 품질 평가
 
-`eval/golden/rag-v1.json`은 checksum으로 고정한 원본 50건과 regression/development/holdout을 합친 120건 fixture입니다. Evaluator는 실제 `search_rules`와 `get_context`를 호출해 문서 순위, 근거 조문·첨부, answerability, 필터 누출, 영문 canonical source, HWP 첨부를 판정하고 corpus/index/vector/lexicon provenance를 report에 기록합니다.
+`eval/golden/rag-v1.json`은 checksum으로 고정한 원본 50건과 regression/development/holdout을 합친 125건 fixture입니다. Evaluator는 실제 `search_rules`와 `get_context`를 호출해 문서 순위, 근거 조문·첨부, answerability, 필터 누출, 영문 canonical source, HWP 첨부를 판정하고 corpus/index/vector/lexicon provenance를 report에 기록합니다. Lexicon 작성에 사용된 query-shaped false-premise 변형은 development로 분류해 공개 holdout의 일반화 지표와 구분합니다.
 
 ```bash
 # 빠른 BM25 진단
@@ -339,9 +339,11 @@ go run ./cmd/krx-rule-eval \
   --output eval/results/rag-v1-vector.json
 ```
 
-Golden expectation은 실행 결과와 분리되어 있습니다. `eval/source/`의 원본 case 수나 SHA-256이 fixture provenance와 다르면 evaluator는 실행을 거부합니다. Release gate에는 full-coverage vector generation과 동일한 embedding 환경변수가 필요합니다.
+Golden expectation은 실행 결과와 분리되어 있습니다. `eval/source/`의 원본 case 수나 SHA-256이 fixture provenance와 다르면 evaluator는 실행을 거부합니다. `claim_relation: contradicts`는 target 조문 적중뿐 아니라 사람이 검토해 fixture에 고정한 `relation_must_contain_any` polarity 구문까지 실제 context에서 확인합니다. Release gate에는 full-coverage vector generation과 동일한 embedding 환경변수가 필요합니다.
 Release CI에서 Go build metadata가 제공되지 않는 실행 방식이면 `KRX_RULE_SERVER_COMMIT`에 검증할 source revision을 명시해 report의 `server_commit`을 고정합니다.
-Release gate 기준은 `Document Hit@5 >= 95%`, `MRR@5 >= 0.90`, 전체 및 semantic 계열 `evidence Hit@1 >= 90%`, `evidence Recall@3 >= 95%`, false-premise `evidence Hit@1 >= 90%`, `insufficient refusal >= 95%`, `ambiguous clarification >= 90%`, `filter_leaks = 0`, `context consistency = 100%`, `p95 < 300ms`입니다. Generation `eeac326e54f9d2369979930af4bec1fd2d89f83639b8e0562980183bcac88b01`의 full-vector 기준선은 120건에서 Document Hit@5 `100%`, MRR@5 `0.950`, evidence Hit@1/Recall@3 `95.8%`, semantic/semantic-variant Hit@1 `100%`, false-premise Hit@1 `100%`, refusal/clarification/context `100%`, filter leak `0`, p95 `271.89ms`를 기록하며 `eval/baselines/rag-v1-text-vector.json`에 보존됩니다.
+Release gate 기준은 `Document Hit@5 >= 95%`, `MRR@5 >= 0.90`, 전체 및 semantic 계열 `evidence Hit@1 >= 90%`, `evidence Recall@3 >= 95%`, false-premise `target-evidence Hit@1 >= 90%`, `insufficient refusal >= 95%`, `ambiguous clarification >= 90%`, `filter_leaks = 0`, `context consistency = 100%`, `p95 < 300ms`입니다. `eval/baselines/`의 기존 report는 생성 당시 코드·fixture·lexicon provenance를 보존하는 역사 자료이며 현재 head의 release 기준선으로 간주하지 않습니다. 현재 기준선은 full-vector gate를 다시 실행해 동일 provenance로 갱신해야 합니다.
+
+`.github/workflows/rag-release-eval.yml`은 주간 또는 수동으로 고정 corpus와 full-vector generation을 검증한 뒤 위 gate를 실행합니다. 보호된 `rag-release` environment와 `[self-hosted, linux, x64, krx-rag-eval]` runner가 필요하며, embedding endpoint는 `KRX_RAG_EVAL_EMBEDDING_BASE_URL` repository variable로 지정합니다. `--split` 실행은 표본 수가 작은 진단용이므로 `--fail-on-gate`와 함께 사용할 수 없습니다.
 
 
 ## 테스트

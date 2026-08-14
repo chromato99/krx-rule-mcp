@@ -2,10 +2,21 @@ package main
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	evaluation "github.com/chromato99/krx-rule-mcp/internal/eval"
 )
+
+func TestSplitEvaluationCannotUseReleaseGate(t *testing.T) {
+	err := validateEvalOptions("holdout", true)
+	if err == nil || !strings.Contains(err.Error(), "split runs are diagnostic") {
+		t.Fatalf("validateEvalOptions() error = %v", err)
+	}
+	if err := validateEvalOptions("holdout", false); err != nil {
+		t.Fatalf("diagnostic split rejected: %v", err)
+	}
+}
 
 func TestQualityGateThresholds(t *testing.T) {
 	passing := evaluation.Report{Summary: evaluation.Summary{
@@ -68,7 +79,7 @@ func TestQualityGateThresholds(t *testing.T) {
 	}
 	falsePremiseRegression.Cases[8].EvidenceRank = 2
 	falsePremiseRegression.Cases[9].EvidenceRank = 2
-	if failures := qualityGateFailures(falsePremiseRegression); !slices.Contains(failures, "false-premise evidence Hit@1 < 90%") {
+	if failures := qualityGateFailures(falsePremiseRegression); !slices.Contains(failures, "false-premise target-evidence Hit@1 < 90%") {
 		t.Fatalf("false-premise failures = %v", failures)
 	}
 }

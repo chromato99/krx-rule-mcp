@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const AnswerabilityGateVersion = "evidence-gate-v3"
+const AnswerabilityGateVersion = "evidence-gate-v4"
 
 type AnswerabilityStatus string
 
@@ -22,20 +22,29 @@ const (
 // They are recorded so a versioned golden set can calibrate later gate versions
 // without reinterpreting one BM25, vector, or RRF score as confidence.
 type AnswerabilityFeatures struct {
-	QueryTermCount             int     `json:"query_term_count"`
-	ResultCount                int     `json:"result_count"`
-	TopLexicalCoverage         float64 `json:"top_lexical_coverage"`
-	TopEvidenceAnchored        bool    `json:"top_evidence_anchored"`
-	BM25VectorAgreement        bool    `json:"bm25_vector_agreement"`
-	DomainExpansion            bool    `json:"domain_expansion"`
-	DistinctTopCategories      int     `json:"distinct_top_categories"`
-	TopScoreMargin             float64 `json:"top_score_margin"`
-	FilterApplied              bool    `json:"filter_applied"`
-	QuantitativeClaimsVerified bool    `json:"quantitative_claims_verified"`
-	ExplicitSourceMatched      bool    `json:"explicit_source_matched"`
-	UnknownSpecificTermCount   int     `json:"unknown_specific_term_count"`
-	ObligationSubjectVerified  bool    `json:"obligation_subject_verified"`
-	CompositeClaimEvidence     bool    `json:"composite_claim_evidence"`
+	QueryTermCount                     int     `json:"query_term_count"`
+	ResultCount                        int     `json:"result_count"`
+	SelectedEvidenceMaxLexicalCoverage float64 `json:"selected_evidence_max_lexical_coverage"`
+	SelectedEvidenceAnchored           bool    `json:"selected_evidence_anchored"`
+	BM25VectorAgreement                bool    `json:"bm25_vector_agreement"`
+	DomainExpansion                    bool    `json:"domain_expansion"`
+	DomainExpansionMatchedTerms        int     `json:"domain_expansion_matched_terms"`
+	ReviewedExpansion                  bool    `json:"reviewed_expansion"`
+	ReviewedExpansionMatchedTerms      int     `json:"reviewed_expansion_matched_terms"`
+	ReviewedExpansionExactMatch        bool    `json:"reviewed_expansion_exact_match"`
+	DistinctTopCategories              int     `json:"distinct_top_categories"`
+	TopScoreMargin                     float64 `json:"top_score_margin"`
+	FilterApplied                      bool    `json:"filter_applied"`
+	QuantitativeClaimsPresent          bool    `json:"quantitative_claims_present"`
+	QuantitativeClaimsVerified         bool    `json:"quantitative_claims_verified"`
+	ExplicitSourceMatched              bool    `json:"explicit_source_matched"`
+	UnknownSpecificTermCount           int     `json:"unknown_specific_term_count"`
+	ObligationSubjectVerified          bool    `json:"obligation_subject_verified"`
+	CompositeClaimEvidence             bool    `json:"composite_claim_evidence"`
+	ExceptionConditionsVerified        bool    `json:"exception_conditions_verified"`
+	ContrastiveAlternative             bool    `json:"contrastive_alternative"`
+	ContrastiveAlternativeVerified     bool    `json:"contrastive_alternative_verified"`
+	NormativeCounterEvidence           bool    `json:"normative_counter_evidence"`
 }
 
 type AnswerabilityDecision struct {
@@ -48,12 +57,16 @@ type AnswerabilityDecision struct {
 }
 
 type AnswerabilityInput struct {
-	Query                    string
-	Filter                   Filter
-	DomainExpansionApplied   bool
-	ContractValid            bool
-	UnknownSpecificTermCount int
-	Results                  []SearchResult
+	Query                         string
+	Filter                        Filter
+	DomainExpansionApplied        bool
+	DomainExpansionMatchedTerms   int
+	ReviewedExpansionApplied      bool
+	ReviewedExpansionMatchedTerms int
+	ReviewedExpansionExactMatch   bool
+	ContractValid                 bool
+	UnknownSpecificTermCount      int
+	Results                       []SearchResult
 }
 
 // EvaluateAnswerability classifies whether the current release returned direct
@@ -79,7 +92,7 @@ func EvaluateAnswerability(input AnswerabilityInput) AnswerabilityDecision {
 
 	topEvidence := input.Results[0].EvidenceMatches
 	if features.QueryTermCount <= 1 && !filterDisambiguatesBroadQuery(input.Filter) &&
-		(!input.DomainExpansionApplied || !features.TopEvidenceAnchored || features.TopLexicalCoverage >= 0.34) {
+		(!features.ReviewedExpansionExactMatch || features.SelectedEvidenceMaxLexicalCoverage >= 1.0/3.0) {
 		decision.Status = AnswerabilityAmbiguous
 		decision.ReasonCodes = []string{"broad_query"}
 		decision.Clarification = "질문의 대상 시장, 규정 종류, 상품 또는 행위를 더 구체적으로 지정하세요."
@@ -106,8 +119,16 @@ func EvaluateAnswerability(input AnswerabilityInput) AnswerabilityDecision {
 		decision.ReasonCodes = []string{"composite_claim_not_coanchored", "no_supported_evidence"}
 		return decision
 	}
-	if !features.TopEvidenceAnchored && input.Results[0].EvidenceMatches[0].VectorScore > 0 &&
-		features.TopLexicalCoverage < 0.50 {
+	if !features.ExceptionConditionsVerified {
+		decision.ReasonCodes = []string{"unverified_exception_condition", "no_supported_evidence"}
+		return decision
+	}
+	if !features.ContrastiveAlternativeVerified {
+		decision.ReasonCodes = []string{"unverified_contrastive_relation", "no_supported_evidence"}
+		return decision
+	}
+	if !features.SelectedEvidenceAnchored && selectedEvidenceHasVectorScore(input.Results[0].EvidenceMatches) &&
+		features.SelectedEvidenceMaxLexicalCoverage < 0.50 {
 		decision.Status = AnswerabilityAmbiguous
 		decision.ReasonCodes = []string{"unstructured_vector_evidence"}
 		decision.Clarification = "검색된 의미상 후보의 규정, 조문 또는 첨부 대상을 더 구체적으로 지정하세요."
@@ -115,26 +136,46 @@ func EvaluateAnswerability(input AnswerabilityInput) AnswerabilityDecision {
 		return decision
 	}
 
-	directLexicalEvidence := features.TopEvidenceAnchored && features.TopLexicalCoverage >= 0.60
-	expandedDirectEvidence := input.DomainExpansionApplied && features.TopEvidenceAnchored && !strings.Contains(input.Query, "대신")
-	strongChannelAgreement := features.BM25VectorAgreement && features.TopEvidenceAnchored &&
-		features.UnknownSpecificTermCount <= 1 && features.TopLexicalCoverage >= 1.0/3.0
-	semanticChannelAgreement := features.BM25VectorAgreement && features.TopEvidenceAnchored &&
-		features.UnknownSpecificTermCount <= 1 &&
-		((features.QueryTermCount >= 5 && features.TopLexicalCoverage >= 0.20 && !strings.Contains(input.Query, "대신")) ||
-			(features.QueryTermCount >= 8 && features.TopLexicalCoverage >= 0.125))
-	negatedClaimEvidence := features.BM25VectorAgreement && features.TopEvidenceAnchored &&
-		(strings.Contains(input.Query, "안 되") || strings.Contains(input.Query, "안 된") ||
-			strings.Contains(input.Query, "금지"))
-	documentEvidence := !features.TopEvidenceAnchored && features.QueryTermCount >= 2 && features.TopLexicalCoverage >= 0.50
-	if directLexicalEvidence || expandedDirectEvidence || strongChannelAgreement || semanticChannelAgreement || negatedClaimEvidence || documentEvidence {
+	directLexicalEvidence := features.SelectedEvidenceAnchored && features.SelectedEvidenceMaxLexicalCoverage >= 0.60 &&
+		features.UnknownSpecificTermCount <= 1
+	knownLexicalEvidence := features.SelectedEvidenceAnchored && features.UnknownSpecificTermCount == 0 &&
+		features.SelectedEvidenceMaxLexicalCoverage >= 1.0/3.0
+	reviewedAliasEvidence := features.ReviewedExpansionExactMatch && features.SelectedEvidenceAnchored
+	reviewedExpansionEvidence := features.ReviewedExpansion && features.SelectedEvidenceAnchored &&
+		((features.UnknownSpecificTermCount == 0 && features.SelectedEvidenceMaxLexicalCoverage >= 0.25) ||
+			(features.QueryTermCount >= 5 && features.UnknownSpecificTermCount*2 <= features.QueryTermCount &&
+				features.SelectedEvidenceMaxLexicalCoverage >= 0.25) ||
+			(features.ReviewedExpansionMatchedTerms >= 2 && features.QueryTermCount >= 5 &&
+				features.SelectedEvidenceMaxLexicalCoverage >= 0.125))
+	strongChannelAgreement := features.BM25VectorAgreement && features.SelectedEvidenceAnchored &&
+		((features.QueryTermCount >= 4 && features.UnknownSpecificTermCount <= 1 &&
+			features.SelectedEvidenceMaxLexicalCoverage >= 0.25) ||
+			(features.UnknownSpecificTermCount <= 2 && features.SelectedEvidenceMaxLexicalCoverage >= 0.40) ||
+			(features.DomainExpansionMatchedTerms >= 2 && features.UnknownSpecificTermCount <= 1))
+	semanticChannelAgreement := features.BM25VectorAgreement && features.SelectedEvidenceAnchored &&
+		features.QueryTermCount >= 5 && features.SelectedEvidenceMaxLexicalCoverage >= 0.20 &&
+		features.UnknownSpecificTermCount*4 < features.QueryTermCount
+	quantitativeEvidence := features.QuantitativeClaimsPresent && features.QuantitativeClaimsVerified &&
+		features.BM25VectorAgreement && features.SelectedEvidenceAnchored &&
+		features.UnknownSpecificTermCount <= 3 && features.SelectedEvidenceMaxLexicalCoverage >= 0.125
+	normativeCounterEvidence := features.NormativeCounterEvidence && features.BM25VectorAgreement &&
+		features.SelectedEvidenceAnchored && (features.UnknownSpecificTermCount <= 2 ||
+		features.UnknownSpecificTermCount*2 <= features.QueryTermCount) &&
+		(features.SelectedEvidenceMaxLexicalCoverage >= 0.125 || features.ReviewedExpansion)
+	documentEvidence := !features.SelectedEvidenceAnchored && features.QueryTermCount >= 2 &&
+		features.SelectedEvidenceMaxLexicalCoverage >= 0.50
+	if directLexicalEvidence || knownLexicalEvidence || reviewedAliasEvidence || reviewedExpansionEvidence || strongChannelAgreement ||
+		semanticChannelAgreement || quantitativeEvidence || normativeCounterEvidence || documentEvidence {
 		decision.Status = AnswerabilitySupported
 		decision.ReasonCodes = []string{"direct_evidence"}
-		if strongChannelAgreement || semanticChannelAgreement || negatedClaimEvidence {
+		if strongChannelAgreement || semanticChannelAgreement {
 			decision.ReasonCodes = append(decision.ReasonCodes, "bm25_vector_agreement")
 		}
-		if input.DomainExpansionApplied {
+		if reviewedAliasEvidence || reviewedExpansionEvidence {
 			decision.ReasonCodes = append(decision.ReasonCodes, "reviewed_domain_expansion")
+		}
+		if normativeCounterEvidence {
+			decision.ReasonCodes = append(decision.ReasonCodes, "normative_counter_evidence")
 		}
 		decision.EvidenceChunkIDs = evidenceChunkIDs(topEvidence)
 		return decision
@@ -145,16 +186,26 @@ func EvaluateAnswerability(input AnswerabilityInput) AnswerabilityDecision {
 }
 
 func answerabilityFeatures(input AnswerabilityInput) AnswerabilityFeatures {
+	selectedResults := selectedEvidenceResults(input.Results)
 	features := AnswerabilityFeatures{
-		QueryTermCount:             len(meaningfulQueryTerms(input.Query)),
-		ResultCount:                len(input.Results),
-		DomainExpansion:            input.DomainExpansionApplied,
-		FilterApplied:              filterApplied(input.Filter),
-		QuantitativeClaimsVerified: quantitativeClaimsVerified(input.Query, input.Results),
-		ExplicitSourceMatched:      explicitSourceMatched(input.Query, input.Results),
-		UnknownSpecificTermCount:   input.UnknownSpecificTermCount,
-		ObligationSubjectVerified:  obligationSubjectVerified(input.Query, input.Results),
-		CompositeClaimEvidence:     compositeClaimEvidence(input.Query, input.Results),
+		QueryTermCount:                 len(meaningfulQueryTerms(input.Query)),
+		ResultCount:                    len(input.Results),
+		DomainExpansion:                input.DomainExpansionApplied,
+		DomainExpansionMatchedTerms:    input.DomainExpansionMatchedTerms,
+		ReviewedExpansion:              input.ReviewedExpansionApplied,
+		ReviewedExpansionMatchedTerms:  input.ReviewedExpansionMatchedTerms,
+		ReviewedExpansionExactMatch:    input.ReviewedExpansionExactMatch,
+		FilterApplied:                  filterApplied(input.Filter),
+		QuantitativeClaimsPresent:      quantitativeClaimsPresent(input.Query),
+		QuantitativeClaimsVerified:     quantitativeClaimsVerified(input.Query, selectedResults),
+		ExplicitSourceMatched:          explicitSourceMatched(input.Query, selectedResults),
+		UnknownSpecificTermCount:       input.UnknownSpecificTermCount,
+		ObligationSubjectVerified:      obligationSubjectVerified(input.Query, selectedResults),
+		CompositeClaimEvidence:         compositeClaimEvidence(input.Query, selectedResults),
+		ExceptionConditionsVerified:    exceptionConditionsVerified(input.Query, selectedResults),
+		ContrastiveAlternative:         queryContainsContrastiveAlternative(input.Query),
+		ContrastiveAlternativeVerified: contrastiveAlternativeVerified(input.Query, selectedResults),
+		NormativeCounterEvidence:       normativeCounterEvidence(input.Query, selectedResults),
 	}
 	categories := map[string]struct{}{}
 	for i, result := range input.Results {
@@ -173,11 +224,34 @@ func answerabilityFeatures(input AnswerabilityInput) AnswerabilityFeatures {
 	if len(input.Results) == 0 || len(input.Results[0].EvidenceMatches) == 0 {
 		return features
 	}
-	top := input.Results[0].EvidenceMatches[0]
-	features.TopLexicalCoverage = top.LexicalCoverage
-	features.TopEvidenceAnchored = top.ArticleID != "" || top.AttachmentID != "" || len(top.HeadingPath) > 0
-	features.BM25VectorAgreement = top.BM25Score > 0 && top.VectorScore > 0
+	for _, match := range input.Results[0].EvidenceMatches {
+		if match.LexicalCoverage > features.SelectedEvidenceMaxLexicalCoverage {
+			features.SelectedEvidenceMaxLexicalCoverage = match.LexicalCoverage
+		}
+		if match.ArticleID != "" || match.AttachmentID != "" || len(match.HeadingPath) > 0 {
+			features.SelectedEvidenceAnchored = true
+		}
+		if match.BM25Score > 0 && match.VectorScore > 0 {
+			features.BM25VectorAgreement = true
+		}
+	}
 	return features
+}
+
+func selectedEvidenceHasVectorScore(matches []EvidenceMatch) bool {
+	for _, match := range matches {
+		if match.VectorScore > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func selectedEvidenceResults(results []SearchResult) []SearchResult {
+	if len(results) == 0 {
+		return nil
+	}
+	return results[:1]
 }
 
 func evidenceChunkIDs(matches []EvidenceMatch) []string {
@@ -228,7 +302,7 @@ func (e *Engine) UnknownSpecificTermCount(query string) int {
 }
 
 var (
-	quantitativeClaimPattern = regexp.MustCompile(`(?i)(제\s*[0-9]+조(?:의\s*[0-9]+)?|별표\s*[0-9]+|min\s*[0-9]+|[0-9]{1,2}:[0-9]{2}|(?:오전|오후)?\s*[0-9]+(?:\.[0-9]+)?\s*(?:%|％|퍼센트|년|개월|일|시|분|초))`)
+	quantitativeClaimPattern = regexp.MustCompile(`(?i)(제\s*[0-9]+조(?:의\s*[0-9]+)?|별표\s*[0-9]+|min\s*[0-9]+|[0-9]{1,2}:[0-9]{2}|(?:오전|오후)?\s*[0-9]+(?:\.[0-9]+)?\s*(?:%|％|퍼센트|년|개월|일|시|분|초|점))`)
 	claimNumberPattern       = regexp.MustCompile(`[0-9]+`)
 )
 
@@ -240,7 +314,7 @@ func quantitativeClaimsVerified(query string, results []SearchResult) bool {
 	haystack := normalizeClaimText(searchEvidenceText(results))
 	for _, claim := range claims {
 		matched := false
-		for _, alias := range quantitativeClaimAliases(claim) {
+		for _, alias := range quantitativeClaimAliases(claim, query) {
 			if strings.Contains(haystack, alias) {
 				matched = true
 				break
@@ -253,18 +327,46 @@ func quantitativeClaimsVerified(query string, results []SearchResult) bool {
 	return true
 }
 
+func quantitativeClaimsPresent(query string) bool {
+	return quantitativeClaimPattern.MatchString(query)
+}
+
+// QuantitativeEvidenceTerms returns normalized-equivalent surface forms that
+// evidence reranking can keep in the selected bundle for later verification.
+func QuantitativeEvidenceTerms(query string) []string {
+	seen := map[string]struct{}{}
+	var terms []string
+	for _, claim := range quantitativeClaimPattern.FindAllString(query, -1) {
+		for _, alias := range quantitativeClaimAliases(claim, query) {
+			normalized := normalizeClaimText(alias)
+			if normalized == "" {
+				continue
+			}
+			if _, exists := seen[normalized]; exists {
+				continue
+			}
+			seen[normalized] = struct{}{}
+			terms = append(terms, alias)
+		}
+	}
+	return terms
+}
+
 func normalizeClaimText(value string) string {
 	value = strings.ToLower(value)
 	value = strings.NewReplacer("%", "퍼센트", "％", "퍼센트").Replace(value)
 	return strings.Join(strings.Fields(value), "")
 }
 
-func quantitativeClaimAliases(claim string) []string {
+func quantitativeClaimAliases(claim, query string) []string {
 	normalized := normalizeClaimText(claim)
 	aliases := []string{normalized}
 	number := claimNumberPattern.FindString(normalized)
 	if strings.HasPrefix(normalized, "min") && number != "" {
-		aliases = append(aliases, number)
+		aliases = append(aliases, "최소"+number, number+"이상", "min("+number)
+		if strings.Contains(normalizeClaimText(query), "점수"+normalized) {
+			aliases = append(aliases, number+"점")
+		}
 	}
 	if strings.HasPrefix(normalized, "오후") && strings.HasSuffix(normalized, "시") && number != "" {
 		hour, _ := strconv.Atoi(number)
@@ -275,8 +377,12 @@ func quantitativeClaimAliases(claim string) []string {
 	}
 	if len(normalized) == 5 && normalized[2] == ':' {
 		hour := int(normalized[0]-'0')*10 + int(normalized[1]-'0')
-		aliases = append(aliases, strconv.Itoa(hour)+"시")
-		if hour >= 12 {
+		minute := int(normalized[3]-'0')*10 + int(normalized[4]-'0')
+		aliases = append(aliases, strconv.Itoa(hour)+"시"+strconv.Itoa(minute)+"분")
+		if minute == 0 {
+			aliases = append(aliases, strconv.Itoa(hour)+"시")
+		}
+		if hour >= 12 && minute == 0 {
 			displayHour := hour
 			if displayHour > 12 {
 				displayHour -= 12
@@ -311,6 +417,84 @@ func searchEvidenceText(results []SearchResult) string {
 	return text.String()
 }
 
+func exceptionConditionsVerified(query string, results []SearchResult) bool {
+	evidence := normalizeClaimText(searchEvidenceText(results))
+	for _, field := range strings.Fields(query) {
+		field = strings.Trim(field, ".,?!:;()[]{}\"'")
+		for _, suffix := range []string{"이라면", "라면", "이면", "하면"} {
+			if !strings.HasSuffix(field, suffix) {
+				continue
+			}
+			stem := strings.TrimSuffix(field, suffix)
+			if exceptionConditionStem(stem) && !strings.Contains(evidence, normalizeClaimText(stem)) {
+				return false
+			}
+			break
+		}
+	}
+	return true
+}
+
+func exceptionConditionStem(stem string) bool {
+	stem = normalizeClaimText(stem)
+	for _, material := range []string{"동의", "승인", "허가", "합의", "승낙", "요청", "신청", "예외"} {
+		if strings.HasSuffix(stem, material) {
+			return true
+		}
+	}
+	return false
+}
+
+func queryContainsContrastiveAlternative(query string) bool {
+	for _, field := range strings.Fields(query) {
+		field = strings.Trim(field, ".,?!:;()[]{}\"'")
+		for _, suffix := range []string{"대신", "말고", "아니라", "대체하여", "대체해서", "대체해"} {
+			if strings.HasSuffix(field, suffix) {
+				return true
+			}
+		}
+	}
+	return strings.Contains(normalizeClaimText(query), "쓰지않고")
+}
+
+func contrastiveAlternativeVerified(query string, results []SearchResult) bool {
+	if !queryContainsContrastiveAlternative(query) {
+		return true
+	}
+	evidence := normalizeClaimText(searchEvidenceText(results))
+	for _, marker := range []string{"대신", "말고", "아니라", "대체하여", "대체해서", "대체해", "쓰지않고"} {
+		if strings.Contains(evidence, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func normativeCounterEvidence(query string, results []SearchResult) bool {
+	query = normalizeClaimText(query)
+	queryRequestsPermissionOrDeniesDuty := false
+	for _, marker := range []string{
+		"안되", "안된", "안돼", "필요가없", "하지않아도", "하지않고", "없이", "사용할수", "써도", "해도", "빼고", "가능",
+	} {
+		if strings.Contains(query, marker) {
+			queryRequestsPermissionOrDeniesDuty = true
+			break
+		}
+	}
+	if !queryRequestsPermissionOrDeniesDuty {
+		return false
+	}
+	evidence := normalizeClaimText(searchEvidenceText(results))
+	for _, marker := range []string{
+		"해야한다", "하여야한다", "할수없다", "하지못한다", "해서는아니된다", "금지", "의무", "반드시",
+	} {
+		if strings.Contains(evidence, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func obligationSubjectVerified(query string, results []SearchResult) bool {
 	if !strings.Contains(query, "의무") {
 		return true
@@ -318,9 +502,7 @@ func obligationSubjectVerified(query string, results []SearchResult) bool {
 	if len(results) == 0 || len(results[0].EvidenceMatches) == 0 {
 		return false
 	}
-	top := results[0].EvidenceMatches[0]
-	evidence := normalizeClaimText(results[0].Title + " " + top.ArticleID + " " +
-		strings.Join(top.HeadingPath, " ") + " " + top.Snippet + " " + top.Text)
+	evidence := normalizeClaimText(searchEvidenceText(results))
 	for _, field := range strings.Fields(query) {
 		field = strings.Trim(field, ".,?!:;()[]{}\"'")
 		if runeLen(field) < 3 {
@@ -352,8 +534,15 @@ func compositeClaimEvidence(query string, results []SearchResult) bool {
 	if !strings.Contains(query, "동시에") {
 		return true
 	}
-	return len(results) > 0 && len(results[0].EvidenceMatches) > 0 &&
-		results[0].EvidenceMatches[0].LexicalCoverage >= 0.60
+	if len(results) == 0 {
+		return false
+	}
+	for _, match := range results[0].EvidenceMatches {
+		if match.LexicalCoverage >= 0.60 {
+			return true
+		}
+	}
+	return false
 }
 
 func explicitSourceMatched(query string, results []SearchResult) bool {
@@ -382,18 +571,30 @@ func explicitSourceNames(query string) []string {
 	var sources []string
 	for _, field := range strings.Fields(query) {
 		field = strings.Trim(field, ".,?!:;()[]{}\"'")
+		hasSourceParticle := false
 		for _, particle := range []string{"에서", "에는", "으로", "상", "의", "에"} {
 			if strings.HasSuffix(field, particle) {
 				field = strings.TrimSuffix(field, particle)
+				hasSourceParticle = true
 				break
 			}
 		}
 		if field == "규정" || field == "법" {
 			continue
 		}
-		if strings.HasSuffix(field, "규정") || strings.HasSuffix(field, "법") {
+		if strings.HasSuffix(field, "규정") || (strings.HasSuffix(field, "법") &&
+			(hasSourceParticle || isKnownBareLawName(field))) {
 			sources = append(sources, field)
 		}
 	}
 	return sources
+}
+
+func isKnownBareLawName(value string) bool {
+	switch value {
+	case "상법", "민법", "형법", "자본시장법":
+		return true
+	default:
+		return false
+	}
 }

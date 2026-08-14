@@ -46,6 +46,80 @@ func (e DomainQueryExpansion) Applied() bool {
 	return len(e.AppliedTerms) > 0
 }
 
+// Reviewed reports whether the expansion contains at least one curated,
+// high-confidence lexicon match. Unreviewed matches may still improve ranking,
+// but are not answerability evidence.
+func (e DomainQueryExpansion) Reviewed() bool {
+	return e.ReviewedMatchCount() > 0
+}
+
+func (e DomainQueryExpansion) MatchedTermCount() int {
+	return e.matchedTermCount(false)
+}
+
+func (e DomainQueryExpansion) ReviewedMatchCount() int {
+	return e.matchedTermCount(true)
+}
+
+func (e DomainQueryExpansion) ReviewedAppliedTerms() []DomainLexiconMatch {
+	var reviewed []DomainLexiconMatch
+	for _, match := range e.AppliedTerms {
+		if reviewedLexiconMatch(match) {
+			reviewed = append(reviewed, match)
+		}
+	}
+	return reviewed
+}
+
+func (e DomainQueryExpansion) matchedTermCount(reviewedOnly bool) int {
+	seen := map[string]struct{}{}
+	for _, match := range e.AppliedTerms {
+		if reviewedOnly && !reviewedLexiconMatch(match) {
+			continue
+		}
+		for _, term := range match.MatchedTerms {
+			if normalized := normalizeLexiconTerm(term); normalized != "" {
+				seen[normalized] = struct{}{}
+			}
+		}
+	}
+	return len(seen)
+}
+
+// ReviewedExactMatch reports whether a high-confidence reviewed lexicon term
+// covers the whole user query. This is intentionally stricter than Applied:
+// substring matches may improve recall, but must not by themselves make a
+// mixed or out-of-domain query answerable.
+func (e DomainQueryExpansion) ReviewedExactMatch() bool {
+	query := normalizeLexiconTerm(e.OriginalQuery)
+	if query == "" {
+		return false
+	}
+	for _, match := range e.AppliedTerms {
+		if !reviewedLexiconMatch(match) {
+			continue
+		}
+		for _, term := range match.MatchedTerms {
+			if normalizeLexiconTerm(term) == query {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func reviewedLexiconMatch(match DomainLexiconMatch) bool {
+	if !strings.EqualFold(strings.TrimSpace(match.Confidence), "high") {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(match.ReviewStatus)) {
+	case "curated", "curated-corpus", "corpus-derived", "official-glossary", "official-source":
+		return true
+	default:
+		return false
+	}
+}
+
 func (e DomainQueryExpansion) TokenWeights(expansionWeight float64) map[string]float64 {
 	if expansionWeight <= 0 || expansionWeight > 1 {
 		expansionWeight = 0.4
