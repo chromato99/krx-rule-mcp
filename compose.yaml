@@ -27,8 +27,10 @@ services:
       RULE_MCP_RESPONSE_SIZE_LIMIT: "${RULE_MCP_RESPONSE_SIZE_LIMIT:-1048576}"
       RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT: "${RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT:-524288}"
       RULE_MCP_EMBEDDING_TIMEOUT: "${RULE_MCP_EMBEDDING_TIMEOUT:-5s}"
+      RULE_MCP_RERANKER_TIMEOUT: "${RULE_MCP_RERANKER_TIMEOUT:-30m}"
       RULE_MCP_READINESS_EMBEDDING_TIMEOUT: "${RULE_MCP_READINESS_EMBEDDING_TIMEOUT:-5s}"
-      RULE_MCP_REQUEST_TIMEOUT: "${RULE_MCP_REQUEST_TIMEOUT:-40s}"
+      RULE_MCP_READINESS_RERANKER_TIMEOUT: "${RULE_MCP_READINESS_RERANKER_TIMEOUT:-5m}"
+      RULE_MCP_REQUEST_TIMEOUT: "${RULE_MCP_REQUEST_TIMEOUT:-32m}"
       RULE_MCP_SHUTDOWN_TIMEOUT: "${RULE_MCP_SHUTDOWN_TIMEOUT:-45s}"
       KRX_RULE_DATA_DIR: /app/data
       KRX_RULE_INDEX_DIR: /app/index
@@ -44,6 +46,16 @@ services:
       KRX_EMBEDDING_QUERY_PREFIX: "${KRX_EMBEDDING_QUERY_PREFIX-query: }"
       KRX_EMBEDDING_DOCUMENT_PREFIX: "${KRX_EMBEDDING_DOCUMENT_PREFIX-passage: }"
       KRX_EMBEDDING_INPUT_FORMAT: "${KRX_EMBEDDING_INPUT_FORMAT:-text-v1}"
+      KRX_RERANKER_ENABLED: "${KRX_RERANKER_ENABLED:-false}"
+      KRX_RERANKER_POLICY: "${KRX_RERANKER_POLICY:-optional}"
+      KRX_REQUIRE_RERANKER: "${KRX_REQUIRE_RERANKER:-false}"
+      KRX_RERANKER_BASE_URL: "${KRX_RERANKER_BASE_URL:-http://krx-rule-reranker:80}"
+      KRX_RERANKER_API_KEY: "${KRX_RERANKER_API_KEY:-local}"
+      KRX_RERANKER_MODEL: "${KRX_RERANKER_MODEL:-dragonkue/bge-reranker-v2-m3-ko}"
+      KRX_RERANKER_MODEL_REVISION: "${KRX_RERANKER_MODEL_REVISION:-2aca5884ecac490192af9ebd86836d9073d826cd}"
+      KRX_RERANKER_CANDIDATE_LIMIT: "${KRX_RERANKER_CANDIDATE_LIMIT:-20}"
+      KRX_RERANKER_BATCH_SIZE: "${KRX_RERANKER_BATCH_SIZE:-4}"
+      RULE_MCP_RERANKER_IMAGE_DIGEST: "${RULE_MCP_RERANKER_IMAGE_DIGEST:-}"
     volumes:
       - "${KRX_RULE_DATA_DIR:?Set KRX_RULE_DATA_DIR to a generated krx-rule-markdown data directory}:/app/data:ro"
       - "${KRX_RULE_INDEX_DIR:?Set KRX_RULE_INDEX_DIR to a krx-rule-mcp index directory}:/app/index:ro"
@@ -91,5 +103,41 @@ services:
     mem_limit: 2g
     restart: unless-stopped
 
+  krx-rule-reranker:
+    profiles: ["reranker"]
+    image: "${RULE_MCP_RERANKER_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.9}"
+    command:
+      - --model-id
+      - "${KRX_RERANKER_MODEL:-dragonkue/bge-reranker-v2-m3-ko}"
+      - --revision
+      - "${KRX_RERANKER_MODEL_REVISION:-2aca5884ecac490192af9ebd86836d9073d826cd}"
+      - --dtype
+      - float16
+      - --tokenization-workers
+      - "${RULE_MCP_RERANKER_TOKENIZATION_WORKERS:-2}"
+      - --max-concurrent-requests
+      - "${RULE_MCP_RERANKER_MAX_CONCURRENT_REQUESTS:-16}"
+      - --max-client-batch-size
+      - "${KRX_RERANKER_BATCH_SIZE:-4}"
+      - --max-batch-tokens
+      - "${RULE_MCP_RERANKER_MAX_BATCH_TOKENS:-2048}"
+    volumes:
+      - reranker-cache:/data
+    ports:
+      - "127.0.0.1:${RULE_MCP_RERANKER_PORT:-18082}:80"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:80/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 10m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 5g
+    restart: unless-stopped
+
 volumes:
   embeddings-cache:
+  reranker-cache:

@@ -107,7 +107,6 @@ func (lock *GenerationBuildLock) Publish(build GenerationBuild) (GenerationDescr
 		return GenerationDescriptor{}, fmt.Errorf("generation build lock is not held")
 	}
 	snap := build.Snapshot
-	normalizeSnapshotHashes(&snap)
 	if snap.CorpusReleaseHash == "" {
 		return GenerationDescriptor{}, fmt.Errorf("generation publish requires corpus release hash")
 	}

@@ -79,7 +79,7 @@ func TestOpenAIEmbedderAppliesInputPrefix(t *testing.T) {
 	embedder := &OpenAIEmbedder{
 		BaseURL:     "http://embedding.test/v1",
 		APIKey:      "local",
-		Model:       "intfloat/multilingual-e5-small",
+		Model:       "test-embedding-model",
 		Dimensions:  2,
 		InputPrefix: "query: ",
 		Client:      client,
@@ -91,7 +91,7 @@ func TestOpenAIEmbedderAppliesInputPrefix(t *testing.T) {
 	if len(vectors) != 1 || len(vectors[0]) != 2 {
 		t.Fatalf("vectors = %#v", vectors)
 	}
-	if captured.Model != "intfloat/multilingual-e5-small" {
+	if captured.Model != "test-embedding-model" {
 		t.Fatalf("model = %q", captured.Model)
 	}
 	if captured.Dimensions != 2 {
@@ -174,11 +174,10 @@ func TestVectorMetadataRoundTrip(t *testing.T) {
 	want := VectorMetadata{
 		IndexSourceHash: "source",
 		IndexBuildHash:  "build",
-		CorpusHash:      "source",
-		Model:           "intfloat/multilingual-e5-small",
-		Dimensions:      384,
-		QueryPrefix:     "query: ",
-		DocumentPrefix:  "passage: ",
+		Model:           "test-embedding-model",
+		Dimensions:      1024,
+		QueryPrefix:     DefaultEmbeddingQueryPrefix,
+		DocumentPrefix:  DefaultEmbeddingDocumentPrefix,
 		Scope:           VectorScopeSample,
 	}
 	if err := WriteVectorMetadata(path, want); err != nil {

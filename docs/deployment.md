@@ -6,6 +6,7 @@ The root `compose.yaml` is the recommended Docker-only runtime. It starts:
 
 - `krx-rule-mcp`: Go HTTP MCP server.
 - `krx-rule-embeddings`: operator-selected, TEI-compatible embeddings sidecar.
+- `krx-rule-reranker`: optional `reranker` profile for Korean evidence reranking.
 
 Prepare a corpus with `krx-rule-markdown`, copy it to a host path, and point Compose at that corpus plus a matching index directory.
 This repository does not contain a generated corpus, but the source checkout may include a default immutable index generation under root-level `index/`.
@@ -52,6 +53,19 @@ HTTP controls remain enabled.
 
 HTTP request and complete JSON-RPC response bodies default to 1 MiB (`RULE_MCP_REQUEST_SIZE_LIMIT` and `RULE_MCP_RESPONSE_SIZE_LIMIT`, minimum 1024 bytes). Tool payload shaping has a separate 512 KiB default (`RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT`). The response limit covers the final wire representation after SDK serialization, not only `structuredContent`.
 
+### Optional Korean reranker
+
+The reranker is a separate TEI process because one TEI instance serves one model. Start the profile before enabling required mode in the server:
+
+```bash
+docker compose --profile reranker up -d krx-rule-reranker
+docker compose up -d krx-rule-mcp
+```
+
+Set `KRX_RERANKER_ENABLED=true`, `KRX_RERANKER_POLICY=required`, and `KRX_REQUIRE_RERANKER=true` in `.env`. The maintained experiment pins `dragonkue/bge-reranker-v2-m3-ko` revision `2aca5884ecac490192af9ebd86836d9073d826cd`, F16, candidate K 20, and client batch 4. The service verifies `/info` model identity before serving and `/readyz` sends a live two-passage canary. `RULE_MCP_REQUEST_TIMEOUT` must exceed `RULE_MCP_RERANKER_TIMEOUT`; measured long legal inputs required a 30-minute reranker deadline in required mode.
+
+On the current x86_64 CPU workstation, the constrained TEI process used about 2 GiB when idle. Three short passages took 4.79 seconds; selected real legal queries had a reranker p95 above two minutes. Treat these measurements as hardware-specific. The profile is optional because the protected audit did not meet release-quality gates even though it improved one retrospective evidence case.
+
 ## Bearer Token Rotation
 
 The registry is loaded once at process startup. Editing the host file alone
@@ -66,8 +80,7 @@ curl --fail http://localhost:8080/readyz
 Add a replacement token and restart before moving clients. After every client
 uses it, set the old record to `enabled: false` and restart again. Compare the
 `auth_registry_generation` and `active_bearer_tokens` fields from `/readyz`
-after each restart. `RULE_MCP_BEARER_TOKEN` and `--token` are no longer
-supported.
+after each restart.
 
 ## Manual Index Jobs
 
@@ -83,7 +96,7 @@ go run ./cmd/krx-rule-index \
   --check
 ```
 
-Add `--require-full-vector` only when the selected generation was published with a full vector artifact. Do not combine a current BM25-only generation with an unrelated legacy flat vector file.
+Add `--vector --require-full-vector` when checking a generation that must contain a full vector artifact.
 
 Local:
 
@@ -127,7 +140,7 @@ docker run --rm --network krx-rule-mcp_default \
   krx-rule-mcp:local \
   --data-dir /app/data \
   --index-dir /app/index \
-  --vector-index /app/index/vectors.krxvec
+  --vector
 
 docker run --rm \
   --entrypoint /usr/local/bin/krx-rule-index \
@@ -135,11 +148,11 @@ docker run --rm \
   -v "$KRX_RULE_INDEX_DIR:/app/index:ro" \
   -e KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
   krx-rule-mcp:local \
-  --data-dir /app/data --index-dir /app/index --check --require-full-vector
+  --data-dir /app/data --index-dir /app/index --vector --check --require-full-vector
 ```
 
 The vector command builds the full corpus by default. For a cheap smoke test, add `--vector-sample-query "상장 심사" --vector-sample-per-query 16`.
-`--vector-index` is retained as the vector-inclusion selector; BM25, vector, metadata, and `generation.json` are published together below `generations/<id>/`. The default vector settings are `intfloat/multilingual-e5-small`, 384 dimensions, `query: ` query prefix, `passage: ` document prefix, and `text-v1` document input. If you use another embedding model or input format, set the matching indexing/serving variables and publish a new full generation.
+`--vector` publishes BM25, vector, metadata, and `generation.json` together below `generations/<id>/`. Release artifacts use only `intfloat/multilingual-e5-small` revision `614241f622f53c4eeff9890bdc4f31cfecc418b3`, 384 dimensions, `query: ` / `passage: ` prefixes, and `text-v1` document input. A different model or input format is a research-only generation and is rejected by the release quality gate.
 
 ## Images
 
@@ -153,7 +166,7 @@ The image is non-root and can run with a read-only filesystem. Corpus data is pr
 
 Manifests are in `deploy/kubernetes`.
 
-The example manifest runs the Go MCP server and an operator-selected TEI
+The example manifest runs the Go MCP server and an operator-selected embedding TEI
 sidecar in the same Pod. It expects a PVC named `krx-rule-data` mounted at
 `/app/data` with a validated schema-v2 corpus and a separate PVC named
 `krx-rule-index` mounted at `/app/index` with `current` plus immutable
@@ -165,7 +178,7 @@ surprise. The operator-selected TEI image must support the deployment's target
 architecture and sidecar contract. In required mode, runtime embedding errors,
 timeouts, count/dimension mismatches, and non-finite vectors return a tool error
 instead of BM25 results. Optional mode remains available when running the
-binary directly for deployments that explicitly accept BM25 fallback.
+binary directly for deployments that explicitly accept BM25 fallback. Re-measure the TEI sidecar resources on the target CPU architecture before rollout. The checked-in Kubernetes example does not add the optional reranker sidecar. A deployment that enables it must add a separately resourced TEI container, set the reranker environment contract and image digest, extend readiness timeouts, and recalculate `release_generation`.
 The ConfigMap also uses `RULE_MCP_AUTH_MODE=required`. The Secret key
 `bearer-tokens.yaml` is mounted as a file under
 `/run/secrets/krx-rule-mcp`; the server rejects a missing or invalid registry
@@ -176,15 +189,15 @@ Before applying, update:
 
 - the immutable server image digest in both the `image:` reference and `RULE_MCP_SERVER_IMAGE_DIGEST`
 - the operator-selected immutable TEI image and matching
-  `RULE_MCP_TEI_IMAGE_DIGEST`, plus the same exact model commit in TEI
-  `--revision`, `KRX_EMBEDDING_MODEL_REVISION`, and vector build settings
+  `RULE_MCP_TEI_IMAGE_DIGEST`; it must support the pinned E5 model/revision
+  already shared by TEI, `KRX_EMBEDDING_MODEL_REVISION`, and the vector build metadata
 - the rejected bearer-registry placeholder in `krx-rule-mcp-secret`
 - `RULE_MCP_EXPECTED_RELEASE_GENERATION`
 - ingress host and TLS secret
 - allowed origins
 - PVC/storage strategy for `krx-rule-data` and `krx-rule-index`
 
-The checked-in all-zero server/TEI image digests are intentionally non-deployable, and the placeholder bearer registry/model revision must be replaced. This prevents an example manifest from silently becoming a production deployment. Compose may use a mutable tag for local development; any reproducible or required-vector rollout must pin its TEI image digest and model commit too.
+The checked-in all-zero server/TEI image digests and placeholder bearer registry are intentionally non-deployable. This prevents an example manifest from silently becoming a production deployment. Compose may use a mutable tag for local development; any reproducible or required-vector rollout must pin its TEI image digest and retain the model commit too.
 
 Calculate the release generation with the exact published image, mounted artifacts, vector settings, and server and TEI image digests that the Pod will use. The command does not call the embeddings endpoint; it only verifies that the configured runtime can adopt the loaded vector snapshot.
 
@@ -214,7 +227,7 @@ kubectl apply -f deploy/kubernetes/
 kubectl rollout status deployment/krx-rule-mcp
 ```
 
-`/readyz` returns 503 when the loaded descriptor differs from the configured generation. In required-vector mode it also performs a five-second canary embedding and validates the returned count, configured dimensions, finite values, and compatibility with the loaded vector index; a TEI outage therefore removes the replica from service and readiness automatically recovers with TEI. A successful response includes `auth_mode`, `auth_registry_generation`, and `active_bearer_tokens`; these values do not include individual token IDs or hashes. The public Ingress routes only `/mcp`; `/healthz`, `/readyz`, and `/metrics` remain available through the cluster-internal Service for probes and monitoring. For strict no-mixed-generation cutovers, deploy a second labeled Service/Deployment and switch the public route only after every new Pod is ready.
+`/readyz` returns 503 when the loaded descriptor differs from the configured generation. In required-vector mode it also performs a bounded canary embedding (five-second default) and validates the returned count, configured dimensions, finite values, and an exact match with the loaded vector index; a TEI outage therefore removes the replica from service and readiness automatically recovers with TEI. A successful response includes `auth_mode`, `auth_registry_generation`, and `active_bearer_tokens`; these values do not include individual token IDs or hashes. The public Ingress routes only `/mcp`; `/healthz`, `/readyz`, and `/metrics` remain available through the cluster-internal Service for probes and monitoring. For strict no-mixed-generation cutovers, deploy a second labeled Service/Deployment and switch the public route only after every new Pod is ready.
 
 After changing `bearer-tokens.yaml`, update the Secret and restart all server
 Pods. The process intentionally does not watch mounted Secret updates:
@@ -244,7 +257,7 @@ This is a post-deploy assertion only; the application does not add peer discover
 
 ### Memory profile behind the manifest
 
-The server container request/limit is `1536Mi`/`2Gi`. With the schema-v2 corpus release containing 123 documents and 597 attachments, the structured generation contains 45,686 chunks and full 384-dimension vectors. Required-vector `--print-release-generation` startup took 5.39s and peaked at `923,280KiB`. Earlier BM25-only startup initially peaked at `1,509,264KiB`; removing a redundant validation-time rebuild reduced that run to `867,052KiB` without changing chunks or search scores. The request is above the measured startup peaks, while the limit leaves headroom for requests, Go GC pacing, and release growth. The separate TEI sidecar is not included in this number.
+The server container request/limit is `1536Mi`/`2Gi`. Re-measure startup memory whenever the corpus, index format, or embedding dimensions change; the separate TEI sidecar is not included in the server figure.
 
 The full BM25+vector build took 48m36s and peaked at `1,756,900KiB` RSS with local CPU TEI. Run index publication as a separate release job with at least a `2Gi` request and a `3Gi` limit; do not assume the lower server startup figure applies to builds. The local TEI reported no immutable model SHA, so a production rollout must rebuild with a pinned model revision even when the model ID and dimensions match.
 

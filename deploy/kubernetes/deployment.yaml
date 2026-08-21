@@ -74,13 +74,20 @@ spec:
             - --model-id
             - intfloat/multilingual-e5-small
             - --revision
-            - REPLACE_WITH_MODEL_COMMIT_SHA
+            - 614241f622f53c4eeff9890bdc4f31cfecc418b3
           ports:
             - name: embeddings
               containerPort: 80
           volumeMounts:
             - name: embeddings-cache
               mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: embeddings
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 60
           resources:
             requests:
               cpu: 100m

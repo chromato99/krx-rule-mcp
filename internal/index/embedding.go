@@ -25,9 +25,14 @@ type EmbedderInfo interface {
 type EmbeddingInputFormat string
 
 const (
-	EmbeddingInputTextV1        EmbeddingInputFormat = "text-v1"
-	EmbeddingInputStructuredV1  EmbeddingInputFormat = "structured-v1"
-	DefaultEmbeddingInputFormat                      = EmbeddingInputTextV1
+	EmbeddingInputTextV1           EmbeddingInputFormat = "text-v1"
+	EmbeddingInputStructuredV1     EmbeddingInputFormat = "structured-v1"
+	DefaultEmbeddingInputFormat                         = EmbeddingInputTextV1
+	DefaultEmbeddingModel                               = "intfloat/multilingual-e5-small"
+	DefaultEmbeddingModelRevision                       = "614241f622f53c4eeff9890bdc4f31cfecc418b3"
+	DefaultEmbeddingDimensions                          = 384
+	DefaultEmbeddingQueryPrefix                         = "query: "
+	DefaultEmbeddingDocumentPrefix                      = "passage: "
 )
 
 func ParseEmbeddingInputFormat(value string) (EmbeddingInputFormat, error) {
@@ -115,7 +120,7 @@ func NewQueryEmbedderFromEnv() (*OpenAIEmbedder, error) {
 	if err != nil {
 		return nil, err
 	}
-	embedder.InputPrefix = envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: ")
+	embedder.InputPrefix = envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", DefaultEmbeddingQueryPrefix)
 	return embedder, nil
 }
 
@@ -124,12 +129,12 @@ func NewDocumentEmbedderFromEnv() (*OpenAIEmbedder, error) {
 	if err != nil {
 		return nil, err
 	}
-	embedder.InputPrefix = envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: ")
+	embedder.InputPrefix = envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", DefaultEmbeddingDocumentPrefix)
 	return embedder, nil
 }
 
 func newOpenAIEmbedderFromEnv() (*OpenAIEmbedder, error) {
-	dims := 384
+	dims := DefaultEmbeddingDimensions
 	if raw := os.Getenv("KRX_EMBEDDING_DIMENSIONS"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 {
@@ -140,10 +145,10 @@ func newOpenAIEmbedderFromEnv() (*OpenAIEmbedder, error) {
 	return &OpenAIEmbedder{
 		BaseURL:       strings.TrimRight(envDefault("KRX_EMBEDDING_BASE_URL", "http://127.0.0.1:18081/v1"), "/"),
 		APIKey:        envDefault("OPENAI_API_KEY", "local"),
-		Model:         envDefault("KRX_EMBEDDING_MODEL", "intfloat/multilingual-e5-small"),
-		ModelRevision: strings.TrimSpace(os.Getenv("KRX_EMBEDDING_MODEL_REVISION")),
+		Model:         envDefault("KRX_EMBEDDING_MODEL", DefaultEmbeddingModel),
+		ModelRevision: envDefault("KRX_EMBEDDING_MODEL_REVISION", DefaultEmbeddingModelRevision),
 		Dimensions:    dims,
-		Client:        &http.Client{Timeout: 45 * time.Second},
+		Client:        &http.Client{Timeout: 10 * time.Minute},
 	}, nil
 }
 
@@ -302,5 +307,5 @@ func (e *OpenAIEmbedder) client() *http.Client {
 	if e.Client != nil {
 		return e.Client
 	}
-	return &http.Client{Timeout: 45 * time.Second}
+	return &http.Client{Timeout: 10 * time.Minute}
 }

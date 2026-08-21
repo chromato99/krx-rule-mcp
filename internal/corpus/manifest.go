@@ -35,15 +35,6 @@ var releaseOperationalFields = map[string]struct{}{
 	"last_refresh_failed_at": {},
 }
 
-// legacyReleaseOperationalFields freezes the schema-v2 hash contract from
-// before refresh-failure provenance became operational metadata.
-var legacyReleaseOperationalFields = map[string]struct{}{
-	"release_hash":         {},
-	"generated_at":         {},
-	"last_checked_at":      {},
-	"source_response_hash": {},
-}
-
 var refreshFailureOperationalFields = map[string]struct{}{
 	"last_refresh_error":     {},
 	"last_refresh_failed_at": {},
@@ -115,16 +106,8 @@ func validateReleaseManifest(root string, docs []model.Document, attachmentTexts
 		return ReleaseManifest{}, err
 	}
 	if declaredReleaseHash != actualReleaseHash {
-		legacyReleaseHash, eligible, err := legacyV2ReleaseHash(payload)
-		if err != nil {
-			return ReleaseManifest{}, err
-		}
-		if !eligible || declaredReleaseHash != legacyReleaseHash {
-			return ReleaseManifest{}, fmt.Errorf("release manifest release_hash_mismatch: got %s want %s", declaredReleaseHash, actualReleaseHash)
-		}
+		return ReleaseManifest{}, fmt.Errorf("release manifest release_hash_mismatch: got %s want %s", declaredReleaseHash, actualReleaseHash)
 	}
-	// Keep the declared legacy digest so indexes built against that release
-	// remain compatible after the hash contract migration.
 	return ReleaseManifest{IndexSourceHash: actualIndexHash, ReleaseHash: declaredReleaseHash}, nil
 }
 
@@ -141,19 +124,6 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 func releaseHash(payload map[string]any) (string, error) {
 	scrubbed := scrubReleaseFields(payload)
 	return canonicalJSONHash(scrubbed)
-}
-
-func legacyV2ReleaseHash(payload map[string]any) (string, bool, error) {
-	schema, ok := payload["schema_version"].(float64)
-	if !ok || schema != float64(IndexSourceSchemaVersion) || !containsLegacyRefreshField(payload) {
-		return "", false, nil
-	}
-	scrubbed := scrubReleaseFieldsWith(payload, legacyReleaseOperationalFields)
-	hash, err := canonicalJSONHash(scrubbed)
-	if err != nil {
-		return "", false, err
-	}
-	return hash, true, nil
 }
 
 func canonicalJSONHash(value any) (string, error) {
@@ -341,27 +311,6 @@ func scrubReleaseFieldsWith(value any, excludedFields map[string]struct{}) any {
 	default:
 		return typed
 	}
-}
-
-func containsLegacyRefreshField(value any) bool {
-	switch typed := value.(type) {
-	case map[string]any:
-		for key, item := range typed {
-			if _, operational := refreshFailureOperationalFields[key]; operational {
-				return true
-			}
-			if containsLegacyRefreshField(item) {
-				return true
-			}
-		}
-	case []any:
-		for _, item := range typed {
-			if containsLegacyRefreshField(item) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func normalizeReleaseJSON(value any) any {

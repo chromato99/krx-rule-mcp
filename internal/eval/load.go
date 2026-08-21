@@ -58,6 +58,8 @@ func ValidateFixture(fixture Fixture) error {
 		return fmt.Errorf("evaluation source sha256 %q is invalid", fixture.Source.SHA256)
 	}
 	seen := map[string]struct{}{}
+	splitCounts := map[string]int{}
+	englishHoldoutCases := 0
 	for index, item := range fixture.Cases {
 		if !caseIDPattern.MatchString(item.ID) {
 			return fmt.Errorf("evaluation case %d has invalid id %q", index, item.ID)
@@ -66,9 +68,28 @@ func ValidateFixture(fixture Fixture) error {
 			return fmt.Errorf("evaluation case id %q is duplicated", item.ID)
 		}
 		seen[item.ID] = struct{}{}
+		splitCounts[item.Split]++
+		if item.Split == "holdout" && item.Input.Language == "en" {
+			englishHoldoutCases++
+		}
 		if err := validateCase(item); err != nil {
 			return fmt.Errorf("evaluation case %q: %w", item.ID, err)
 		}
+	}
+	for _, requirement := range []struct {
+		split   string
+		minimum int
+	}{
+		{split: "regression", minimum: 50},
+		{split: "development", minimum: 20},
+		{split: "holdout", minimum: 20},
+	} {
+		if splitCounts[requirement.split] < requirement.minimum {
+			return fmt.Errorf("evaluation fixture split %q has %d cases, want at least %d", requirement.split, splitCounts[requirement.split], requirement.minimum)
+		}
+	}
+	if englishHoldoutCases < 10 {
+		return fmt.Errorf("evaluation fixture has %d English holdout cases, want at least 10", englishHoldoutCases)
 	}
 	return nil
 }
@@ -135,13 +156,16 @@ func validateCase(item Case) error {
 	if item.Expectation.EvidenceStatus == "ambiguous" && !item.Expectation.ClarificationRequired {
 		return fmt.Errorf("ambiguous case requires clarification_required")
 	}
+	seenTargets := map[string]struct{}{}
 	for _, target := range item.Expectation.Targets {
 		if strings.TrimSpace(target.DocumentID) == "" {
 			return fmt.Errorf("target.document_id is required")
 		}
-		if target.Evidence != nil && target.ArticleID == "" && target.AttachmentID == "" {
-			return fmt.Errorf("evidence text conditions require article_id or attachment_id")
+		targetKey := strings.Join([]string{target.DocumentID, target.ArticleID, target.AttachmentID}, "\x00")
+		if _, duplicate := seenTargets[targetKey]; duplicate {
+			return fmt.Errorf("duplicate target tuple for document %q", target.DocumentID)
 		}
+		seenTargets[targetKey] = struct{}{}
 		if item.Expectation.ClaimRelation == "contradicts" &&
 			(target.Evidence == nil || len(target.Evidence.RelationMustContainAny) == 0) {
 			return fmt.Errorf("contradicts target requires relation_must_contain_any evidence")

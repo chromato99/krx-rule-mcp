@@ -24,18 +24,6 @@ func buildHash(indexSourceHash, version string) string {
 	return model.HashBytes(payload)
 }
 
-func normalizeSnapshotHashes(snap *Snapshot) {
-	if snap.IndexSourceHash == "" {
-		snap.IndexSourceHash = snap.CorpusHash
-	}
-	if snap.CorpusHash == "" {
-		snap.CorpusHash = snap.IndexSourceHash
-	}
-	if snap.IndexBuildHash == "" && snap.IndexSourceHash != "" {
-		snap.IndexBuildHash = buildHash(snap.IndexSourceHash, firstNonEmpty(snap.IndexerVersion, indexerVersion))
-	}
-}
-
 func attachmentDocuments(docs []model.Document, texts map[string]string) map[string]AttachmentDocument {
 	out := make(map[string]AttachmentDocument, len(texts))
 	for _, doc := range docs {
@@ -100,7 +88,6 @@ func snapshotForValidation(docs []model.Document, attachments map[string]Attachm
 		IndexerVersion:  indexerVersion,
 		IndexSourceHash: indexSourceHash,
 		IndexBuildHash:  buildHash(indexSourceHash, indexerVersion),
-		CorpusHash:      indexSourceHash,
 		Documents:       documents,
 		Chunks:          chunks,
 	}, nil
@@ -133,7 +120,6 @@ func normalizeVectorWriteOptions(snap Snapshot, vectors map[string][]float64, mo
 }
 
 func vectorGenerationID(snap Snapshot, vectors map[string][]float64, modelName string, dimensions int, option VectorWriteOptions) string {
-	normalizeSnapshotHashes(&snap)
 	ids := make([]string, 0, len(vectors))
 	for id := range vectors {
 		ids = append(ids, id)
@@ -320,7 +306,6 @@ func validateVectorSnapshotStructure(snap VectorSnapshot) error {
 }
 
 func BuildVectorMetadata(snap Snapshot, vectors map[string][]float64, modelName string, dimensions int, option VectorWriteOptions) VectorMetadata {
-	normalizeSnapshotHashes(&snap)
 	option = normalizeVectorWriteOptions(snap, vectors, modelName, dimensions, option)
 	expectedIDs := snapshotChunkIDs(snap.Chunks)
 	storedIDs := make([]string, 0, len(vectors))
@@ -334,7 +319,6 @@ func BuildVectorMetadata(snap Snapshot, vectors map[string][]float64, modelName 
 		IndexSourceHash:      snap.IndexSourceHash,
 		IndexBuildHash:       snap.IndexBuildHash,
 		CorpusReleaseHash:    snap.CorpusReleaseHash,
-		CorpusHash:           snap.IndexSourceHash,
 		Model:                modelName,
 		ModelRevision:        option.ModelRevision,
 		Dimensions:           dimensions,

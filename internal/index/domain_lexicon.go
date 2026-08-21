@@ -71,6 +71,19 @@ func (e DomainQueryExpansion) ReviewedAppliedTerms() []DomainLexiconMatch {
 	return reviewed
 }
 
+func (e DomainQueryExpansion) ReviewedEvidenceConcepts() [][]string {
+	var concepts [][]string
+	for _, match := range e.ReviewedAppliedTerms() {
+		// AddedTerms can contain broad recall expansions such as a document type.
+		// Evidence coverage must retain the reviewed canonical concept itself.
+		concept := uniqueTerms([]string{match.Canonical})
+		if len(concept) > 0 {
+			concepts = append(concepts, concept)
+		}
+	}
+	return concepts
+}
+
 func (e DomainQueryExpansion) matchedTermCount(reviewedOnly bool) int {
 	seen := map[string]struct{}{}
 	for _, match := range e.AppliedTerms {
@@ -282,6 +295,17 @@ func lexiconTermMatches(query, term string) bool {
 		want := strings.ToLower(term)
 		for _, token := range Tokenize(query) {
 			if token == want {
+				return true
+			}
+		}
+		for _, field := range strings.Fields(strings.ToLower(query)) {
+			field = strings.Trim(field, ".,?!:;()[]{}\"'")
+			if !strings.HasPrefix(field, want) {
+				continue
+			}
+			suffix := strings.TrimPrefix(field, want)
+			switch suffix {
+			case "은", "는", "이", "가", "을", "를", "의", "에", "에서", "로", "으로", "와", "과":
 				return true
 			}
 		}

@@ -26,29 +26,46 @@ import (
 var version = "dev"
 
 type artifactRuntime struct {
-	ReleaseGeneration    string
-	CorpusDigest         string
-	IndexDigest          string
-	VectorDigest         string
-	VectorMetadataDigest string
-	DomainLexiconDigest  string
-	RuntimeVectorMode    string
-	ServerImageDigest    string
+	ReleaseGeneration       string
+	CorpusDigest            string
+	IndexDigest             string
+	VectorDigest            string
+	VectorMetadataDigest    string
+	DomainLexiconDigest     string
+	RuntimeVectorMode       string
+	RetrievalCandidateLimit int
+	RerankerModel           string
+	RerankerRevision        string
+	RerankerImageDigest     string
+	ServerImageDigest       string
 }
 
 type releaseDescriptor struct {
-	Schema              string                   `json:"schema"`
-	CorpusReleaseHash   string                   `json:"corpus_release_hash"`
-	IndexSourceHash     string                   `json:"index_source_hash"`
-	IndexBuildHash      string                   `json:"index_build_hash"`
-	BM25ArtifactDigest  string                   `json:"bm25_artifact_digest"`
-	BM25SnapshotVersion uint16                   `json:"bm25_snapshot_version"`
-	IndexerVersion      string                   `json:"indexer_version"`
-	Vector              *vectorReleaseDescriptor `json:"vector,omitempty"`
-	DomainLexiconDigest string                   `json:"domain_lexicon_digest"`
-	RuntimeVectorMode   string                   `json:"runtime_vector_mode"`
-	ServerImageDigest   string                   `json:"server_image_digest"`
-	TEIImageDigest      string                   `json:"tei_image_digest"`
+	Schema                  string                     `json:"schema"`
+	CorpusReleaseHash       string                     `json:"corpus_release_hash"`
+	IndexSourceHash         string                     `json:"index_source_hash"`
+	IndexBuildHash          string                     `json:"index_build_hash"`
+	BM25ArtifactDigest      string                     `json:"bm25_artifact_digest"`
+	BM25SnapshotVersion     uint16                     `json:"bm25_snapshot_version"`
+	IndexerVersion          string                     `json:"indexer_version"`
+	Vector                  *vectorReleaseDescriptor   `json:"vector,omitempty"`
+	Reranker                *rerankerReleaseDescriptor `json:"reranker,omitempty"`
+	DomainLexiconDigest     string                     `json:"domain_lexicon_digest"`
+	RuntimeVectorMode       string                     `json:"runtime_vector_mode"`
+	RetrievalCandidateLimit int                        `json:"retrieval_candidate_limit"`
+	ServerImageDigest       string                     `json:"server_image_digest"`
+	TEIImageDigest          string                     `json:"tei_image_digest"`
+	RerankerImageDigest     string                     `json:"reranker_image_digest,omitempty"`
+}
+
+type rerankerReleaseDescriptor struct {
+	Model          string `json:"model"`
+	ModelRevision  string `json:"model_revision"`
+	CandidateLimit int    `json:"candidate_limit"`
+	BatchSize      int    `json:"batch_size"`
+	Mode           string `json:"mode"`
+	Timeout        string `json:"timeout"`
+	InputFormat    string `json:"input_format"`
 }
 
 type vectorReleaseDescriptor struct {
@@ -69,62 +86,71 @@ type vectorReleaseDescriptor struct {
 }
 
 type httpRuntimeConfig struct {
-	Addr                  string
-	AuthMode              security.AuthMode
-	TokenRegistry         *security.BearerTokenRegistry
-	Origins               []string
-	RequestSizeLimit      int64
-	ResponseSizeLimit     int64
-	MaxConcurrentRequests int
-	RequestTimeout        time.Duration
-	ShutdownTimeout       time.Duration
-	ReadinessEmbedTimeout time.Duration
-	ExpectedGeneration    string
-	Artifacts             artifactRuntime
-	Metrics               *security.Metrics
-	Embedder              searchindex.Embedder
-	VectorRequired        bool
+	Addr                   string
+	AuthMode               security.AuthMode
+	TokenRegistry          *security.BearerTokenRegistry
+	Origins                []string
+	RequestSizeLimit       int64
+	ResponseSizeLimit      int64
+	MaxConcurrentRequests  int
+	RequestTimeout         time.Duration
+	ShutdownTimeout        time.Duration
+	ReadinessEmbedTimeout  time.Duration
+	ReadinessRerankTimeout time.Duration
+	ExpectedGeneration     string
+	Artifacts              artifactRuntime
+	Metrics                *security.Metrics
+	Embedder               searchindex.Embedder
+	VectorRequired         bool
+	Reranker               searchindex.Reranker
+	RerankerRequired       bool
 }
 
 func main() {
 	var (
-		mode               = flag.String("mode", env("RULE_MCP_MODE", "stdio"), "transport mode: stdio or http")
-		addr               = flag.String("addr", env("RULE_MCP_ADDR", ":8080"), "HTTP listen address")
-		dataDir            = flag.String("data-dir", envDataDir(), "data directory")
-		indexDir           = flag.String("index-dir", envIndexDir(), "search index snapshot directory")
-		indexPath          = flag.String("index", "", "BM25/core index snapshot path")
-		vectorIndex        = flag.String("vector-index", "", "optional vector snapshot path")
-		vectorPolicy       = flag.String("vector-policy", env("KRX_VECTOR_SEARCH_POLICY", "optional"), "vector runtime policy: optional or required when vector search is enabled")
-		requireVector      = flag.Bool("require-vector", envBool("KRX_REQUIRE_VECTOR"), "require a valid full-coverage vector snapshot and embedding configuration")
-		lexiconPath        = flag.String("domain-lexicon", env("KRX_DOMAIN_LEXICON_PATH", searchindex.DefaultDomainLexiconPath), "domain lexicon YAML path for query expansion")
-		authModeValue      = flag.String("auth-mode", env("RULE_MCP_AUTH_MODE", string(security.AuthModeRequired)), "HTTP bearer authentication mode: required or disabled")
-		bearerTokenFile    = flag.String("bearer-token-file", os.Getenv("RULE_MCP_BEARER_TOKEN_FILE"), "YAML bearer token registry for required HTTP authentication")
-		origins            = flag.String("allowed-origins", os.Getenv("RULE_MCP_ALLOWED_ORIGINS"), "comma-separated Origin allowlist for HTTP mode")
-		requestLimit       = flag.Int64("request-size-limit", envInt64("RULE_MCP_REQUEST_SIZE_LIMIT", 1<<20), "maximum HTTP request body size in bytes")
-		responseLimit      = flag.Int64("response-size-limit", envInt64("RULE_MCP_RESPONSE_SIZE_LIMIT", 1<<20), "maximum complete HTTP MCP response body size in bytes")
-		toolOutputLimit    = flag.Int("tool-output-size-limit", envInt("RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT", 512<<10), "maximum structured tool output size in bytes")
-		maxQueryRunes      = flag.Int("max-query-runes", envInt("RULE_MCP_MAX_QUERY_RUNES", 1000), "maximum search query length in characters")
-		maxSearches        = flag.Int("max-concurrent-searches", envInt("RULE_MCP_MAX_CONCURRENT_SEARCHES", 16), "maximum concurrent search and query embedding operations")
-		maxRequests        = flag.Int("max-concurrent-requests", envInt("RULE_MCP_MAX_CONCURRENT_REQUESTS", 64), "maximum concurrent HTTP MCP requests")
-		embedTimeout       = flag.Duration("embedding-timeout", envDuration("RULE_MCP_EMBEDDING_TIMEOUT", 3*time.Second), "query embedding deadline")
-		readinessTimeout   = flag.Duration("readiness-embedding-timeout", envDuration("RULE_MCP_READINESS_EMBEDDING_TIMEOUT", 5*time.Second), "required-vector readiness canary embedding deadline")
-		requestTimeout     = flag.Duration("request-timeout", envDuration("RULE_MCP_REQUEST_TIMEOUT", 30*time.Second), "overall HTTP MCP request deadline")
-		shutdownTimeout    = flag.Duration("shutdown-timeout", envDuration("RULE_MCP_SHUTDOWN_TIMEOUT", 15*time.Second), "HTTP graceful shutdown deadline")
-		expectedGeneration = flag.String("expected-release-generation", os.Getenv("RULE_MCP_EXPECTED_RELEASE_GENERATION"), "expected lowercase SHA-256 digest of the canonical release descriptor")
-		printGeneration    = flag.Bool("print-release-generation", false, "print the canonical release descriptor and generation, then exit")
+		mode                     = flag.String("mode", env("RULE_MCP_MODE", "stdio"), "transport mode: stdio or http")
+		addr                     = flag.String("addr", env("RULE_MCP_ADDR", ":8080"), "HTTP listen address")
+		dataDir                  = flag.String("data-dir", envDataDir(), "data directory")
+		indexDir                 = flag.String("index-dir", envIndexDir(), "search index snapshot directory")
+		vectorPolicy             = flag.String("vector-policy", env("KRX_VECTOR_SEARCH_POLICY", "optional"), "vector runtime policy: optional or required when vector search is enabled")
+		requireVector            = flag.Bool("require-vector", envBool("KRX_REQUIRE_VECTOR"), "require a valid full-coverage vector snapshot and embedding configuration")
+		rerankerPolicy           = flag.String("reranker-policy", env("KRX_RERANKER_POLICY", "optional"), "reranker runtime policy: optional or required when reranking is enabled")
+		requireReranker          = flag.Bool("require-reranker", envBool("KRX_REQUIRE_RERANKER"), "require a valid Korean reranker configuration")
+		lexiconPath              = flag.String("domain-lexicon", env("KRX_DOMAIN_LEXICON_PATH", searchindex.DefaultDomainLexiconPath), "domain lexicon YAML path for query expansion")
+		authModeValue            = flag.String("auth-mode", env("RULE_MCP_AUTH_MODE", string(security.AuthModeRequired)), "HTTP bearer authentication mode: required or disabled")
+		bearerTokenFile          = flag.String("bearer-token-file", os.Getenv("RULE_MCP_BEARER_TOKEN_FILE"), "YAML bearer token registry for required HTTP authentication")
+		origins                  = flag.String("allowed-origins", os.Getenv("RULE_MCP_ALLOWED_ORIGINS"), "comma-separated Origin allowlist for HTTP mode")
+		requestLimit             = flag.Int64("request-size-limit", envInt64("RULE_MCP_REQUEST_SIZE_LIMIT", 1<<20), "maximum HTTP request body size in bytes")
+		responseLimit            = flag.Int64("response-size-limit", envInt64("RULE_MCP_RESPONSE_SIZE_LIMIT", 1<<20), "maximum complete HTTP MCP response body size in bytes")
+		toolOutputLimit          = flag.Int("tool-output-size-limit", envInt("RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT", 512<<10), "maximum structured tool output size in bytes")
+		maxQueryRunes            = flag.Int("max-query-runes", envInt("RULE_MCP_MAX_QUERY_RUNES", 1000), "maximum search query length in characters")
+		maxSearches              = flag.Int("max-concurrent-searches", envInt("RULE_MCP_MAX_CONCURRENT_SEARCHES", 16), "maximum concurrent search and query embedding operations")
+		retrievalCandidates      = flag.Int("candidate-limit", envInt("KRX_RETRIEVAL_CANDIDATE_LIMIT", 0), "first-stage candidate limit per channel, max 512; 0 derives it from result limit")
+		maxRequests              = flag.Int("max-concurrent-requests", envInt("RULE_MCP_MAX_CONCURRENT_REQUESTS", 64), "maximum concurrent HTTP MCP requests")
+		embedTimeout             = flag.Duration("embedding-timeout", envDuration("RULE_MCP_EMBEDDING_TIMEOUT", 3*time.Second), "query embedding deadline")
+		rerankerTimeout          = flag.Duration("reranker-timeout", envDuration("RULE_MCP_RERANKER_TIMEOUT", 30*time.Minute), "bounded candidate reranker deadline")
+		readinessTimeout         = flag.Duration("readiness-embedding-timeout", envDuration("RULE_MCP_READINESS_EMBEDDING_TIMEOUT", 5*time.Second), "required-vector readiness canary embedding deadline")
+		readinessRerankerTimeout = flag.Duration("readiness-reranker-timeout", envDuration("RULE_MCP_READINESS_RERANKER_TIMEOUT", 30*time.Second), "required-reranker readiness canary deadline")
+		requestTimeout           = flag.Duration("request-timeout", envDuration("RULE_MCP_REQUEST_TIMEOUT", 30*time.Second), "overall HTTP MCP request deadline")
+		shutdownTimeout          = flag.Duration("shutdown-timeout", envDuration("RULE_MCP_SHUTDOWN_TIMEOUT", 15*time.Second), "HTTP graceful shutdown deadline")
+		expectedGeneration       = flag.String("expected-release-generation", os.Getenv("RULE_MCP_EXPECTED_RELEASE_GENERATION"), "expected lowercase SHA-256 digest of the canonical release descriptor")
+		printGeneration          = flag.Bool("print-release-generation", false, "print the canonical release descriptor and generation, then exit")
 	)
 	flag.Parse()
+	if *retrievalCandidates < 0 || *retrievalCandidates > 512 {
+		_, _ = fmt.Fprintln(os.Stderr, "candidate limit must be between 1 and 512, or 0 for the default")
+		os.Exit(1)
+	}
 	requestedMode := strings.ToLower(strings.TrimSpace(*mode))
 	var httpAuth httpAuthConfig
 	if requestedMode == "http" && !*printGeneration {
-		_, legacyBearerTokenConfigured := os.LookupEnv("RULE_MCP_BEARER_TOKEN")
 		var err error
-		httpAuth, err = loadHTTPAuthConfig(*authModeValue, *bearerTokenFile, legacyBearerTokenConfigured)
+		httpAuth, err = loadHTTPAuthConfig(*authModeValue, *bearerTokenFile)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "invalid HTTP authentication configuration: %v\n", err)
 			os.Exit(1)
 		}
-		if *maxQueryRunes <= 0 || *maxSearches <= 0 || *maxRequests <= 0 || *requestLimit <= 0 || *toolOutputLimit <= 0 || *embedTimeout <= 0 || *readinessTimeout <= 0 || *requestTimeout <= 0 || *shutdownTimeout <= 0 {
+		if *maxQueryRunes <= 0 || *maxSearches <= 0 || *maxRequests <= 0 || *requestLimit <= 0 || *toolOutputLimit <= 0 || *embedTimeout <= 0 || *rerankerTimeout <= 0 || *readinessTimeout <= 0 || *readinessRerankerTimeout <= 0 || *requestTimeout <= 0 || *shutdownTimeout <= 0 {
 			_, _ = fmt.Fprintln(os.Stderr, "HTTP limits and timeouts must be greater than zero")
 			os.Exit(1)
 		}
@@ -137,24 +163,6 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	legacyIndexPath := strings.TrimSpace(*indexPath)
-	if legacyIndexPath == "" {
-		legacyIndexPath = strings.TrimSpace(os.Getenv("KRX_INDEX_PATH"))
-	}
-	legacyVectorPath := strings.TrimSpace(*vectorIndex)
-	if legacyVectorPath == "" {
-		legacyVectorPath = strings.TrimSpace(os.Getenv("KRX_VECTOR_INDEX_PATH"))
-	}
-	usePublishedGeneration := legacyIndexPath == "" && legacyVectorPath == ""
-	if !usePublishedGeneration {
-		if legacyIndexPath == "" {
-			legacyIndexPath = searchindex.DefaultBM25Path(*indexDir)
-		}
-		if legacyVectorPath == "" {
-			legacyVectorPath = searchindex.DefaultVectorPath(*indexDir)
-		}
-	}
-
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if requestedMode == "http" && !*printGeneration {
 		if httpAuth.Mode == security.AuthModeDisabled {
@@ -176,18 +184,33 @@ func main() {
 		logger.Error("required vector embedding configuration failed", "error", embedErr)
 		os.Exit(1)
 	}
+	reranker, rerankerEnabled, rerankerErr := searchindex.NewRerankerFromEnv()
+	rerankerRequired, err := resolveRerankerPolicy(rerankerEnabled, *rerankerPolicy, *requireReranker)
+	if err != nil {
+		logger.Error("invalid reranker policy", "error", err)
+		os.Exit(1)
+	}
+	if rerankerRequired && rerankerErr != nil {
+		logger.Error("required reranker configuration failed", "error", rerankerErr)
+		os.Exit(1)
+	}
+	if requestedMode == "http" && !*printGeneration && rerankerRequired && *requestTimeout <= *rerankerTimeout {
+		logger.Error("request timeout must exceed required reranker timeout", "request_timeout", *requestTimeout, "reranker_timeout", *rerankerTimeout)
+		os.Exit(1)
+	}
+	rerankerCandidates := 0
+	if rerankerEnabled && rerankerErr == nil {
+		rerankerCandidates, rerankerErr = searchindex.RerankerCandidateLimitFromEnv()
+		if rerankerRequired && rerankerErr != nil {
+			logger.Error("required reranker candidate configuration failed", "error", rerankerErr)
+			os.Exit(1)
+		}
+	}
 	loadOptions := searchindex.RepositoryLoadOptions{
-		VectorEnabled:         vectorEnabled,
-		RequireVector:         vectorRequired,
-		RequireCorpusManifest: true,
+		VectorEnabled: vectorEnabled,
+		RequireVector: vectorRequired,
 	}
-	var repo *searchindex.Repository
-	if usePublishedGeneration {
-		repo, err = searchindex.LoadRepositoryGeneration(*dataDir, *indexDir, loadOptions)
-	} else {
-		loadOptions.VectorIndexPaths = []string{legacyVectorPath}
-		repo, err = searchindex.LoadRepositoryWithOptions(*dataDir, legacyIndexPath, loadOptions)
-	}
+	repo, err := searchindex.LoadRepositoryGeneration(*dataDir, *indexDir, loadOptions)
 	if err != nil {
 		logger.Error("load repository failed", "error", err)
 		os.Exit(1)
@@ -222,6 +245,29 @@ func main() {
 	} else {
 		logger.Info("vector search disabled; BM25-only mode")
 	}
+	var activeReranker searchindex.Reranker
+	if rerankerEnabled && rerankerErr != nil {
+		logger.Warn("reranker disabled; configuration failed", "error", rerankerErr)
+	} else if rerankerEnabled {
+		model, revision := reranker.RerankingInfo()
+		logger.Info("Korean reranker enabled", "model", model, "revision", revision, "base_url", reranker.BaseURL, "candidates", rerankerCandidates)
+		activeReranker = reranker
+	} else {
+		logger.Info("Korean reranker disabled")
+	}
+	if activeReranker != nil {
+		verifyCtx, cancel := context.WithTimeout(context.Background(), *rerankerTimeout)
+		verifyErr := reranker.VerifyReranker(verifyCtx)
+		cancel()
+		if verifyErr != nil {
+			if rerankerRequired {
+				logger.Error("required reranker identity check failed", "error", verifyErr)
+				os.Exit(1)
+			}
+			logger.Warn("reranker disabled; identity check failed", "error", verifyErr)
+			activeReranker = nil
+		}
+	}
 	runtimeVectorMode := "bm25"
 	if activeEmbedder != nil {
 		runtimeVectorMode = "bm25+vector"
@@ -230,8 +276,13 @@ func main() {
 		repo,
 		lexiconDigest,
 		runtimeVectorMode,
+		*retrievalCandidates,
+		activeReranker,
+		rerankerCandidates,
+		*rerankerTimeout,
 		strings.TrimSpace(os.Getenv("RULE_MCP_SERVER_IMAGE_DIGEST")),
 		strings.TrimSpace(os.Getenv("RULE_MCP_TEI_IMAGE_DIGEST")),
+		strings.TrimSpace(os.Getenv("RULE_MCP_RERANKER_IMAGE_DIGEST")),
 	)
 	if err != nil {
 		logger.Error("inspect loaded artifacts failed", "error", err)
@@ -245,6 +296,10 @@ func main() {
 		"vector_metadata_digest", artifacts.VectorMetadataDigest,
 		"domain_lexicon_digest", artifacts.DomainLexiconDigest,
 		"runtime_vector_mode", artifacts.RuntimeVectorMode,
+		"retrieval_candidate_limit", artifacts.RetrievalCandidateLimit,
+		"reranker_model", artifacts.RerankerModel,
+		"reranker_revision", artifacts.RerankerRevision,
+		"reranker_image_digest", artifacts.RerankerImageDigest,
 		"server_image_digest", artifacts.ServerImageDigest,
 	)
 	if *printGeneration {
@@ -261,17 +316,22 @@ func main() {
 
 	runtimeMetrics := security.NewMetrics()
 	service := &mcpserver.Service{
-		Repo:               repo,
-		Embedder:           activeEmbedder,
-		VectorRequired:     vectorRequired,
-		DomainLexicon:      lexicon,
-		Logger:             logger,
-		ReleaseGeneration:  artifacts.ReleaseGeneration,
-		MaxQueryRunes:      *maxQueryRunes,
-		EmbeddingTimeout:   *embedTimeout,
-		ConcurrentSearches: searchSlots(*maxSearches),
-		Observer:           runtimeMetrics,
-		MaxToolOutputBytes: *toolOutputLimit,
+		Repo:                repo,
+		Embedder:            activeEmbedder,
+		VectorRequired:      vectorRequired,
+		Reranker:            activeReranker,
+		RerankerRequired:    rerankerRequired,
+		RerankerCandidates:  rerankerCandidates,
+		RetrievalCandidates: *retrievalCandidates,
+		DomainLexicon:       lexicon,
+		Logger:              logger,
+		ReleaseGeneration:   artifacts.ReleaseGeneration,
+		MaxQueryRunes:       *maxQueryRunes,
+		EmbeddingTimeout:    *embedTimeout,
+		RerankerTimeout:     *rerankerTimeout,
+		ConcurrentSearches:  searchSlots(*maxSearches),
+		Observer:            runtimeMetrics,
+		MaxToolOutputBytes:  *toolOutputLimit,
 	}
 	server := mcpserver.NewServer(service, version)
 
@@ -286,21 +346,24 @@ func main() {
 		}
 	case "http":
 		config := httpRuntimeConfig{
-			Addr:                  *addr,
-			AuthMode:              httpAuth.Mode,
-			TokenRegistry:         httpAuth.Registry,
-			Origins:               splitCSV(*origins),
-			RequestSizeLimit:      *requestLimit,
-			ResponseSizeLimit:     *responseLimit,
-			MaxConcurrentRequests: *maxRequests,
-			RequestTimeout:        *requestTimeout,
-			ShutdownTimeout:       *shutdownTimeout,
-			ReadinessEmbedTimeout: *readinessTimeout,
-			ExpectedGeneration:    strings.TrimSpace(*expectedGeneration),
-			Artifacts:             artifacts,
-			Metrics:               runtimeMetrics,
-			Embedder:              activeEmbedder,
-			VectorRequired:        vectorRequired,
+			Addr:                   *addr,
+			AuthMode:               httpAuth.Mode,
+			TokenRegistry:          httpAuth.Registry,
+			Origins:                splitCSV(*origins),
+			RequestSizeLimit:       *requestLimit,
+			ResponseSizeLimit:      *responseLimit,
+			MaxConcurrentRequests:  *maxRequests,
+			RequestTimeout:         *requestTimeout,
+			ShutdownTimeout:        *shutdownTimeout,
+			ReadinessEmbedTimeout:  *readinessTimeout,
+			ReadinessRerankTimeout: *readinessRerankerTimeout,
+			ExpectedGeneration:     strings.TrimSpace(*expectedGeneration),
+			Artifacts:              artifacts,
+			Metrics:                runtimeMetrics,
+			Embedder:               activeEmbedder,
+			VectorRequired:         vectorRequired,
+			Reranker:               activeReranker,
+			RerankerRequired:       rerankerRequired,
 		}
 		if err := runHTTP(ctx, config, server, repo, logger); err != nil {
 			logger.Error("HTTP server failed", "error", err)
@@ -319,18 +382,22 @@ func runHTTP(ctx context.Context, config httpRuntimeConfig, server *mcpsdk.Serve
 		metrics = security.NewMetrics()
 	}
 	metrics.SetRuntimeInfo(security.RuntimeInfo{
-		ReleaseGeneration:    config.Artifacts.ReleaseGeneration,
-		CorpusDigest:         config.Artifacts.CorpusDigest,
-		IndexDigest:          config.Artifacts.IndexDigest,
-		VectorDigest:         config.Artifacts.VectorDigest,
-		VectorMetadataDigest: config.Artifacts.VectorMetadataDigest,
-		DomainLexiconDigest:  config.Artifacts.DomainLexiconDigest,
-		RuntimeVectorMode:    config.Artifacts.RuntimeVectorMode,
-		ServerImageDigest:    config.Artifacts.ServerImageDigest,
-		VectorCoverage:       repo.VectorCoverage,
-		AuthMode:             string(config.AuthMode),
-		AuthRegistryDigest:   config.TokenRegistry.Digest(),
-		ActiveBearerTokens:   config.TokenRegistry.ActiveTokenCount(),
+		ReleaseGeneration:       config.Artifacts.ReleaseGeneration,
+		CorpusDigest:            config.Artifacts.CorpusDigest,
+		IndexDigest:             config.Artifacts.IndexDigest,
+		VectorDigest:            config.Artifacts.VectorDigest,
+		VectorMetadataDigest:    config.Artifacts.VectorMetadataDigest,
+		DomainLexiconDigest:     config.Artifacts.DomainLexiconDigest,
+		RuntimeVectorMode:       config.Artifacts.RuntimeVectorMode,
+		RetrievalCandidateLimit: config.Artifacts.RetrievalCandidateLimit,
+		RerankerModel:           config.Artifacts.RerankerModel,
+		RerankerRevision:        config.Artifacts.RerankerRevision,
+		RerankerImageDigest:     config.Artifacts.RerankerImageDigest,
+		ServerImageDigest:       config.Artifacts.ServerImageDigest,
+		VectorCoverage:          repo.VectorCoverage,
+		AuthMode:                string(config.AuthMode),
+		AuthRegistryDigest:      config.TokenRegistry.Digest(),
+		ActiveBearerTokens:      config.TokenRegistry.ActiveTokenCount(),
 	})
 	authenticated := security.WithBearerAuth(config.AuthMode, config.TokenRegistry,
 		security.WithRateLimit(120, time.Minute, mcpHandler))
@@ -523,6 +590,30 @@ func readinessHandler(config httpRuntimeConfig, repo *searchindex.Repository) ht
 				return
 			}
 		}
+		if config.RerankerRequired {
+			if config.Reranker == nil {
+				http.Error(w, "required reranker service is not configured", http.StatusServiceUnavailable)
+				return
+			}
+			timeout := config.ReadinessRerankTimeout
+			if timeout <= 0 {
+				timeout = 30 * time.Second
+			}
+			ctx, cancel := context.WithTimeout(request.Context(), timeout)
+			if verifier, ok := config.Reranker.(searchindex.RerankerVerifier); ok {
+				if err := verifier.VerifyReranker(ctx); err != nil {
+					cancel()
+					http.Error(w, "required reranker identity is not ready", http.StatusServiceUnavailable)
+					return
+				}
+			}
+			scores, err := config.Reranker.Rerank(ctx, "상장 심사", []string{"상장 심사 절차를 정한다.", "무관한 문장이다."})
+			cancel()
+			if err != nil || len(scores) != 2 {
+				http.Error(w, "required reranker service is not ready", http.StatusServiceUnavailable)
+				return
+			}
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		registryDigest := config.TokenRegistry.Digest()
 		if registryDigest == "" {
@@ -543,10 +634,7 @@ type httpAuthConfig struct {
 	Registry *security.BearerTokenRegistry
 }
 
-func loadHTTPAuthConfig(modeValue, tokenFile string, legacyBearerTokenConfigured bool) (httpAuthConfig, error) {
-	if legacyBearerTokenConfigured {
-		return httpAuthConfig{}, fmt.Errorf("RULE_MCP_BEARER_TOKEN was removed; migrate to RULE_MCP_BEARER_TOKEN_FILE")
-	}
+func loadHTTPAuthConfig(modeValue, tokenFile string) (httpAuthConfig, error) {
 	mode, err := security.ParseAuthMode(modeValue)
 	if err != nil {
 		return httpAuthConfig{}, err
@@ -590,17 +678,11 @@ func env(key, fallback string) string {
 }
 
 func envDataDir() string {
-	if value := os.Getenv("KRX_RULE_DATA_DIR"); value != "" {
-		return value
-	}
-	return env("KRX_DATA_DIR", "data")
+	return env("KRX_RULE_DATA_DIR", "data")
 }
 
 func envIndexDir() string {
-	if value := strings.TrimSpace(os.Getenv("KRX_RULE_INDEX_DIR")); value != "" {
-		return value
-	}
-	return env("KRX_INDEX_DIR", searchindex.DefaultIndexDir)
+	return env("KRX_RULE_INDEX_DIR", searchindex.DefaultIndexDir)
 }
 
 func splitCSV(raw string) []string {
@@ -618,7 +700,7 @@ func splitCSV(raw string) []string {
 	return out
 }
 
-func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtimeVectorMode, serverImageDigest, teiImageDigest string) (artifactRuntime, releaseDescriptor, error) {
+func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtimeVectorMode string, retrievalCandidateLimit int, reranker searchindex.Reranker, rerankerCandidates int, rerankerTimeout time.Duration, serverImageDigest, teiImageDigest, rerankerImageDigest string) (artifactRuntime, releaseDescriptor, error) {
 	if repo == nil {
 		return artifactRuntime{}, releaseDescriptor{}, fmt.Errorf("loaded repository is nil")
 	}
@@ -650,6 +732,9 @@ func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtime
 	var vectorDigest string
 	var vectorMetadataDigest string
 	var vectorDescriptor *vectorReleaseDescriptor
+	var rerankerDescriptor *rerankerReleaseDescriptor
+	var rerankerModel string
+	var rerankerRevision string
 	if strings.TrimSpace(repo.VectorPath) != "" {
 		var adopted *searchindex.VectorIndexStatus
 		for index := range repo.VectorIndexes {
@@ -682,19 +767,37 @@ func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtime
 			StoredVectorCount:  metadata.StoredVectorCount,
 		}
 	}
+	if reranker != nil {
+		model, revision := "unknown", ""
+		batchSize := 0
+		if info, ok := reranker.(searchindex.RerankerInfo); ok {
+			model, revision = info.RerankingInfo()
+		}
+		if configured, ok := reranker.(*searchindex.TEIReranker); ok {
+			batchSize = configured.BatchSize
+		}
+		rerankerDescriptor = &rerankerReleaseDescriptor{
+			Model: model, ModelRevision: revision, CandidateLimit: rerankerCandidates, BatchSize: batchSize, Mode: "weak-supported-korean", Timeout: rerankerTimeout.String(), InputFormat: "structured-korean-v1",
+		}
+		rerankerModel = model
+		rerankerRevision = revision
+	}
 	descriptor := releaseDescriptor{
-		Schema:              "krx-rule-mcp-release-v4",
-		CorpusReleaseHash:   repo.CorpusReleaseHash,
-		IndexSourceHash:     repo.IndexSourceHash,
-		IndexBuildHash:      repo.IndexBuildHash,
-		BM25ArtifactDigest:  repo.BM25ArtifactDigest,
-		BM25SnapshotVersion: repo.BM25SnapshotVersion,
-		IndexerVersion:      repo.IndexerVersion,
-		Vector:              vectorDescriptor,
-		DomainLexiconDigest: domainLexiconDigest,
-		RuntimeVectorMode:   runtimeVectorMode,
-		ServerImageDigest:   serverImageDigest,
-		TEIImageDigest:      teiImageDigest,
+		Schema:                  "krx-rule-mcp-release-v4",
+		CorpusReleaseHash:       repo.CorpusReleaseHash,
+		IndexSourceHash:         repo.IndexSourceHash,
+		IndexBuildHash:          repo.IndexBuildHash,
+		BM25ArtifactDigest:      repo.BM25ArtifactDigest,
+		BM25SnapshotVersion:     repo.BM25SnapshotVersion,
+		IndexerVersion:          repo.IndexerVersion,
+		Vector:                  vectorDescriptor,
+		Reranker:                rerankerDescriptor,
+		DomainLexiconDigest:     domainLexiconDigest,
+		RuntimeVectorMode:       runtimeVectorMode,
+		RetrievalCandidateLimit: retrievalCandidateLimit,
+		ServerImageDigest:       serverImageDigest,
+		TEIImageDigest:          teiImageDigest,
+		RerankerImageDigest:     rerankerImageDigest,
 	}
 	descriptorJSON, err := json.Marshal(descriptor)
 	if err != nil {
@@ -703,14 +806,18 @@ func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtime
 	generationHash := sha256.Sum256(descriptorJSON)
 	generation := hex.EncodeToString(generationHash[:])
 	return artifactRuntime{
-		ReleaseGeneration:    generation,
-		CorpusDigest:         repo.CorpusReleaseHash,
-		IndexDigest:          repo.BM25ArtifactDigest,
-		VectorDigest:         vectorDigest,
-		VectorMetadataDigest: vectorMetadataDigest,
-		DomainLexiconDigest:  domainLexiconDigest,
-		RuntimeVectorMode:    runtimeVectorMode,
-		ServerImageDigest:    serverImageDigest,
+		ReleaseGeneration:       generation,
+		CorpusDigest:            repo.CorpusReleaseHash,
+		IndexDigest:             repo.BM25ArtifactDigest,
+		VectorDigest:            vectorDigest,
+		VectorMetadataDigest:    vectorMetadataDigest,
+		DomainLexiconDigest:     domainLexiconDigest,
+		RuntimeVectorMode:       runtimeVectorMode,
+		RetrievalCandidateLimit: retrievalCandidateLimit,
+		RerankerModel:           rerankerModel,
+		RerankerRevision:        rerankerRevision,
+		RerankerImageDigest:     rerankerImageDigest,
+		ServerImageDigest:       serverImageDigest,
 	}, descriptor, nil
 }
 
@@ -759,6 +866,23 @@ func resolveVectorPolicy(enabled bool, policy string, requireFlag bool) (bool, e
 	if !enabled {
 		if requireFlag {
 			return false, fmt.Errorf("--require-vector needs KRX_VECTOR_SEARCH_ENABLED=true")
+		}
+		return false, nil
+	}
+	return requireFlag || policy == "required", nil
+}
+
+func resolveRerankerPolicy(enabled bool, policy string, requireFlag bool) (bool, error) {
+	policy = strings.ToLower(strings.TrimSpace(policy))
+	if policy == "" {
+		policy = "optional"
+	}
+	if policy != "optional" && policy != "required" {
+		return false, fmt.Errorf("unsupported KRX_RERANKER_POLICY %q; expected optional or required", policy)
+	}
+	if !enabled {
+		if requireFlag {
+			return false, fmt.Errorf("--require-reranker needs KRX_RERANKER_ENABLED=true")
 		}
 		return false, nil
 	}

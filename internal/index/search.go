@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromato99/krx-rule-mcp/internal/model"
@@ -21,6 +22,7 @@ const (
 	evidenceClaimCoverageWeight     = 0.048
 	documentIntentTermWeight        = 0.008
 	documentIntentPhraseWeight      = 0.008
+	documentIntentClaimWeight       = 0.032
 )
 
 type Filter struct {
@@ -44,7 +46,9 @@ type SearchOptions struct {
 	EvidenceTokenWeights map[string]float64
 	EvidenceTerms        []string
 	EvidenceClaims       []string
+	EvidenceConcepts     [][]string
 	EvidenceLimit        int
+	CandidateLimit       int
 }
 
 type SearchResult struct {
@@ -60,6 +64,7 @@ type SearchResult struct {
 	Score             float64            `json:"score"`
 	BM25Score         float64            `json:"bm25_score,omitempty"`
 	VectorScore       float64            `json:"vector_score,omitempty"`
+	RerankerScore     float64            `json:"reranker_score,omitempty"`
 	Snippet           string             `json:"snippet,omitempty"`
 	MatchedSource     string             `json:"matched_source,omitempty"`
 	MatchedChunkID    string             `json:"matched_chunk_id,omitempty"`
@@ -95,6 +100,19 @@ type ChunkCandidate struct {
 	LexicalCoverage  float64
 	BM25Rank         int
 	VectorRank       int
+	BaselineRank     int
+	RerankerRank     int
+	FinalRank        int
+	RerankerScore    float64
+	Reranked         bool
+}
+
+// SearchCandidateSet keeps retrieval candidates at chunk granularity until an
+// optional bounded reranker has scored them. Metadata is intentionally kept
+// private so callers can only return a set through GroupCandidates.
+type SearchCandidateSet struct {
+	Chunks   []ChunkCandidate
+	metadata []documentMetadataScore
 }
 
 // EvidenceMatch is a ranked, context-addressable reason why a document was
@@ -110,6 +128,8 @@ type EvidenceMatch struct {
 	Score            float64                `json:"score"`
 	BM25Score        float64                `json:"bm25_score,omitempty"`
 	VectorScore      float64                `json:"vector_score,omitempty"`
+	RerankerScore    float64                `json:"reranker_score,omitempty"`
+	RerankerRank     int                    `json:"reranker_rank,omitempty"`
 	LexicalCoverage  float64                `json:"lexical_coverage"`
 	Snippet          string                 `json:"snippet,omitempty"`
 	Text             string                 `json:"-"`
@@ -225,7 +245,7 @@ func BuildWithAttachments(docs []model.Document, attachments map[string]Attachme
 					AttachmentID:     att.ID,
 					AttachmentTitle:  firstNonEmpty(att.Title, att.FileName),
 					AttachmentFile:   att.FileName,
-					AttachmentStatus: att.Status,
+					AttachmentStatus: att.EffectiveConversionStatus(),
 					Text:             part.Text,
 					ArticleID:        part.ArticleID,
 					HeadingPath:      append([]string(nil), part.HeadingPath...),
@@ -282,6 +302,14 @@ func firstNonEmpty(values ...string) string {
 }
 
 func (e *Engine) Search(opts SearchOptions) []SearchResult {
+	candidates := e.RetrieveCandidates(opts)
+	return e.GroupCandidates(opts, candidates)
+}
+
+// RetrieveCandidates executes the read-only first-stage channels and RRF but
+// does not aggregate chunks into documents. This boundary lets a service apply
+// a bounded cross-encoder without duplicating retrieval logic.
+func (e *Engine) RetrieveCandidates(opts SearchOptions) SearchCandidateSet {
 	if opts.Limit <= 0 {
 		opts.Limit = 10
 	} else if opts.Limit > 50 {
@@ -291,20 +319,53 @@ func (e *Engine) Search(opts SearchOptions) []SearchResult {
 	if originalQuery == "" {
 		originalQuery = opts.Query
 	}
-	queryTokens := Tokenize(opts.Query)
+	queryTokens := uniqueSearchTokens(Tokenize(opts.Query))
 	originalTerms := meaningfulQueryTerms(originalQuery)
-	candidateLimit := opts.Limit * 24
-	if candidateLimit < 64 {
-		candidateLimit = 64
+	candidateLimit := opts.CandidateLimit
+	if candidateLimit <= 0 {
+		candidateLimit = opts.Limit * 24
+		if candidateLimit < 64 {
+			candidateLimit = 64
+		}
 	}
 	if candidateLimit > 512 {
 		candidateLimit = 512
 	}
-	bm25 := e.bm25ChunkCandidates(queryTokens, originalTerms, opts.Filter, opts.TokenWeights, candidateLimit)
-	vector := e.vectorChunkCandidates(opts.QueryVector, originalTerms, opts.Filter, candidateLimit)
+	var bm25, vector []ChunkCandidate
+	var metadata []documentMetadataScore
+	var wait sync.WaitGroup
+	wait.Add(3)
+	go func() {
+		defer wait.Done()
+		bm25 = e.bm25ChunkCandidates(queryTokens, originalTerms, opts.Filter, opts.TokenWeights, candidateLimit)
+	}()
+	go func() {
+		defer wait.Done()
+		vector = e.vectorChunkCandidates(opts.QueryVector, originalTerms, opts.Filter, candidateLimit)
+	}()
+	go func() {
+		defer wait.Done()
+		metadata = e.metadataDocumentScores(queryTokens, opts.Filter, opts.TokenWeights)
+	}()
+	wait.Wait()
 	fused := fuseChunkCandidates(bm25, vector)
-	metadata := e.metadataDocumentScores(queryTokens, opts.Filter, opts.TokenWeights)
-	return e.groupChunkCandidates(opts, fused, metadata)
+	for index := range fused {
+		fused[index].BaselineRank = index + 1
+		fused[index].FinalRank = index + 1
+	}
+	return SearchCandidateSet{Chunks: fused, metadata: metadata}
+}
+
+// GroupCandidates converts a retrieved and optionally reranked chunk set into
+// stable document results. With no reranker, candidate.Score remains the
+// original chunk-level RRF score and behavior is unchanged.
+func (e *Engine) GroupCandidates(opts SearchOptions, candidates SearchCandidateSet) []SearchResult {
+	if opts.Limit <= 0 {
+		opts.Limit = 10
+	} else if opts.Limit > 50 {
+		opts.Limit = 50
+	}
+	return e.groupChunkCandidates(opts, candidates.Chunks, candidates.metadata)
 }
 
 func (e *Engine) Documents(filter Filter, limit, offset int) []model.Document {
@@ -627,6 +688,91 @@ func fuseChunkCandidates(bm25, vector []ChunkCandidate) []ChunkCandidate {
 	return out
 }
 
+// ApplyRerankScores promotes the bounded reranker ordering while retaining a
+// smaller rank-only contribution from the first-stage RRF. Raw cross-encoder
+// scores are deliberately not mixed with BM25, cosine, or RRF scores because
+// their scales are not comparable and are not answerability probabilities.
+func ApplyRerankScores(set *SearchCandidateSet, scores []RerankScore, candidateLimit int, protectedConcepts [][]string) error {
+	if set == nil || len(set.Chunks) == 0 {
+		return nil
+	}
+	if candidateLimit <= 0 || candidateLimit > len(set.Chunks) {
+		candidateLimit = len(set.Chunks)
+	}
+	if len(scores) != candidateLimit {
+		return fmt.Errorf("reranker returned %d scores for %d candidates", len(scores), candidateLimit)
+	}
+	seen := make(map[int]struct{}, len(scores))
+	for _, score := range scores {
+		if score.Index < 0 || score.Index >= candidateLimit {
+			return fmt.Errorf("reranker returned invalid candidate index %d", score.Index)
+		}
+		if _, duplicate := seen[score.Index]; duplicate {
+			return fmt.Errorf("reranker returned duplicate candidate index %d", score.Index)
+		}
+		if math.IsNaN(score.Score) || math.IsInf(score.Score, 0) {
+			return fmt.Errorf("reranker returned non-finite score for candidate index %d", score.Index)
+		}
+		seen[score.Index] = struct{}{}
+		set.Chunks[score.Index].RerankerScore = score.Score
+		set.Chunks[score.Index].Reranked = true
+	}
+	order := make([]int, candidateLimit)
+	for index := range order {
+		order[index] = index
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		left := set.Chunks[order[i]]
+		right := set.Chunks[order[j]]
+		leftProtected := protectedConceptCoverage(left, protectedConcepts)
+		rightProtected := protectedConceptCoverage(right, protectedConcepts)
+		if leftProtected != rightProtected {
+			return leftProtected > rightProtected
+		}
+		if !sameScore(left.RerankerScore, right.RerankerScore) {
+			return left.RerankerScore > right.RerankerScore
+		}
+		return left.BaselineRank < right.BaselineRank
+	})
+	for rank, index := range order {
+		set.Chunks[index].RerankerRank = rank + 1
+	}
+	for index := range set.Chunks {
+		candidate := &set.Chunks[index]
+		baselineRank := candidate.BaselineRank
+		if baselineRank <= 0 {
+			baselineRank = index + 1
+		}
+		candidate.Score = 0.5 / (60 + float64(baselineRank))
+		if candidate.Reranked {
+			candidate.Score += 1 / (60 + float64(candidate.RerankerRank))
+		}
+	}
+	sort.SliceStable(set.Chunks, func(i, j int) bool { return chunkCandidateBetter(set.Chunks[i], set.Chunks[j]) })
+	for index := range set.Chunks {
+		set.Chunks[index].FinalRank = index + 1
+	}
+	return nil
+}
+
+func protectedConceptCoverage(candidate ChunkCandidate, concepts [][]string) int {
+	if len(concepts) == 0 {
+		return 0
+	}
+	text := normalizeEvidencePhrase(candidate.Text + " " + strings.Join(candidate.HeadingPath, " ") + " " + candidate.AttachmentTitle)
+	matched := 0
+	for _, concept := range concepts {
+		for _, alias := range concept {
+			normalized := normalizeEvidencePhrase(alias)
+			if normalized != "" && strings.Contains(text, normalized) {
+				matched++
+				break
+			}
+		}
+	}
+	return matched
+}
+
 func (e *Engine) groupChunkCandidates(opts SearchOptions, fused []ChunkCandidate, metadata []documentMetadataScore) []SearchResult {
 	type documentAggregate struct {
 		candidates    []ChunkCandidate
@@ -664,7 +810,7 @@ func (e *Engine) groupChunkCandidates(opts SearchOptions, fused []ChunkCandidate
 		} else if evidenceLimit > 20 {
 			evidenceLimit = 20
 		}
-		retrievalSelected := selectEvidenceCandidates(aggregate.candidates, 3)
+		retrievalSelected := selectBaselineEvidenceCandidates(aggregate.candidates, 3)
 		for rank, candidate := range retrievalSelected {
 			switch rank {
 			case 0:
@@ -676,7 +822,7 @@ func (e *Engine) groupChunkCandidates(opts SearchOptions, fused []ChunkCandidate
 			}
 		}
 		selected := selectExpandedEvidenceCandidates(
-			aggregate.candidates, evidenceLimit, opts.EvidenceTokenWeights, opts.EvidenceTerms, opts.EvidenceClaims,
+			aggregate.candidates, evidenceLimit, opts.EvidenceTokenWeights, opts.EvidenceTerms, opts.EvidenceClaims, opts.EvidenceConcepts,
 		)
 		matches := make([]EvidenceMatch, 0, len(selected))
 		for _, candidate := range selected {
@@ -684,8 +830,13 @@ func (e *Engine) groupChunkCandidates(opts SearchOptions, fused []ChunkCandidate
 		}
 		SetSearchResultEvidence(&result, matches)
 		if len(selected) > 0 {
-			result.Score += documentIntentTermWeight*expandedTermCoverage(selected[0], opts.EvidenceTokenWeights) +
-				documentIntentPhraseWeight*expandedPhraseCoverage(selected[0], opts.EvidenceTerms)
+			documentCandidate := selected[0]
+			if candidatesContainReranked(aggregate.candidates) && len(retrievalSelected) > 0 {
+				documentCandidate = retrievalSelected[0]
+			}
+			result.Score += documentIntentTermWeight*expandedTermCoverage(documentCandidate, opts.EvidenceTokenWeights) +
+				documentIntentPhraseWeight*expandedPhraseCoverage(documentCandidate, opts.EvidenceTerms) +
+				documentIntentClaimWeight*evidenceClaimCoverage(documentCandidate, opts.EvidenceClaims)
 		}
 		result.Score += aggregate.metadataScore
 		results = append(results, result)
@@ -698,17 +849,36 @@ func selectEvidenceCandidates(candidates []ChunkCandidate, limit int) []ChunkCan
 	return selectRankedEvidenceCandidates(candidates, limit, chunkCandidateBetter)
 }
 
+func selectBaselineEvidenceCandidates(candidates []ChunkCandidate, limit int) []ChunkCandidate {
+	better := func(left, right ChunkCandidate) bool {
+		left.Score = left.FusedScore
+		right.Score = right.FusedScore
+		return chunkCandidateBetter(left, right)
+	}
+	return selectRankedEvidenceCandidates(candidates, limit, better)
+}
+
+func candidatesContainReranked(candidates []ChunkCandidate) bool {
+	for _, candidate := range candidates {
+		if candidate.Reranked {
+			return true
+		}
+	}
+	return false
+}
+
 func selectExpandedEvidenceCandidates(
 	candidates []ChunkCandidate,
 	limit int,
 	tokenWeights map[string]float64,
 	evidenceTerms []string,
 	evidenceClaims []string,
+	evidenceConcepts [][]string,
 ) []ChunkCandidate {
 	ranked := append([]ChunkCandidate(nil), candidates...)
 	for index := range ranked {
 		candidate := &ranked[index]
-		candidate.Score = candidate.FusedScore +
+		candidate.Score = candidate.Score +
 			evidenceOriginalCoverageWeight*candidate.LexicalCoverage +
 			evidenceExpansionCoverageWeight*expandedTermCoverage(*candidate, tokenWeights) +
 			evidencePhraseCoverageWeight*expandedPhraseCoverage(*candidate, evidenceTerms) +
@@ -721,12 +891,87 @@ func selectExpandedEvidenceCandidates(
 			candidate.Score += evidenceAttachmentPhraseWeight * expandedPhraseCoverage(*candidate, evidenceTerms)
 		}
 	}
-	return selectRankedEvidenceCandidates(ranked, limit, func(left, right ChunkCandidate) bool {
+	better := func(left, right ChunkCandidate) bool {
 		if !sameScore(left.Score, right.Score) {
 			return left.Score > right.Score
 		}
 		return chunkCandidateBetter(left, right)
-	})
+	}
+	if len(evidenceConcepts) > 0 {
+		return selectConceptCoveredEvidenceCandidates(ranked, limit, evidenceConcepts, better)
+	}
+	return selectRankedEvidenceCandidates(ranked, limit, better)
+}
+
+func selectConceptCoveredEvidenceCandidates(candidates []ChunkCandidate, limit int, concepts [][]string, better func(ChunkCandidate, ChunkCandidate) bool) []ChunkCandidate {
+	if limit <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	ranked := append([]ChunkCandidate(nil), candidates...)
+	sort.Slice(ranked, func(i, j int) bool { return better(ranked[i], ranked[j]) })
+	selected := make([]ChunkCandidate, 0, limit)
+	ownerCounts := map[string]int{}
+	covered := make([]bool, len(concepts))
+	normalizedConcepts := make([][]string, len(concepts))
+	for conceptIndex, concept := range concepts {
+		for _, alias := range concept {
+			if normalized := normalizeEvidencePhrase(alias); normalized != "" {
+				normalizedConcepts[conceptIndex] = append(normalizedConcepts[conceptIndex], normalized)
+			}
+		}
+	}
+	normalizedCandidateText := make(map[string]string, len(ranked))
+	for _, candidate := range ranked {
+		normalizedCandidateText[candidate.ChunkID] = normalizeEvidencePhrase(
+			candidate.Text + " " + strings.Join(candidate.HeadingPath, " ") + " " + candidate.AttachmentTitle,
+		)
+	}
+	matchesConcept := func(candidate ChunkCandidate, conceptIndex int) bool {
+		text := normalizedCandidateText[candidate.ChunkID]
+		for _, alias := range normalizedConcepts[conceptIndex] {
+			if strings.Contains(text, alias) {
+				return true
+			}
+		}
+		return false
+	}
+	add := func(candidate ChunkCandidate) bool {
+		owner := evidenceOwner(candidate)
+		if ownerCounts[owner] >= 3 {
+			return false
+		}
+		for _, existing := range selected {
+			if candidate.ChunkID == existing.ChunkID || evidenceNearDuplicate(candidate, existing) {
+				return false
+			}
+		}
+		selected = append(selected, candidate)
+		ownerCounts[owner]++
+		for conceptIndex := range normalizedConcepts {
+			if matchesConcept(candidate, conceptIndex) {
+				covered[conceptIndex] = true
+			}
+		}
+		return true
+	}
+	for conceptIndex := range normalizedConcepts {
+		if covered[conceptIndex] || len(selected) == limit {
+			continue
+		}
+		for _, candidate := range ranked {
+			if matchesConcept(candidate, conceptIndex) && add(candidate) {
+				break
+			}
+		}
+	}
+	for _, candidate := range ranked {
+		if len(selected) == limit {
+			break
+		}
+		add(candidate)
+	}
+	sort.Slice(selected, func(i, j int) bool { return better(selected[i], selected[j]) })
+	return selected
 }
 
 func evidenceClaimCoverage(candidate ChunkCandidate, claims []string) float64 {
@@ -752,7 +997,9 @@ func selectRankedEvidenceCandidates(candidates []ChunkCandidate, limit int, bett
 	ownerCounts := map[string]int{}
 	for _, candidate := range candidates {
 		owner := evidenceOwner(candidate)
-		if ownerCounts[owner] >= 2 {
+		// Adjacent paragraphs in one article can contain independent claims.
+		// Keep up to three distinct chunks; Jaccard filtering removes duplicates.
+		if ownerCounts[owner] >= 3 {
 			continue
 		}
 		duplicate := false
@@ -840,11 +1087,7 @@ func evidenceNearDuplicate(left, right ChunkCandidate) bool {
 	if evidenceOwner(left) != evidenceOwner(right) {
 		return false
 	}
-	delta := left.ChunkIndex - right.ChunkIndex
-	if delta < 0 {
-		delta = -delta
-	}
-	return delta <= 1 || textTokenJaccard(left.Text, right.Text) >= 0.75
+	return textTokenJaccard(left.Text, right.Text) >= 0.75
 }
 
 func textTokenJaccard(left, right string) float64 {
@@ -879,6 +1122,8 @@ func evidenceMatch(candidate ChunkCandidate, query string) EvidenceMatch {
 		Score:            candidate.Score,
 		BM25Score:        candidate.BM25Score,
 		VectorScore:      candidate.VectorScore,
+		RerankerScore:    candidate.RerankerScore,
+		RerankerRank:     candidate.RerankerRank,
 		LexicalCoverage:  candidate.LexicalCoverage,
 		Snippet:          snippet,
 		Text:             candidate.Text,
@@ -919,6 +1164,7 @@ func SetSearchResultEvidence(result *SearchResult, matches []EvidenceMatch) {
 	result.AttachmentMatches = nil
 	result.BM25Score = 0
 	result.VectorScore = 0
+	result.RerankerScore = 0
 	for index, match := range result.EvidenceMatches {
 		if index == 0 {
 			result.Snippet = match.Snippet
@@ -927,6 +1173,7 @@ func SetSearchResultEvidence(result *SearchResult, matches []EvidenceMatch) {
 			result.MatchedChunkIndex = match.ChunkIndex
 			result.ArticleID = match.ArticleID
 			result.HeadingPath = append([]string(nil), match.HeadingPath...)
+			result.RerankerScore = match.RerankerScore
 		}
 		if match.BM25Score > result.BM25Score {
 			result.BM25Score = match.BM25Score
@@ -1027,6 +1274,19 @@ func meaningfulQueryTerms(query string) []string {
 		terms = append(terms, term)
 	}
 	return terms
+}
+
+func uniqueSearchTokens(tokens []string) []string {
+	seen := make(map[string]struct{}, len(tokens))
+	out := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		if _, duplicate := seen[token]; duplicate {
+			continue
+		}
+		seen[token] = struct{}{}
+		out = append(out, token)
+	}
+	return out
 }
 
 func normalizeMeaningfulQueryTerm(term string) string {

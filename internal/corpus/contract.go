@@ -58,18 +58,7 @@ var canonicalQualityCodes = map[string]struct{}{
 	"formula_generated_latex_invalid": {},
 	"source_inspection_failed":        {},
 	"stale_due_to_refresh_failure":    {},
-	// Transitional v1 codes accepted by the producer during coordinated v2 migration.
-	"empty_text":                             {},
-	"very_short_text":                        {},
-	"replacement_characters":                 {},
-	"very_long_lines":                        {},
-	"raw_table_hints_without_table_text":     {},
-	"raw_table_cells_may_be_flattened":       {},
-	"raw_formula_hints_without_formula_text": {},
-	"conversion_failed":                      {},
-	"conversion_pending":                     {},
-	"missing_text_path":                      {},
-	"missing_converted_file":                 {},
+	"very_short_text":                 {},
 }
 
 // LoadedCorpus is a validated corpus handoff. AttachmentTexts contains
@@ -158,8 +147,8 @@ func validateDocument(root string, doc *model.Document, texts map[string]string,
 	if doc.CollectedAt.IsZero() {
 		return fmt.Errorf("document %q: collected_at is required", doc.ID)
 	}
-	if doc.SchemaVersion != 0 && doc.SchemaVersion != 1 && doc.SchemaVersion != IndexSourceSchemaVersion {
-		return fmt.Errorf("document %q: unsupported schema_version %d", doc.ID, doc.SchemaVersion)
+	if doc.SchemaVersion != IndexSourceSchemaVersion {
+		return fmt.Errorf("document %q: schema_version must be %d", doc.ID, IndexSourceSchemaVersion)
 	}
 	if err := validateDate("effective_date", doc.EffectiveDate); err != nil {
 		return fmt.Errorf("document %q: %w", doc.ID, err)
@@ -169,29 +158,18 @@ func validateDocument(root string, doc *model.Document, texts map[string]string,
 	}
 	bodyEmpty := strings.TrimSpace(doc.Body) == ""
 	actualBodyHash := model.HashText(doc.Body)
-	if doc.SchemaVersion >= IndexSourceSchemaVersion && strings.TrimSpace(doc.BodyHash) == "" {
+	if strings.TrimSpace(doc.BodyHash) == "" {
 		return fmt.Errorf("document %q: body_hash is required for schema v%d", doc.ID, IndexSourceSchemaVersion)
 	}
-	if strings.TrimSpace(doc.BodyHash) != "" {
-		wantBodyHash, err := requireSHA256("body_hash", doc.BodyHash)
-		if err != nil {
-			return fmt.Errorf("document %q: %w", doc.ID, err)
-		}
-		if actualBodyHash != wantBodyHash {
-			return fmt.Errorf("document %q: body_hash_mismatch: got %s want %s", doc.ID, actualBodyHash, wantBodyHash)
-		}
+	wantBodyHash, err := requireSHA256("body_hash", doc.BodyHash)
+	if err != nil {
+		return fmt.Errorf("document %q: %w", doc.ID, err)
 	}
-	if strings.TrimSpace(doc.ContentHash) != "" {
-		wantLegacyHash, err := requireSHA256("content_hash", doc.ContentHash)
-		if err != nil {
-			return fmt.Errorf("document %q: %w", doc.ID, err)
-		}
-		gotLegacyHash := model.HashText(doc.Title + "\n" + doc.Body)
-		if gotLegacyHash != wantLegacyHash {
-			return fmt.Errorf("document %q: content_hash_mismatch: got %s want %s", doc.ID, gotLegacyHash, wantLegacyHash)
-		}
-	} else if strings.TrimSpace(doc.BodyHash) == "" {
-		return fmt.Errorf("document %q: body_hash or content_hash is required", doc.ID)
+	if actualBodyHash != wantBodyHash {
+		return fmt.Errorf("document %q: body_hash_mismatch: got %s want %s", doc.ID, actualBodyHash, wantBodyHash)
+	}
+	if doc.Searchable == nil {
+		return fmt.Errorf("document %q: searchable is required", doc.ID)
 	}
 	conversionStatus := doc.EffectiveConversionStatus()
 	if err := validateEntityStatuses(conversionStatus, doc.PreservationStatus, doc.IsSearchable(), doc.QualityStatus); err != nil {
@@ -225,7 +203,7 @@ func validateDocument(root string, doc *model.Document, texts map[string]string,
 		if err != nil {
 			return fmt.Errorf("document %q raw_path: %w", doc.ID, err)
 		}
-		if declared := doc.EffectiveRawFileHash(); declared != "" {
+		if declared := strings.TrimSpace(doc.RawFileHash); declared != "" {
 			if err := verifyFileHash(rawPath, declared); err != nil {
 				return fmt.Errorf("document %q: %w", doc.ID, err)
 			}
@@ -526,16 +504,16 @@ func validateAttachment(root, bundle, documentID, documentSourceURL string, sche
 	} else {
 		att.FileName = fileName
 	}
-	if strings.TrimSpace(att.ConversionStatus) != "" && att.Status != "" && string(att.Status) != strings.TrimSpace(att.ConversionStatus) {
-		return fmt.Errorf("document %q attachment %q: status and conversion_status differ", documentID, att.ID)
-	}
-	att.Status = att.EffectiveConversionStatus()
-	switch att.Status {
+	status := att.EffectiveConversionStatus()
+	switch status {
 	case model.AttachmentPending, model.AttachmentConverted, model.AttachmentFailed:
 	default:
-		return fmt.Errorf("document %q attachment %q: invalid status %q", documentID, att.ID, att.Status)
+		return fmt.Errorf("document %q attachment %q: invalid conversion_status %q", documentID, att.ID, status)
 	}
-	if err := validateEntityStatuses(string(att.Status), att.PreservationStatus, att.IsSearchable(), att.QualityStatus); err != nil {
+	if att.Searchable == nil {
+		return fmt.Errorf("document %q attachment %q: searchable is required", documentID, att.ID)
+	}
+	if err := validateEntityStatuses(string(status), att.PreservationStatus, att.IsSearchable(), att.QualityStatus); err != nil {
 		return fmt.Errorf("document %q attachment %q: %w", documentID, att.ID, err)
 	}
 	att.QualityCodes = att.EffectiveQualityCodes()
@@ -548,7 +526,7 @@ func validateAttachment(root, bundle, documentID, documentSourceURL string, sche
 		if err != nil {
 			return fmt.Errorf("document %q attachment %q raw_path: %w", documentID, att.ID, err)
 		}
-		declared := att.EffectiveRawFileHash()
+		declared := strings.TrimSpace(att.RawFileHash)
 		if declared == "" {
 			return fmt.Errorf("document %q attachment %q: raw_file_hash is required when raw_path is present", documentID, att.ID)
 		}
@@ -562,7 +540,7 @@ func validateAttachment(root, bundle, documentID, documentSourceURL string, sche
 		}
 	}
 
-	if att.Status != model.AttachmentConverted {
+	if status != model.AttachmentConverted {
 		if strings.TrimSpace(att.TextPath) != "" {
 			return fmt.Errorf("document %q attachment %q: text_path requires converted status", documentID, att.ID)
 		}

@@ -33,7 +33,8 @@ func TestEvaluateAnswerabilityContracts(t *testing.T) {
 		{
 			name: "reviewed alias covering the whole query is supported",
 			input: AnswerabilityInput{
-				Query: "동적상하한가", DomainExpansionApplied: true, ReviewedExpansionExactMatch: true,
+				Query: "동적상하한가", DomainExpansionApplied: true, ReviewedExpansionApplied: true,
+				ReviewedExpansionMatchedTerms: 2, ReviewedExpansionExactMatch: true,
 				ContractValid: true, UnknownSpecificTermCount: 1,
 				Results: []SearchResult{{EvidenceMatches: []EvidenceMatch{{
 					ChunkID: "rule#alias", ArticleID: "별표25", LexicalCoverage: 0, BM25Score: 2,
@@ -70,9 +71,10 @@ func TestEvaluateAnswerabilityContracts(t *testing.T) {
 				UnknownSpecificTermCount: 3,
 				Results: []SearchResult{{EvidenceMatches: []EvidenceMatch{{
 					ChunkID: "rule#uti", ArticleID: "제18조", LexicalCoverage: 0.25, BM25Score: 2,
+					Text: "거래고유식별기호를 포함하여 보고한다.",
 				}}}},
 			},
-			status: AnswerabilityInsufficient, reason: "low_query_evidence_coverage",
+			status: AnswerabilityInsufficient, reason: "explicit_identifier_context_mismatch",
 		},
 		{
 			name:   "low coverage remains insufficient",
@@ -148,6 +150,34 @@ func TestEvaluateAnswerabilityContracts(t *testing.T) {
 			status: AnswerabilitySupported, reason: "bm25_vector_agreement",
 		},
 		{
+			name: "explicit comparison can use multiple returned documents",
+			input: AnswerabilityInput{
+				Query: "유가증권시장 코스닥시장 가격제한폭 비교", ContractValid: true,
+				Results: []SearchResult{
+					{Title: "유가증권시장 업무규정", EvidenceMatches: []EvidenceMatch{{
+						ChunkID: "kospi#1", ArticleID: "제1조", LexicalCoverage: 0.25, BM25Score: 1, VectorScore: 0.8,
+						Text: "유가증권시장의 가격제한폭을 정한다.",
+					}}},
+					{Title: "코스닥시장 업무규정", EvidenceMatches: []EvidenceMatch{{
+						ChunkID: "kosdaq#1", ArticleID: "제1조", LexicalCoverage: 0.25, BM25Score: 1, VectorScore: 0.8,
+						Text: "코스닥시장의 가격제한폭을 정한다.",
+					}}},
+				},
+			},
+			status: AnswerabilitySupported, reason: "multi_document_evidence",
+		},
+		{
+			name: "comparison marker does not override multiple unknown terms",
+			input: AnswerabilityInput{
+				Query: "NAV 화성 토지 소유권 모두 비교", ContractValid: true, UnknownSpecificTermCount: 3,
+				Results: []SearchResult{
+					{EvidenceMatches: []EvidenceMatch{{ChunkID: "nav#1", ArticleID: "제1조", LexicalCoverage: 0.2, BM25Score: 1, VectorScore: 0.8, Text: "NAV"}}},
+					{EvidenceMatches: []EvidenceMatch{{ChunkID: "nav#2", ArticleID: "제2조", LexicalCoverage: 0.2, BM25Score: 1, VectorScore: 0.8, Text: "순자산가치"}}},
+				},
+			},
+			status: AnswerabilityInsufficient, reason: "explicit_identifier_context_mismatch",
+		},
+		{
 			name: "unverified quantitative claim is insufficient",
 			input: AnswerabilityInput{Query: "ETF NAV 괴리율 73퍼센트", ContractValid: true, Results: []SearchResult{{
 				Title: "유가증권시장 업무규정", EvidenceMatches: []EvidenceMatch{{
@@ -156,6 +186,29 @@ func TestEvaluateAnswerabilityContracts(t *testing.T) {
 				}},
 			}}},
 			status: AnswerabilityInsufficient, reason: "unverified_quantitative_claim",
+		},
+		{
+			name: "instrumental claim requires its object in selected evidence",
+			input: AnswerabilityInput{Query: "파생상품 가격제한폭으로 건강보험료 상한을 계산하는가", ContractValid: true, Results: []SearchResult{{
+				EvidenceMatches: []EvidenceMatch{{
+					ChunkID: "rule#limit", ArticleID: "제60조", LexicalCoverage: 0.60, BM25Score: 2, VectorScore: 0.8,
+					Text: "파생상품 가격제한폭과 상한을 계산한다.",
+				}},
+			}}},
+			status: AnswerabilityInsufficient, reason: "instrumental_claim_mismatch",
+		},
+		{
+			name: "general prohibition can contradict a novel use example",
+			input: AnswerabilityInput{
+				Query: "고객 위탁증거금으로 법인세를 납부할 의무가 있나", ContractValid: true,
+				DomainExpansionApplied: true, DomainExpansionMatchedTerms: 3,
+				ReviewedExpansionApplied: true, ReviewedExpansionMatchedTerms: 1, UnknownSpecificTermCount: 1,
+				Results: []SearchResult{{EvidenceMatches: []EvidenceMatch{{
+					ChunkID: "rule#margin", ArticleID: "제139조", LexicalCoverage: 0.15, BM25Score: 2, VectorScore: 0.8,
+					Text: "위탁증거금은 정하는 방법 이외에는 사용하지 못한다.",
+				}}}},
+			},
+			status: AnswerabilitySupported, reason: "normative_counter_evidence",
 		},
 		{
 			name: "quantitative claim in another result is not selected evidence",
@@ -316,6 +369,30 @@ func TestSupportedDecisionReturnsEveryChunkUsedForVerification(t *testing.T) {
 	}
 }
 
+func TestMultiDocumentDecisionReturnsEverySelectedChunk(t *testing.T) {
+	decision := EvaluateAnswerability(AnswerabilityInput{
+		Query: "유가증권시장 코스닥시장 가격제한폭 비교", ContractValid: true,
+		Results: []SearchResult{
+			{Title: "유가증권시장 업무규정", EvidenceMatches: []EvidenceMatch{{
+				ChunkID: "kospi#1", ArticleID: "제1조", LexicalCoverage: 0.25, BM25Score: 1, VectorScore: 0.8,
+				Text: "유가증권시장의 가격제한폭",
+			}}},
+			{Title: "코스닥시장 업무규정", EvidenceMatches: []EvidenceMatch{{
+				ChunkID: "kosdaq#1", ArticleID: "제1조", LexicalCoverage: 0.25, BM25Score: 1, VectorScore: 0.8,
+				Text: "코스닥시장의 가격제한폭",
+			}}},
+		},
+	})
+	if decision.Status != AnswerabilitySupported || !containsString(decision.ReasonCodes, "multi_document_evidence") {
+		t.Fatalf("decision = %#v", decision)
+	}
+	for _, chunkID := range []string{"kospi#1", "kosdaq#1"} {
+		if !containsString(decision.EvidenceChunkIDs, chunkID) {
+			t.Fatalf("evidence ids = %#v, want %q", decision.EvidenceChunkIDs, chunkID)
+		}
+	}
+}
+
 func TestExplicitSourceNamesRequireSourceGrammarOrKnownLaw(t *testing.T) {
 	tests := []struct {
 		query string
@@ -330,6 +407,27 @@ func TestExplicitSourceNamesRequireSourceGrammarOrKnownLaw(t *testing.T) {
 		if got := explicitSourceNames(test.query); !equalStrings(got, test.want) {
 			t.Errorf("explicitSourceNames(%q) = %#v, want %#v", test.query, got, test.want)
 		}
+	}
+}
+
+func TestExplicitIdentifierEvidenceTermsHandleKoreanParticles(t *testing.T) {
+	terms := ExplicitIdentifierEvidenceTerms("ETF는 NAV에서 LP가 어떤 호가를 내나")
+	for _, want := range []string{"상장지수집합투자기구", "순자산가치", "유동성공급호가"} {
+		if !containsString(terms, want) {
+			t.Fatalf("identifier evidence terms = %#v, want %q", terms, want)
+		}
+	}
+	entries := []DomainLexiconEntry{{
+		ID: "nav", Canonical: "순자산가치", Aliases: []string{"NAV"}, Expansions: []string{"괴리율"},
+		Confidence: "high", ReviewStatus: "official-glossary",
+	}}
+	expansion := ExpandDomainQueryWithLexicon("NAV에서 벌어지는가", entries)
+	if !expansion.Applied() || expansion.ReviewedMatchCount() != 1 {
+		t.Fatalf("particle-suffixed acronym expansion = %#v", expansion)
+	}
+	concepts := expansion.ReviewedEvidenceConcepts()
+	if len(concepts) != 1 || !containsString(concepts[0], "순자산가치") || containsString(concepts[0], "괴리율") {
+		t.Fatalf("reviewed evidence concepts = %#v", concepts)
 	}
 }
 

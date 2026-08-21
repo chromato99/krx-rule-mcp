@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromato99/krx-rule-mcp/internal/corpus"
 	searchindex "github.com/chromato99/krx-rule-mcp/internal/index"
 	mcpserver "github.com/chromato99/krx-rule-mcp/internal/mcp"
 	"github.com/chromato99/krx-rule-mcp/internal/model"
@@ -61,7 +62,7 @@ tokens:
 		t.Fatal(err)
 	}
 
-	required, err := loadHTTPAuthConfig("required", tokenFile, false)
+	required, err := loadHTTPAuthConfig("required", tokenFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ tokens:
 		t.Fatalf("required auth config = %#v", required)
 	}
 
-	disabled, err := loadHTTPAuthConfig("disabled", filepath.Join(t.TempDir(), "missing.yaml"), false)
+	disabled, err := loadHTTPAuthConfig("disabled", filepath.Join(t.TempDir(), "missing.yaml"))
 	if err != nil {
 		t.Fatalf("disabled auth read token file: %v", err)
 	}
@@ -81,15 +82,13 @@ tokens:
 		name       string
 		mode       string
 		path       string
-		legacyEnv  bool
 		wantSubstr string
 	}{
 		{name: "unknown mode", mode: "optional", path: tokenFile, wantSubstr: "auth mode"},
 		{name: "missing required file", mode: "required", wantSubstr: "bearer token file is required"},
-		{name: "legacy environment", mode: "required", path: tokenFile, legacyEnv: true, wantSubstr: "was removed"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := loadHTTPAuthConfig(test.mode, test.path, test.legacyEnv)
+			_, err := loadHTTPAuthConfig(test.mode, test.path)
 			if err == nil || !strings.Contains(err.Error(), test.wantSubstr) {
 				t.Fatalf("error = %v, want substring %q", err, test.wantSubstr)
 			}
@@ -121,34 +120,26 @@ func TestResolveVectorPolicy(t *testing.T) {
 	}
 }
 
-func TestDisabledVectorModeDoesNotReadMalformedSnapshot(t *testing.T) {
-	dataRoot, indexPath := writeRuntimeTestCorpusAndIndex(t)
-	vectorPath := filepath.Join(t.TempDir(), "malformed.krxvec")
-	if err := os.WriteFile(vectorPath, []byte("not a vector snapshot"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	repo, err := searchindex.LoadRepositoryWithOptions(dataRoot, indexPath, searchindex.RepositoryLoadOptions{
-		VectorEnabled:    false,
-		VectorIndexPaths: []string{vectorPath},
-	})
+func TestGenerationWithoutVectorLoadsWhenDisabledAndFailsWhenRequired(t *testing.T) {
+	dataRoot, indexDir := writeRuntimeTestCorpusAndIndex(t)
+	repo, err := searchindex.LoadRepositoryGeneration(dataRoot, indexDir, searchindex.RepositoryLoadOptions{})
 	if err != nil {
-		t.Fatalf("disabled vector mode read malformed file: %v", err)
+		t.Fatalf("load BM25-only generation: %v", err)
 	}
 	if repo.Engine.HasVectors() || len(repo.VectorIndexes) != 0 {
-		t.Fatalf("disabled vector mode loaded vector state: %#v", repo.VectorIndexes)
+		t.Fatalf("BM25-only generation loaded vector state: %#v", repo.VectorIndexes)
 	}
-	if _, err := searchindex.LoadRepositoryWithOptions(dataRoot, indexPath, searchindex.RepositoryLoadOptions{
-		VectorEnabled:    true,
-		RequireVector:    true,
-		VectorIndexPaths: []string{vectorPath},
+	if _, err := searchindex.LoadRepositoryGeneration(dataRoot, indexDir, searchindex.RepositoryLoadOptions{
+		VectorEnabled: true,
+		RequireVector: true,
 	}); err == nil {
-		t.Fatal("required vector mode accepted malformed snapshot")
+		t.Fatal("required vector mode accepted a generation without vectors")
 	}
 }
 
 func TestReleaseGenerationBindsCanonicalDescriptor(t *testing.T) {
-	dataRoot, indexPath := writeRuntimeTestCorpusAndIndex(t)
-	repo, err := searchindex.LoadRepositoryWithOptions(dataRoot, indexPath, searchindex.RepositoryLoadOptions{})
+	dataRoot, indexDir := writeRuntimeTestCorpusAndIndex(t)
+	repo, err := searchindex.LoadRepositoryGeneration(dataRoot, indexDir, searchindex.RepositoryLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,31 +148,60 @@ func TestReleaseGenerationBindsCanonicalDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, descriptor, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-a", "sha256:tei-a")
+	first, descriptor, err := inspectArtifacts(repo, lexiconDigest, "bm25", 0, nil, 0, time.Minute, "sha256:image-a", "sha256:tei-a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(indexPath); err != nil {
+	if err := os.Remove(repo.IndexPath); err != nil {
 		t.Fatal(err)
 	}
-	second, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-a", "sha256:tei-a")
+	second, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", 0, nil, 0, time.Minute, "sha256:image-a", "sha256:tei-a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	serverChanged, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-b", "sha256:tei-a")
+	serverChanged, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", 0, nil, 0, time.Minute, "sha256:image-b", "sha256:tei-a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	teiChanged, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", "sha256:image-a", "sha256:tei-b")
+	teiChanged, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", 0, nil, 0, time.Minute, "sha256:image-a", "sha256:tei-b", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.ReleaseGeneration != second.ReleaseGeneration || first.ReleaseGeneration == serverChanged.ReleaseGeneration || first.ReleaseGeneration == teiChanged.ReleaseGeneration {
 		t.Fatalf("release generation is not deterministic or runtime-image-bound: first=%s second=%s server_changed=%s tei_changed=%s", first.ReleaseGeneration, second.ReleaseGeneration, serverChanged.ReleaseGeneration, teiChanged.ReleaseGeneration)
 	}
+	reranker := identityReranker{model: "reranker", revision: "revision"}
+	reranked, rerankedDescriptor, err := inspectArtifacts(repo, lexiconDigest, "bm25", 128, reranker, 20, time.Minute, "sha256:image-a", "sha256:tei-a", "sha256:reranker-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rerankerChanged, _, err := inspectArtifacts(repo, lexiconDigest, "bm25", 128, reranker, 20, time.Minute, "sha256:image-a", "sha256:tei-a", "sha256:reranker-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reranked.ReleaseGeneration == first.ReleaseGeneration || reranked.ReleaseGeneration == rerankerChanged.ReleaseGeneration || rerankedDescriptor.Reranker == nil || rerankedDescriptor.RetrievalCandidateLimit != 128 {
+		t.Fatalf("reranker identity is not release-bound: baseline=%s reranked=%#v changed=%s", first.ReleaseGeneration, rerankedDescriptor, rerankerChanged.ReleaseGeneration)
+	}
 	if descriptor.Schema != "krx-rule-mcp-release-v4" || descriptor.CorpusReleaseHash == "" || descriptor.CorpusReleaseHash != repo.CorpusReleaseHash || descriptor.IndexSourceHash == "" || descriptor.IndexBuildHash == "" || descriptor.DomainLexiconDigest == "" || descriptor.RuntimeVectorMode != "bm25" || descriptor.ServerImageDigest != "sha256:image-a" || descriptor.TEIImageDigest != "sha256:tei-a" {
 		t.Fatalf("canonical descriptor is incomplete: %#v", descriptor)
 	}
+}
+
+type identityReranker struct {
+	model    string
+	revision string
+}
+
+func (r identityReranker) Rerank(_ context.Context, _ string, passages []string) ([]searchindex.RerankScore, error) {
+	scores := make([]searchindex.RerankScore, len(passages))
+	for index := range passages {
+		scores[index] = searchindex.RerankScore{Index: index, Score: float64(index)}
+	}
+	return scores, nil
+}
+
+func (r identityReranker) RerankingInfo() (string, string) {
+	return r.model, r.revision
 }
 
 func TestReadinessRequiresExpectedReleaseGeneration(t *testing.T) {
@@ -235,7 +255,7 @@ func TestReadinessReportsDisabledAuthentication(t *testing.T) {
 }
 
 func TestReadinessRequiredVectorValidatesLiveEmbedding(t *testing.T) {
-	doc := model.Document{ID: "rule-1", Title: "규정", Body: "상장 규정", DocumentType: model.DocumentTypeRule}
+	doc := model.Document{ID: "rule-1", Title: "규정", Body: "상장 규정", DocumentType: model.DocumentTypeRule, Searchable: boolPointer(true)}
 	repo := &searchindex.Repository{
 		Documents:      map[string]model.Document{doc.ID: doc},
 		Engine:         searchindex.BuildWithAttachments([]model.Document{doc}, nil, map[string][]float64{"rule-1#0": {1, 0}}),
@@ -275,7 +295,7 @@ func TestReadinessRequiredVectorValidatesLiveEmbedding(t *testing.T) {
 }
 
 func TestReadinessRequiredVectorRecoversWithEmbeddingService(t *testing.T) {
-	doc := model.Document{ID: "rule-1", Title: "규정", Body: "상장 규정", DocumentType: model.DocumentTypeRule}
+	doc := model.Document{ID: "rule-1", Title: "규정", Body: "상장 규정", DocumentType: model.DocumentTypeRule, Searchable: boolPointer(true)}
 	repo := &searchindex.Repository{
 		Documents:      map[string]model.Document{doc.ID: doc},
 		Engine:         searchindex.BuildWithAttachments([]model.Document{doc}, nil, map[string][]float64{"rule-1#0": {1, 0}}),
@@ -425,15 +445,19 @@ func writeRuntimeTestCorpusAndIndex(t *testing.T) (string, string) {
 	t.Helper()
 	root := t.TempDir()
 	doc := model.Document{
-		ID:           "rule-1",
-		Title:        "상장규정",
-		SourceURL:    "https://example.test/rule",
-		CollectedAt:  time.Now().UTC(),
-		BodyHash:     model.HashText("상장 심사"),
-		ContentHash:  model.HashText("상장규정\n상장 심사"),
-		Language:     model.LanguageKorean,
-		DocumentType: model.DocumentTypeRule,
-		Body:         "상장 심사",
+		SchemaVersion:      2,
+		ID:                 "rule-1",
+		Title:              "상장규정",
+		SourceURL:          "https://example.test/rule",
+		CollectedAt:        time.Now().UTC(),
+		BodyHash:           model.HashText("상장 심사"),
+		ConversionStatus:   "converted",
+		PreservationStatus: "preserved",
+		Searchable:         boolPointer(true),
+		QualityStatus:      "ok",
+		Language:           model.LanguageKorean,
+		DocumentType:       model.DocumentTypeRule,
+		Body:               "상장 심사",
 	}
 	path := filepath.Join(root, "ko", "rules", model.Slug(doc.Title), "index.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -457,33 +481,68 @@ func writeRuntimeTestCorpusAndIndex(t *testing.T) (string, string) {
 	if err := os.WriteFile(path, content.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, _, err := searchindex.BuildSnapshot(root)
+	indexSourceHash, err := corpus.IndexSourceHash([]model.Document{doc}, map[string]string{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifestIdentity := map[string]any{
-		"index_source_hash": snapshot.IndexSourceHash,
+	metaJSON, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifestDocument map[string]any
+	if err := json.Unmarshal(metaJSON, &manifestDocument); err != nil {
+		t.Fatal(err)
+	}
+	manifestDocument["path"] = filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
+	manifest := map[string]any{
 		"schema_version":    2,
+		"version":           "test",
+		"generated_at":      "2026-07-01T00:00:00Z",
+		"source":            "test",
+		"documents":         []any{manifestDocument},
+		"attachment_log":    []any{},
+		"index_source_hash": indexSourceHash,
+		"release_profile": map[string]any{
+			"version":             1,
+			"default":             "strict",
+			"allowed_failure_ids": []any{},
+		},
 	}
-	canonicalIdentity, err := json.Marshal(manifestIdentity)
+	releaseProjection := make(map[string]any, len(manifest)-1)
+	for key, value := range manifest {
+		if key != "generated_at" {
+			releaseProjection[key] = value
+		}
+	}
+	canonicalIdentity, err := json.Marshal(releaseProjection)
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifestIdentity["release_hash"] = model.HashBytes(canonicalIdentity)
-	manifestJSON, err := json.Marshal(manifestIdentity)
+	manifest["release_hash"] = model.HashBytes(canonicalIdentity)
+	manifestJSON, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "manifest.json"), manifestJSON, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, _, err = searchindex.BuildSnapshot(root)
+	snapshot, _, err := searchindex.BuildReleaseSnapshot(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexPath := filepath.Join(t.TempDir(), "bm25.krxidx")
-	if err := searchindex.WriteSnapshot(indexPath, snapshot); err != nil {
+	indexDir := filepath.Join(t.TempDir(), "index")
+	lock, err := searchindex.AcquireGenerationBuildLock(indexDir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return root, indexPath
+	if _, err := lock.Publish(searchindex.GenerationBuild{Snapshot: snapshot}); err != nil {
+		_ = lock.Close()
+		t.Fatal(err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return root, indexDir
 }
+
+func boolPointer(value bool) *bool { return &value }

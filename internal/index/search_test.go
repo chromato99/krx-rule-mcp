@@ -11,6 +11,27 @@ import (
 	"github.com/chromato99/krx-rule-mcp/internal/model"
 )
 
+func buildTestEngine(documents []model.Document, attachments map[string]AttachmentDocument, vectors map[string][]float64) *Engine {
+	searchable := true
+	for index := range documents {
+		if documents[index].Searchable == nil {
+			documents[index].Searchable = &searchable
+		}
+		for attachmentIndex := range documents[index].Attachments {
+			if documents[index].Attachments[attachmentIndex].Searchable == nil {
+				documents[index].Attachments[attachmentIndex].Searchable = &searchable
+			}
+		}
+	}
+	for id, attachment := range attachments {
+		if attachment.Attachment.Searchable == nil {
+			attachment.Attachment.Searchable = &searchable
+			attachments[id] = attachment
+		}
+	}
+	return BuildWithAttachments(documents, attachments, vectors)
+}
+
 func TestBM25KoreanSearchAndFilter(t *testing.T) {
 	docs := []model.Document{
 		{
@@ -33,7 +54,7 @@ func TestBM25KoreanSearchAndFilter(t *testing.T) {
 			Body:          "외환거래 도입에 따른 조문 정비",
 		},
 	}
-	engine := BuildWithAttachments(docs, nil, nil)
+	engine := buildTestEngine(docs, nil, nil)
 	results := engine.Search(SearchOptions{
 		Query:  "상장 신청",
 		Limit:  5,
@@ -67,7 +88,7 @@ func TestSearchLanguageFilter(t *testing.T) {
 			Body:         "listing review",
 		},
 	}
-	engine := BuildWithAttachments(docs, nil, nil)
+	engine := buildTestEngine(docs, nil, nil)
 	results := engine.Search(SearchOptions{Query: "listing", Filter: Filter{Language: "en"}, Limit: 5})
 	if len(results) != 1 || results[0].ID != "rule-1-en" || results[0].Language != "en" || results[0].SourceID != "rule-1" {
 		t.Fatalf("unexpected English results: %#v", results)
@@ -83,7 +104,7 @@ func TestVectorRRF(t *testing.T) {
 		{ID: "a", Title: "상장규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "상장 심사"},
 		{ID: "b", Title: "청산규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "청산 결제"},
 	}
-	engine := BuildWithAttachments(docs, nil, map[string][]float64{
+	engine := buildTestEngine(docs, nil, map[string][]float64{
 		"a#0": {1, 0},
 		"b#0": {0, 1},
 	})
@@ -105,7 +126,7 @@ func TestBM25AndVectorCandidatesFromDifferentChunksRemainEvidence(t *testing.T) 
 		ID: "mixed-channel", Title: "복합 규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule,
 		Body: "**제1조(상장심사)** 상장 심사 요건을 정한다.\n\n**제2조(결제수량)** 결제 수량을 정한다.",
 	}
-	engine := BuildWithAttachments([]model.Document{doc}, nil, map[string][]float64{
+	engine := buildTestEngine([]model.Document{doc}, nil, map[string][]float64{
 		"mixed-channel#0": {0, 1},
 		"mixed-channel#1": {1, 0},
 	})
@@ -136,7 +157,7 @@ func TestArticleEvidenceOutranksTitleOnlyMetadataMatch(t *testing.T) {
 		ID: "article-evidence", Title: "파생상품 업무규정", CollectedAt: now,
 		DocumentType: model.DocumentTypeRule, Body: "**제818조(결제수량)** 고유 결제 수량 계산 방법을 정한다.",
 	}
-	results := BuildWithAttachments([]model.Document{titleOnly, evidence}, nil, nil).Search(SearchOptions{
+	results := buildTestEngine([]model.Document{titleOnly, evidence}, nil, nil).Search(SearchOptions{
 		Query: "고유 결제 수량 계산", OriginalQuery: "고유 결제 수량 계산", Limit: 2,
 	})
 	if len(results) != 2 || results[0].ID != evidence.ID || results[0].ArticleID != "제818조" {
@@ -146,7 +167,7 @@ func TestArticleEvidenceOutranksTitleOnlyMetadataMatch(t *testing.T) {
 
 func TestInvalidQueryVectorFallsBackToBM25(t *testing.T) {
 	doc := model.Document{ID: "a", Title: "상장규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "상장 심사"}
-	engine := BuildWithAttachments([]model.Document{doc}, nil, map[string][]float64{"a#0": {1, 0}})
+	engine := buildTestEngine([]model.Document{doc}, nil, map[string][]float64{"a#0": {1, 0}})
 	tests := []struct {
 		name   string
 		vector []float64
@@ -180,7 +201,7 @@ func TestAssetReferencesKeepAltAndAnchorButNotLocalTarget(t *testing.T) {
 			ReferencePath: "assets/supersecretlocalpath.png",
 		}},
 	}
-	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
+	engine := buildTestEngine([]model.Document{doc}, nil, nil)
 	if results := engine.Search(SearchOptions{Query: "supersecretlocalpath", Limit: 5}); len(results) != 0 {
 		t.Fatalf("local asset target was indexed: %#v", results)
 	}
@@ -199,7 +220,7 @@ func TestRRFScoreTiePrefersStrongerBM25(t *testing.T) {
 		{ID: "semantic", Title: "의미 검색", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "공통"},
 		{ID: "lexical", Title: "정확 검색", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "공통 희귀 희귀 희귀"},
 	}
-	engine := BuildWithAttachments(docs, nil, map[string][]float64{
+	engine := buildTestEngine(docs, nil, map[string][]float64{
 		"semantic#0": {1, 0},
 		"lexical#0":  {0.8, 0.2},
 	})
@@ -233,7 +254,7 @@ func TestVectorFallbackWhenBM25HasNoHits(t *testing.T) {
 		{ID: "a", Title: "상장규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "상장 심사"},
 		{ID: "b", Title: "청산규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "청산 결제"},
 	}
-	engine := BuildWithAttachments(docs, nil, map[string][]float64{
+	engine := buildTestEngine(docs, nil, map[string][]float64{
 		"a#0": {1, 0},
 		"b#0": {0, 1},
 	})
@@ -264,7 +285,7 @@ func TestBM25UsesTermFrequencyForIndexedDocuments(t *testing.T) {
 		{ID: "repeated", Title: "반복 문서", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "증거금 증거금 증거금"},
 		{ID: "single", Title: "단일 문서", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "증거금"},
 	}
-	engine := BuildWithAttachments(docs, nil, nil)
+	engine := buildTestEngine(docs, nil, nil)
 	results := engine.Search(SearchOptions{Query: "증거금", Limit: 2})
 	if len(results) != 2 {
 		t.Fatalf("results = %#v, want two documents", results)
@@ -276,7 +297,7 @@ func TestBM25UsesTermFrequencyForIndexedDocuments(t *testing.T) {
 
 func TestDocumentsTreatsNegativeOffsetAsZero(t *testing.T) {
 	doc := model.Document{ID: "rule-1", Title: "규정", CollectedAt: time.Now(), DocumentType: model.DocumentTypeRule, Body: "본문"}
-	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
+	engine := buildTestEngine([]model.Document{doc}, nil, nil)
 	results := engine.Documents(Filter{}, 10, -10)
 	if len(results) != 1 || results[0].ID != doc.ID {
 		t.Fatalf("negative offset results = %#v", results)
@@ -294,7 +315,7 @@ func TestSearchLimitClampsToMax(t *testing.T) {
 			Body:         "상장 심사",
 		})
 	}
-	engine := BuildWithAttachments(docs, nil, nil)
+	engine := buildTestEngine(docs, nil, nil)
 	results := engine.Search(SearchOptions{Query: "상장", Limit: 100})
 	if len(results) != 50 {
 		t.Fatalf("len(results) = %d, want clamp to 50", len(results))
@@ -313,7 +334,7 @@ func TestDocumentsLimitClampsAndSortsDeterministically(t *testing.T) {
 			Body:         "본문",
 		})
 	}
-	engine := BuildWithAttachments(docs, nil, nil)
+	engine := buildTestEngine(docs, nil, nil)
 	results, total := engine.DocumentsPage(Filter{}, 500, 0)
 	if total != 250 {
 		t.Fatalf("total = %d, want 250", total)
@@ -393,7 +414,7 @@ func TestStructuredChunksPreserveOwningArticleAndHeadingPath(t *testing.T) {
 			"**제2조(정의)** 정의 조문",
 		}, "\n"),
 	}
-	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
+	engine := buildTestEngine([]model.Document{doc}, nil, nil)
 	results := engine.Search(SearchOptions{Query: "세부 소유", Limit: 1})
 	wantPath := []string{"제1장 총칙", "제1절 목적", "제1조(목적)", "①", "1.", "가."}
 	if len(results) != 1 || results[0].ArticleID != "제1조" || !stringSlicesEqual(results[0].HeadingPath, wantPath) {
@@ -434,7 +455,7 @@ func TestStructuredChunksSkipEnglishTOCAndPreserveSectionArticleAnchors(t *testi
 			"The Exchange pays the settlement amount.",
 		}, "\n"),
 	}
-	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
+	engine := buildTestEngine([]model.Document{doc}, nil, nil)
 	results := engine.Search(SearchOptions{Query: "exercise quantity multiplier", Limit: 3})
 	wantPath := []string{"CHAPTER I. GENERAL PROVISIONS", "Section 1. Settlement", "§818. Calculation of Settlement Quantity"}
 	if len(results) != 1 || results[0].ArticleID != "§818" || !stringSlicesEqual(results[0].HeadingPath, wantPath) {
@@ -459,7 +480,7 @@ func TestChunkCandidatesRemainIndependentUntilDocumentAggregation(t *testing.T) 
 			"**제3조(공동절차)** 사전 협의 결과를 기록한다.",
 		}, "\n"),
 	}
-	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
+	engine := buildTestEngine([]model.Document{doc}, nil, nil)
 	query := "사전 협의"
 	candidates := engine.bm25ChunkCandidates(Tokenize(query), meaningfulQueryTerms(query), Filter{}, nil, 10)
 	if len(candidates) < 3 {
@@ -481,6 +502,17 @@ func TestChunkCandidatesRemainIndependentUntilDocumentAggregation(t *testing.T) 
 	}
 	if results[0].MatchedChunkID != results[0].EvidenceMatches[0].ChunkID {
 		t.Fatalf("matched chunk %q is not top evidence %q", results[0].MatchedChunkID, results[0].EvidenceMatches[0].ChunkID)
+	}
+}
+
+func TestAdjacentDistinctArticleChunksRemainSeparateEvidence(t *testing.T) {
+	candidates := []ChunkCandidate{
+		{ChunkID: "rule#10", DocumentID: "rule", ChunkIndex: 10, ArticleID: "제20조", Text: "ETF 순자산가치 괴리율 3퍼센트", Score: 2},
+		{ChunkID: "rule#11", DocumentID: "rule", ChunkIndex: 11, ArticleID: "제20조", Text: "ETN 지표가치 괴리율 6퍼센트", Score: 1},
+	}
+	selected := selectEvidenceCandidates(candidates, 3)
+	if len(selected) != 2 {
+		t.Fatalf("adjacent distinct evidence was collapsed: %#v", selected)
 	}
 }
 
@@ -593,14 +625,14 @@ func TestAttachmentTextSearchesParentDocument(t *testing.T) {
 		Body:         "본문에는 일반적인 업무규정 내용만 있다.",
 		Attachments: []model.Attachment{
 			{
-				ID:       "att-margin",
-				Title:    "증거금 산출 별표",
-				FileName: "margin.pdf",
-				Status:   model.AttachmentConverted,
+				ID:               "att-margin",
+				Title:            "증거금 산출 별표",
+				FileName:         "margin.pdf",
+				ConversionStatus: model.AttachmentConverted,
 			},
 		},
 	}
-	engine := BuildWithAttachments([]model.Document{doc}, map[string]AttachmentDocument{
+	engine := buildTestEngine([]model.Document{doc}, map[string]AttachmentDocument{
 		"att-margin": {
 			Attachment: doc.Attachments[0],
 			Text:       "최종결제가격 산출과 스프레드증거금률 적용 방법을 정한다.",
@@ -639,7 +671,7 @@ func TestContextAroundReturnsNeighboringChunksFromSameSource(t *testing.T) {
 			"세 번째 문맥 " + strings.Repeat("다", 900),
 		}, "\n\n"),
 	}
-	engine := BuildWithAttachments([]model.Document{doc}, nil, nil)
+	engine := buildTestEngine([]model.Document{doc}, nil, nil)
 	gotDoc, chunks, ok := engine.ContextAround("rule-context#1", 1, 1)
 	if !ok {
 		t.Fatal("ContextAround returned false")
@@ -716,7 +748,7 @@ func TestExpandDomainQueryDoesNotTreatBarePDFAsETFPortfolioFile(t *testing.T) {
 }
 
 func TestDomainExpansionTokenWeightsPreferOriginalQuery(t *testing.T) {
-	engine := BuildWithAttachments([]model.Document{
+	engine := buildTestEngine([]model.Document{
 		{
 			ID:           "original",
 			Title:        "Original",
@@ -772,7 +804,7 @@ func TestExpandedEvidencePrefersDirectHeadingPhrase(t *testing.T) {
 			},
 		},
 	}
-	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms, nil)
+	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms, nil, nil)
 	if len(selected) != 2 || selected[0].ChunkID != "direct" {
 		t.Fatalf("direct heading was not preferred: %#v", selected)
 	}
@@ -801,7 +833,7 @@ func TestExpandedEvidenceRewardsMatchingAttachmentPhrase(t *testing.T) {
 			Text:         "가격상관율을 기초자산별로 산술평균한 값 중 최솟값으로 한다.",
 		},
 	}
-	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms, nil)
+	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms, nil, nil)
 	if len(selected) != 2 || selected[0].ChunkID != "attachment" {
 		t.Fatalf("matching attachment was not preferred: %#v", selected)
 	}
@@ -813,9 +845,37 @@ func TestExpandedEvidenceKeepsQuantitativeClaimsInSelectedBundle(t *testing.T) {
 		{ChunkID: "three", DocumentID: "rule", ChunkIndex: 10, ArticleID: "제18조", FusedScore: 0.02, Text: "괴리율 3퍼센트"},
 		{ChunkID: "six", DocumentID: "rule", ChunkIndex: 20, ArticleID: "제19조", FusedScore: 0.02, Text: "괴리율 6퍼센트"},
 	}
-	selected := selectExpandedEvidenceCandidates(candidates, 3, nil, nil, []string{"3퍼센트", "6퍼센트"})
+	selected := selectExpandedEvidenceCandidates(candidates, 3, nil, nil, []string{"3퍼센트", "6퍼센트"}, nil)
 	if len(selected) != 3 || selected[0].ChunkID == "generic" {
 		t.Fatalf("quantitative evidence was not promoted: %#v", selected)
+	}
+}
+
+func TestExpandedEvidenceCoversExplicitIdentifierConcepts(t *testing.T) {
+	candidates := []ChunkCandidate{
+		{ChunkID: "generic", DocumentID: "rule", ChunkIndex: 1, ArticleID: "제20조", FusedScore: 0.05, Text: "유동성공급호가 제출의무"},
+		{ChunkID: "etf", DocumentID: "rule", ChunkIndex: 2, ArticleID: "제20조", FusedScore: 0.02, Text: "상장지수집합투자기구의 순자산가치"},
+		{ChunkID: "etn", DocumentID: "rule", ChunkIndex: 3, ArticleID: "제20조", FusedScore: 0.02, Text: "상장지수증권의 지표가치"},
+	}
+	concepts := [][]string{
+		{"ETF", "상장지수집합투자기구"},
+		{"ETN", "상장지수증권"},
+	}
+	selected := selectExpandedEvidenceCandidates(candidates, 3, nil, nil, nil, concepts)
+	seen := map[string]bool{}
+	for _, candidate := range selected {
+		seen[candidate.ChunkID] = true
+	}
+	if !seen["etf"] || !seen["etn"] {
+		t.Fatalf("identifier concepts were not covered: %#v", selected)
+	}
+}
+
+func TestSearchQueryTokensAreDeduplicated(t *testing.T) {
+	got := uniqueSearchTokens([]string{"증거금", "증거금", "margin", "증거금", "margin"})
+	want := []string{"증거금", "margin"}
+	if !equalStrings(got, want) {
+		t.Fatalf("uniqueSearchTokens() = %#v, want %#v", got, want)
 	}
 }
 

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "fixture_sha256": "5026836077883452ba19c64882fd8908e7463ed383ba318d7c877bf8afd07764",
+  "embedding": {
+    "model": "intfloat/multilingual-e5-small",
+    "revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+    "dimensions": 384,
+    "query_prefix": "query: ",
+    "document_prefix": "passage: ",
+    "input_format": "text-v1"
+  },
+  "overall": {
+    "cases": 28,
+    "document_eligible": 27,
+    "document_hit_at_5": 24,
+    "mrr_at_5": 0.8271604938271606,
+    "evidence_eligible": 27,
+    "evidence_hit_at_1": 19,
+    "evidence_recall_at_3": 24,
+    "candidate_recall_at_64": 25,
+    "status_correct": 26,
+    "insufficient_cases": 1,
+    "insufficient_refused": 1,
+    "false_supported": 0,
+    "english_canonical_checks": 27,
+    "english_canonical_passed": 24
+  },
+  "holdout": {
+    "cases": 11,
+    "document_eligible": 11,
+    "document_hit_at_5": 10,
+    "mrr_at_5": 0.8181818181818182,
+    "evidence_eligible": 11,
+    "evidence_hit_at_1": 8,
+    "evidence_recall_at_3": 10,
+    "candidate_recall_at_64": 10,
+    "status_correct": 11,
+    "insufficient_cases": 0,
+    "insufficient_refused": 0,
+    "false_supported": 0,
+    "english_canonical_checks": 11,
+    "english_canonical_passed": 10
+  }
+}

@@ -15,6 +15,7 @@ These files are generated from the maintained `krx-rule-markdown/data` corpus wi
 | Field | Value |
 | --- | --- |
 | Model | `intfloat/multilingual-e5-small` |
+| Revision | `614241f622f53c4eeff9890bdc4f31cfecc418b3` |
 | Dimensions | `384` |
 | Document prefix | `passage: ` |
 | Query prefix | `query: ` |
@@ -28,7 +29,7 @@ Check the bundled snapshots before serving:
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
   --index-dir ./index \
-  --vector-index ./index/vectors.krxvec \
+  --vector \
   --check
 ```
 
@@ -47,7 +48,7 @@ go run ./cmd/krx-rule-index \
   --index-dir "$KRX_RULE_INDEX_DIR"
 ```
 
-Freshness is based on the verified corpus release hash plus deterministic index source/build hashes, not file mtimes. The index source contract includes searchable document and attachment content and retrieval-relevant metadata; the build hash additionally binds the tokenizer/chunker/indexer version. `--index` remains a compatibility way to select the directory by naming `<dir>/bm25.krxidx`, but the CLI never writes that flat path: it publishes beneath `<dir>/generations/` and updates `<dir>/current`.
+Freshness is based on the verified corpus release hash plus deterministic index source/build hashes, not file mtimes. The index source contract includes searchable document and attachment content and retrieval-relevant metadata; the build hash additionally binds the tokenizer/chunker/indexer version. The CLI publishes only beneath `<dir>/generations/` and atomically updates `<dir>/current`.
 
 Useful flags:
 
@@ -58,12 +59,12 @@ The tokenizer extracts Korean, Latin, and numeric tokens, and adds Korean 2-gram
 
 ### Structured legal chunks
 
-Snapshot format v7 treats the 1,600-rune chunk size as a target rather than a destructive hard limit. The chunker recognizes chapter/section headings, owning Korean article headings, English body `§N`/`§N-N` headings, and Korean 항·호·목 markers. English table-of-contents entries and inline `[§N]` citations cannot become owning articles. Index-layer search results and chunk context carry:
+Snapshot format v6 treats the 1,600-rune chunk size as a target rather than a destructive hard limit. The chunker recognizes chapter/section headings, owning Korean article headings, English body `§N`/`§N-N` headings, and Korean 항·호·목 markers. English table-of-contents entries and inline `[§N]` citations cannot become owning articles. Index-layer search results and chunk context carry:
 
 - `article_id`: the owning heading such as `제5조` or `제11조의2`.
 - `heading_path`: the ordered chapter, section, full article heading, 항, 호, and 목 path.
 
-Only a structural heading at the beginning of a block can change `article_id`. A sentence such as `제99조에 따른 ...` remains owned by the preceding article, so cited provisions are not presented as the chunk's source anchor. The former heuristic `article_range` is not serialized or populated.
+Only a structural heading at the beginning of a block can change `article_id`. A sentence such as `제99조에 따른 ...` remains owned by the preceding article, so cited provisions are not presented as the chunk's source anchor.
 
 Semantic units are kept intact:
 
@@ -73,11 +74,13 @@ Semantic units are kept intact:
 
 The hermetic retrieval benchmark runs in ordinary Go CI and gates Recall@5, attachment hits, anchors, and filter isolation. Its clearing expectation follows the current corpus wording: `clearing settlement 최종결제가격` resolves to `파생상품시장 업무규정 시행세칙` `제5조`, rather than requiring a title containing `청산`.
 
-Converted attachments are indexed as chunks attached to their parent rule or notice. If an attachment chunk is the best match, the result returns the parent document and includes `matched_source: "attachment"` plus `attachment_matches`.
-Each search result includes `matched_chunk_id` and the zero-based `matched_chunk_index`. Attachment matches include their own `chunk_id` and zero-based `chunk_index`; index 0 is serialized explicitly. The public API does not expose heuristic article-range guesses. Domain lexicon expansion terms are scored with lower BM25 weight than the original query terms. Use these ids with `get_context` to fetch the exact matched chunk and neighboring chunks before writing an answer.
+Converted attachments are indexed as chunks attached to their parent rule or notice. If an attachment chunk is selected, the parent document includes it in `evidence_matches` and exposes attachment metadata in `attachment_matches`.
+Each evidence match includes its `chunk_id`, zero-based `chunk_index`, source, owning article and heading path. Attachment matches include their own chunk anchor as well. Index 0 is serialized explicitly. Domain lexicon expansion terms are scored with lower BM25 weight than the original query terms. Use evidence chunk IDs with `get_context` to fetch the exact chunk and neighboring chunks before writing an answer.
 
-BM25 and vector retrieval keep bounded chunk candidates independently. Reciprocal-rank fusion is keyed by chunk ID, not document ID; only after fusion are up to three diverse evidence chunks grouped into each document. `matched_chunk_id`, `article_id`, and `heading_path` always mirror the first `evidence_matches` item. A bounded lexical-coverage signal breaks weak RRF ties without treating a ranking score as confidence. Filter eligibility is computed once before both channel scans, and vector norms are precomputed when the generation is loaded.
+BM25 and vector retrieval keep bounded chunk candidates independently. Reciprocal-rank fusion is keyed by chunk ID, not document ID; only after fusion are up to three diverse evidence chunks grouped into each document. A bounded lexical-coverage signal breaks weak RRF ties without treating a ranking score as confidence. Filter eligibility is computed once before both channel scans, and vector norms are precomputed when the generation is loaded.
 문서 안의 최종 evidence 순서는 원 질의의 lexical coverage, high-confidence reviewed intent expansion, BM25/vector 채널 일치, 질의에 명시된 수치 claim을 사용해 다시 정렬합니다. Expansion phrase가 조문 heading에 직접 나타나면 간접 인용보다 우선하고, 구체적인 expansion phrase가 첨부 본문에 나타나면 일반 조문보다 우선할 수 있습니다. 각 evidence의 `score`는 이 최종 순서에 사용된 점수이고, `bm25_score`와 `vector_score`는 retrieval channel 진단값입니다. 이 신호들은 bounded retrieval 후보 안에서만 순서를 바꾸며 answerability confidence로 사용하지 않습니다.
+
+선택형 한국어 reranker가 활성화되면 baseline RRF와 answerability를 먼저 계산합니다. Baseline이 `supported`이고, 구조 anchor가 있으나 원 질의 lexical coverage가 0.4 미만인 한국어 단일문서·비수치·비반증 질의만 상위 20개 chunk를 cross-encoder로 재정렬합니다. 문서 점수는 baseline RRF로 고정되고 cross-encoder는 문서 내부 evidence 순서에만 관여합니다. 재정렬 뒤에도 answerability가 `supported`인 경우에만 결과를 채택합니다. `reranker_score`와 `reranker_rank` 역시 순위 진단값이지 confidence가 아닙니다.
 
 
 `score`, `bm25_score`, and `vector_score` are ranking signals. They are useful for ordering and debugging retrieval, but they are not confidence probabilities.
@@ -149,7 +152,13 @@ Search results are discovery aids from a collected derivative snapshot. Ranking 
 - `ambiguous`: the query is too broad or evidence is not sufficiently anchored. A bounded diverse result set and `clarification` are returned, but `answerable` is `false`.
 - `unknown`: the loaded retrieval/index contract is incompatible. It fails closed with empty results.
 
-The `answerability` object contains `reason_codes`, `gate_version`, selected `evidence_chunk_ids`, and observable features such as original-query lexical coverage, BM25/vector agreement, structural anchors, filter state, quantitative-claim checks, explicit-source checks, exception-condition checks, and category diversity. These are deterministic gate inputs, not confidence probabilities. Numeric limits, named external laws, obligation subjects, composite claims, conditional exceptions, and contrastive alternatives are verified only against the selected top-result evidence bundle. Every chunk used by those checks is included in `evidence_chunk_ids`; unrelated lower-ranked documents cannot make a claim pass.
+The `answerability` object contains `reason_codes`, `gate_version`, selected `evidence_chunk_ids`, and observable features such as original-query and bundle lexical coverage, BM25/vector agreement, structural anchors, explicit identifier/source checks, quantitative and instrumental-claim checks, conditional exceptions, and category diversity. These are deterministic gate inputs, not confidence probabilities. A query that explicitly requests comparison or multiple sources may use a bounded top-three-document evidence bundle; every chunk used by the checks is included in `evidence_chunk_ids`. Other queries remain restricted to the first result, so unrelated lower-ranked documents cannot make a claim pass.
+
+The evaluator reports document rank and evidence depth separately. Evidence Hit@1 means the expected article, attachment, or reviewed document-body evidence is the first `evidence_matches` item within the matching document; it is not inflated by, or flattened together with, the document's result rank. `all` and `at_least` policies accumulate distinct document/article/attachment targets across contexts before deciding success.
+
+Before issuing any query, the evaluator audits every target against the loaded corpus and immutable index. A stale document, wrong article or attachment, input filter that excludes its own target, missing required phrase, present forbidden phrase, or missing contradiction polarity aborts the run. Raw article text is checked as well as index chunks so a PDF heading-layout defect is reported as an indexing problem rather than silently rewritten into a wrong fixture label.
+
+Do not add aliases after inspecting the final unseen holdout merely to make its score pass. Corrections that change a factually wrong fixture label must be documented, checksum the fixture again, and reseal the holdout before another retrieval experiment. Audit-D was used to choose the reranker structure and is therefore development data. Model, candidate K, batch, evidence-only ranking, and the weak-supported selection policy were frozen before the document-disjoint audit-E holdout was written. The audit-E result is reported even when it fails and is not followed by another alias or weight adjustment.
 
 Clients should answer only when `answerable=true`, then fetch the returned evidence chunk with `get_context`. For `ambiguous`, ask the user for the provided clarification. For `insufficient` or `unknown`, state that the current corpus did not supply answerable evidence; do not reinterpret ranking scores as permission to answer.
 
@@ -241,7 +250,7 @@ KRX_EMBEDDING_INPUT_FORMAT=text-v1 \
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
   --index-dir "$KRX_RULE_INDEX_DIR" \
-  --vector-index "$KRX_RULE_INDEX_DIR/vectors.krxvec"
+  --vector
 ```
 
 For a cheaper smoke test, add `--vector-sample-query "상장 심사"` and `--vector-sample-per-query 16`, or cap work with `--vector-limit`.
@@ -262,7 +271,7 @@ KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
   --index-dir "$KRX_RULE_INDEX_DIR" \
-  --vector-index "$KRX_RULE_INDEX_DIR/vectors.krxvec" \
+  --vector \
   --force
 ```
 
@@ -288,7 +297,7 @@ Rebuild the vector snapshot after changing any embedding setting:
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
   --index-dir "$KRX_RULE_INDEX_DIR" \
-  --vector-index "$KRX_RULE_INDEX_DIR/vectors.krxvec" \
+  --vector \
   --force
 ```
 

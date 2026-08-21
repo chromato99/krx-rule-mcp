@@ -15,6 +15,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func loadTestRepository(root, indexPath string, vectorPaths ...string) (*Repository, error) {
+	options := RepositoryLoadOptions{VectorEnabled: len(vectorPaths) > 0}
+	vectorPath := ""
+	if len(vectorPaths) > 0 {
+		vectorPath = vectorPaths[0]
+	}
+	return loadRepositoryArtifacts(root, indexPath, vectorPath, options, false)
+}
+
 func TestGoGeneratedSnapshotLoadsIntoRepository(t *testing.T) {
 	root := t.TempDir()
 	doc := model.Document{
@@ -22,13 +31,12 @@ func TestGoGeneratedSnapshotLoadsIntoRepository(t *testing.T) {
 		Title:        "코스닥시장 상장규정",
 		SourceURL:    "https://example.test/rule",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "hash-rule-1",
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장신청인은 신규상장 심사를 신청할 수 있다.",
 	}
 	writeIndexTestDocument(t, root, doc)
 	writeTestIndexSnapshot(t, root)
-	repo, err := LoadRepository(root, filepath.Join(root, "index", "bm25.krxidx"))
+	repo, err := loadTestRepository(root, filepath.Join(root, "index", "bm25.krxidx"))
 	if err != nil {
 		t.Fatalf("load repository: %v", err)
 	}
@@ -89,7 +97,6 @@ func TestVectorSnapshotLoadsIntoRepository(t *testing.T) {
 		Title:        "상장규정",
 		SourceURL:    "https://example.test/rule",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "hash-rule-1",
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장 심사",
 	}
@@ -97,7 +104,7 @@ func TestVectorSnapshotLoadsIntoRepository(t *testing.T) {
 	writeTestIndexSnapshot(t, root)
 	vectorPath := filepath.Join(root, "index", "vectors.krxvec")
 	writeTestVectorSnapshot(t, root, vectorPath, map[string][]float64{"rule-1#0": {1, 0}})
-	repo, err := LoadRepository(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath)
+	repo, err := loadTestRepository(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath)
 	if err != nil {
 		t.Fatalf("load repository: %v", err)
 	}
@@ -120,7 +127,6 @@ func TestVectorSnapshotIgnoresStaleCorpus(t *testing.T) {
 		Title:        "상장규정",
 		SourceURL:    "https://example.test/rule",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "hash-current",
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장 심사",
 	}
@@ -157,7 +163,6 @@ func TestVectorSnapshotIgnoresEmbeddingConfigMismatch(t *testing.T) {
 		Title:        "상장규정",
 		SourceURL:    "https://example.test/rule",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "hash-rule-1",
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장 심사",
 	}
@@ -165,7 +170,7 @@ func TestVectorSnapshotIgnoresEmbeddingConfigMismatch(t *testing.T) {
 	writeTestIndexSnapshot(t, root)
 	vectorPath := filepath.Join(root, "index", "vectors.krxvec")
 	writeTestVectorSnapshot(t, root, vectorPath, map[string][]float64{"rule-1#0": {1, 0}})
-	repo, err := LoadRepository(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath)
+	repo, err := loadTestRepository(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath)
 	if err != nil {
 		t.Fatalf("load repository: %v", err)
 	}
@@ -185,14 +190,14 @@ func TestVectorSnapshotRejectsEmbeddingInputFormatMismatch(t *testing.T) {
 	root := t.TempDir()
 	doc := model.Document{
 		ID: "rule-1", Title: "상장규정", SourceURL: "https://example.test/rule",
-		CollectedAt: time.Now().UTC(), ContentHash: "hash-rule-1",
+		CollectedAt:  time.Now().UTC(),
 		DocumentType: model.DocumentTypeRule, Body: "상장 심사",
 	}
 	writeIndexTestDocument(t, root, doc)
 	writeTestIndexSnapshot(t, root)
 	vectorPath := filepath.Join(root, "index", "vectors.krxvec")
 	writeTestVectorSnapshot(t, root, vectorPath, map[string][]float64{"rule-1#0": {1, 0}})
-	repo, err := LoadRepository(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath)
+	repo, err := loadTestRepository(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath)
 	if err != nil {
 		t.Fatalf("load repository: %v", err)
 	}
@@ -217,7 +222,7 @@ func TestVectorSnapshotIgnoresModelRevisionMismatch(t *testing.T) {
 	writeTestIndexSnapshot(t, root)
 	vectorPath := filepath.Join(root, "index", "vectors.krxvec")
 	writeTestVectorSnapshot(t, root, vectorPath, map[string][]float64{"rule-1#0": {1, 0}})
-	repo, err := LoadRepository(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath)
+	repo, err := loadTestRepository(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath)
 	if err != nil {
 		t.Fatalf("load repository: %v", err)
 	}
@@ -238,9 +243,7 @@ func TestVectorDisabledDoesNotReadConfiguredFile(t *testing.T) {
 	if err := os.MkdirAll(unreadableVectorPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	repo, err := LoadRepositoryWithOptions(root, filepath.Join(root, "index", "bm25.krxidx"), RepositoryLoadOptions{
-		VectorEnabled: false, VectorIndexPaths: []string{unreadableVectorPath},
-	})
+	repo, err := loadRepositoryArtifacts(root, filepath.Join(root, "index", "bm25.krxidx"), unreadableVectorPath, RepositoryLoadOptions{}, false)
 	if err != nil {
 		t.Fatalf("disabled vector load: %v", err)
 	}
@@ -261,8 +264,8 @@ func TestMalformedOptionalVectorFallsBackButRequiredFails(t *testing.T) {
 	if err := os.WriteFile(vectorPath, []byte("not a vector snapshot"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	options := RepositoryLoadOptions{VectorEnabled: true, VectorIndexPaths: []string{vectorPath}}
-	repo, err := LoadRepositoryWithOptions(root, filepath.Join(root, "index", "bm25.krxidx"), options)
+	options := RepositoryLoadOptions{VectorEnabled: true}
+	repo, err := loadRepositoryArtifacts(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath, options, false)
 	if err != nil {
 		t.Fatalf("optional vector should fall back: %v", err)
 	}
@@ -270,7 +273,7 @@ func TestMalformedOptionalVectorFallsBackButRequiredFails(t *testing.T) {
 		t.Fatalf("unexpected optional vector status: %#v", repo.VectorIndexes)
 	}
 	options.RequireVector = true
-	if _, err := LoadRepositoryWithOptions(root, filepath.Join(root, "index", "bm25.krxidx"), options); err == nil {
+	if _, err := loadRepositoryArtifacts(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath, options, false); err == nil {
 		t.Fatal("required malformed vector unexpectedly loaded")
 	}
 }
@@ -289,9 +292,9 @@ func TestRequiredVectorRejectsPartialCoverage(t *testing.T) {
 	snap := writeTestIndexSnapshot(t, root)
 	vectorPath := filepath.Join(root, "index", "partial.krxvec")
 	writeTestVectorSnapshot(t, root, vectorPath, map[string][]float64{snap.Chunks[0].ID: {1, 0}})
-	if _, err := LoadRepositoryWithOptions(root, filepath.Join(root, "index", "bm25.krxidx"), RepositoryLoadOptions{
-		VectorEnabled: true, RequireVector: true, VectorIndexPaths: []string{vectorPath},
-	}); err == nil || !strings.Contains(err.Error(), "required vector snapshot") {
+	if _, err := loadRepositoryArtifacts(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath, RepositoryLoadOptions{
+		VectorEnabled: true, RequireVector: true,
+	}, false); err == nil || !strings.Contains(err.Error(), "required vector snapshot") {
 		t.Fatalf("required partial vector error = %v", err)
 	}
 }
@@ -326,9 +329,7 @@ func TestVectorCoverageCountsUniqueChunks(t *testing.T) {
 	writeTestIndexSnapshot(t, root)
 	vectorPath := filepath.Join(root, "index", "vectors.krxvec")
 	writeTestVectorSnapshot(t, root, vectorPath, map[string][]float64{"rule-1#0": {1, 0}})
-	repo, err := LoadRepositoryWithOptions(root, filepath.Join(root, "index", "bm25.krxidx"), RepositoryLoadOptions{
-		VectorEnabled: true, VectorIndexPaths: []string{vectorPath, vectorPath},
-	})
+	repo, err := loadRepositoryArtifacts(root, filepath.Join(root, "index", "bm25.krxidx"), vectorPath, RepositoryLoadOptions{VectorEnabled: true}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -413,8 +414,17 @@ func renderIndexTestMarkdown(t *testing.T, doc model.Document) []byte {
 	meta.Body = ""
 	meta.Path = ""
 	meta.Language = model.NormalizeLanguage(meta.Language)
+	meta.SchemaVersion = corpus.IndexSourceSchemaVersion
 	meta.BodyHash = model.HashText(doc.Body)
-	meta.ContentHash = model.HashText(doc.Title + "\n" + doc.Body)
+	meta.ConversionStatus = string(model.AttachmentConverted)
+	meta.PreservationStatus = "preserved"
+	meta.Searchable = indexTestBoolPointer(true)
+	meta.QualityStatus = "ok"
+	for index := range meta.Attachments {
+		meta.Attachments[index].PreservationStatus = "preserved"
+		meta.Attachments[index].Searchable = indexTestBoolPointer(true)
+		meta.Attachments[index].QualityStatus = "ok"
+	}
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
 	enc := yaml.NewEncoder(&buf)
@@ -430,6 +440,8 @@ func renderIndexTestMarkdown(t *testing.T, doc model.Document) []byte {
 	buf.WriteString("\n")
 	return buf.Bytes()
 }
+
+func indexTestBoolPointer(value bool) *bool { return &value }
 
 func writeTestIndexSnapshot(t *testing.T, root string) Snapshot {
 	t.Helper()
@@ -451,8 +463,8 @@ func writeTestVectorSnapshot(t *testing.T, root, path string, vectors map[string
 	}
 	options := VectorWriteOptions{
 		ModelRevision:  "test-revision",
-		QueryPrefix:    "query: ",
-		DocumentPrefix: "passage: ",
+		QueryPrefix:    DefaultEmbeddingQueryPrefix,
+		DocumentPrefix: DefaultEmbeddingDocumentPrefix,
 	}
 	if err := WriteVectorSnapshot(path, snap, vectors, "test-model", 2, options); err != nil {
 		t.Fatalf("write vector snapshot: %v", err)

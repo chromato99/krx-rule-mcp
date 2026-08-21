@@ -206,8 +206,8 @@ func TestGenerationPublishesValidatedVectorCompanion(t *testing.T) {
 		VectorOptions: VectorWriteOptions{
 			Scope:          VectorScopeFull,
 			ModelRevision:  "test-revision",
-			QueryPrefix:    "query: ",
-			DocumentPrefix: "passage: ",
+			QueryPrefix:    DefaultEmbeddingQueryPrefix,
+			DocumentPrefix: DefaultEmbeddingDocumentPrefix,
 		},
 	})
 	if err != nil {
@@ -274,8 +274,8 @@ func TestLoadRepositoryGenerationUsesManifestAndFixedArtifactDigests(t *testing.
 		VectorOptions: VectorWriteOptions{
 			Scope:          VectorScopeFull,
 			ModelRevision:  "test-revision",
-			QueryPrefix:    "query: ",
-			DocumentPrefix: "passage: ",
+			QueryPrefix:    DefaultEmbeddingQueryPrefix,
+			DocumentPrefix: DefaultEmbeddingDocumentPrefix,
 		},
 	})
 	if err != nil {
@@ -397,7 +397,6 @@ func generationTestDocument() model.Document {
 		Title:        "세대 게시 검증 규정",
 		SourceURL:    "https://example.test/generation-rule",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "render-helper-replaces-this",
 		DocumentType: model.DocumentTypeRule,
 		Body:         "제1조(세대 게시) 원자적 세대 게시의 검증 기준을 정한다.",
 	}

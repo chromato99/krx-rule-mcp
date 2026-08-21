@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 
 	searchindex "github.com/chromato99/krx-rule-mcp/internal/index"
 	"github.com/chromato99/krx-rule-mcp/internal/model"
@@ -17,22 +18,32 @@ import (
 )
 
 type Service struct {
-	Repo               *searchindex.Repository
-	Embedder           searchindex.Embedder
-	VectorRequired     bool
-	DomainLexicon      []searchindex.DomainLexiconEntry
-	Logger             *slog.Logger
-	ReleaseGeneration  string
-	MaxQueryRunes      int
-	EmbeddingTimeout   time.Duration
-	ConcurrentSearches chan struct{}
-	Observer           Observer
-	MaxToolOutputBytes int
+	Repo                *searchindex.Repository
+	Embedder            searchindex.Embedder
+	VectorRequired      bool
+	Reranker            searchindex.Reranker
+	RerankerRequired    bool
+	RerankerCandidates  int
+	RerankerAll         bool
+	RetrievalCandidates int
+	DomainLexicon       []searchindex.DomainLexiconEntry
+	Logger              *slog.Logger
+	ReleaseGeneration   string
+	MaxQueryRunes       int
+	EmbeddingTimeout    time.Duration
+	RerankerTimeout     time.Duration
+	ConcurrentSearches  chan struct{}
+	Observer            Observer
+	MaxToolOutputBytes  int
 }
 
 type Observer interface {
 	ObserveTool(name string, elapsed time.Duration)
 	CountEmbeddingFallback(reason string)
+}
+
+type rerankerFallbackObserver interface {
+	CountRerankerFallback(reason string)
 }
 
 const (
@@ -55,7 +66,7 @@ type DocumentDTO struct {
 	EffectiveDate   string             `json:"effective_date,omitempty"`
 	PublishedDate   string             `json:"published_date,omitempty"`
 	CollectedAt     time.Time          `json:"collected_at"`
-	ContentHash     string             `json:"content_hash,omitempty"`
+	BodyHash        string             `json:"body_hash,omitempty"`
 	Searchable      bool               `json:"searchable"`
 	QualityStatus   string             `json:"quality_status,omitempty"`
 	QualityCodes    []string           `json:"quality_codes,omitempty"`
@@ -80,8 +91,7 @@ type AttachmentDTO struct {
 	OfficialSource    *OfficialSourceDTO     `json:"official_source,omitempty"`
 	ParentDocumentID  string                 `json:"parent_document_id,omitempty"`
 	ParentDocumentURI string                 `json:"parent_document_uri,omitempty"`
-	ContentHash       string                 `json:"content_hash,omitempty"`
-	Status            model.AttachmentStatus `json:"status,omitempty"`
+	ConversionStatus  model.AttachmentStatus `json:"conversion_status,omitempty"`
 	Searchable        bool                   `json:"searchable"`
 	Size              int64                  `json:"size,omitempty"`
 	QualityStatus     string                 `json:"quality_status,omitempty"`
@@ -161,12 +171,8 @@ type SearchResultDTO struct {
 	Searchable        bool                 `json:"searchable"`
 	BM25Score         float64              `json:"bm25_score,omitempty"`
 	VectorScore       float64              `json:"vector_score,omitempty"`
+	RerankerScore     float64              `json:"reranker_score,omitempty"`
 	Snippet           string               `json:"snippet,omitempty"`
-	MatchedSource     string               `json:"matched_source,omitempty"`
-	MatchedChunkID    string               `json:"matched_chunk_id,omitempty"`
-	MatchedChunkIndex int                  `json:"matched_chunk_index"`
-	ArticleID         string               `json:"article_id,omitempty"`
-	HeadingPath       []string             `json:"heading_path,omitempty"`
 	AttachmentMatches []AttachmentMatchDTO `json:"attachment_matches,omitempty"`
 	EvidenceMatches   []EvidenceMatchDTO   `json:"evidence_matches,omitempty"`
 
@@ -176,57 +182,59 @@ type SearchResultDTO struct {
 }
 
 type AttachmentMatchDTO struct {
-	ID            string                 `json:"id"`
-	Title         string                 `json:"title"`
-	FileName      string                 `json:"file_name,omitempty"`
-	SourceURL     string                 `json:"source_url,omitempty"`
-	URI           string                 `json:"uri"`
-	Status        model.AttachmentStatus `json:"status,omitempty"`
-	Searchable    bool                   `json:"searchable"`
-	ChunkID       string                 `json:"chunk_id,omitempty"`
-	ChunkIndex    int                    `json:"chunk_index"`
-	ArticleID     string                 `json:"article_id,omitempty"`
-	HeadingPath   []string               `json:"heading_path,omitempty"`
-	Score         float64                `json:"score,omitempty"`
-	Snippet       string                 `json:"snippet,omitempty"`
-	QualityNotice *QualityNotice         `json:"quality_notice,omitempty"`
-	FormulaNotice *model.FormulaNotice   `json:"formula_notice,omitempty"`
-}
-type EvidenceMatchDTO struct {
-	ChunkID          string                 `json:"chunk_id"`
-	ChunkIndex       int                    `json:"chunk_index"`
-	Source           string                 `json:"source"`
-	AttachmentID     string                 `json:"attachment_id,omitempty"`
-	AttachmentTitle  string                 `json:"attachment_title,omitempty"`
-	AttachmentFile   string                 `json:"attachment_file,omitempty"`
-	AttachmentStatus model.AttachmentStatus `json:"attachment_status,omitempty"`
+	ID               string                 `json:"id"`
+	Title            string                 `json:"title"`
+	FileName         string                 `json:"file_name,omitempty"`
 	SourceURL        string                 `json:"source_url,omitempty"`
+	URI              string                 `json:"uri"`
+	ConversionStatus model.AttachmentStatus `json:"conversion_status,omitempty"`
 	Searchable       bool                   `json:"searchable"`
-	Score            float64                `json:"score"`
-	BM25Score        float64                `json:"bm25_score,omitempty"`
-	VectorScore      float64                `json:"vector_score,omitempty"`
-	LexicalCoverage  float64                `json:"lexical_coverage"`
-	Snippet          string                 `json:"snippet,omitempty"`
+	ChunkID          string                 `json:"chunk_id,omitempty"`
+	ChunkIndex       int                    `json:"chunk_index"`
 	ArticleID        string                 `json:"article_id,omitempty"`
 	HeadingPath      []string               `json:"heading_path,omitempty"`
+	Score            float64                `json:"score,omitempty"`
+	Snippet          string                 `json:"snippet,omitempty"`
 	QualityNotice    *QualityNotice         `json:"quality_notice,omitempty"`
+	FormulaNotice    *model.FormulaNotice   `json:"formula_notice,omitempty"`
+}
+type EvidenceMatchDTO struct {
+	ChunkID                    string                 `json:"chunk_id"`
+	ChunkIndex                 int                    `json:"chunk_index"`
+	Source                     string                 `json:"source"`
+	AttachmentID               string                 `json:"attachment_id,omitempty"`
+	AttachmentTitle            string                 `json:"attachment_title,omitempty"`
+	AttachmentFile             string                 `json:"attachment_file,omitempty"`
+	AttachmentConversionStatus model.AttachmentStatus `json:"attachment_conversion_status,omitempty"`
+	SourceURL                  string                 `json:"source_url,omitempty"`
+	Searchable                 bool                   `json:"searchable"`
+	Score                      float64                `json:"score"`
+	BM25Score                  float64                `json:"bm25_score,omitempty"`
+	VectorScore                float64                `json:"vector_score,omitempty"`
+	RerankerScore              float64                `json:"reranker_score,omitempty"`
+	RerankerRank               int                    `json:"reranker_rank,omitempty"`
+	LexicalCoverage            float64                `json:"lexical_coverage"`
+	Snippet                    string                 `json:"snippet,omitempty"`
+	ArticleID                  string                 `json:"article_id,omitempty"`
+	HeadingPath                []string               `json:"heading_path,omitempty"`
+	QualityNotice              *QualityNotice         `json:"quality_notice,omitempty"`
 }
 
 type ChunkDTO struct {
-	ID               string                 `json:"id"`
-	DocumentID       string                 `json:"document_id"`
-	Index            int                    `json:"index"`
-	Source           string                 `json:"source"`
-	URI              string                 `json:"uri"`
-	AttachmentID     string                 `json:"attachment_id,omitempty"`
-	AttachmentTitle  string                 `json:"attachment_title,omitempty"`
-	AttachmentFile   string                 `json:"attachment_file,omitempty"`
-	AttachmentStatus model.AttachmentStatus `json:"attachment_status,omitempty"`
-	ArticleID        string                 `json:"article_id,omitempty"`
-	HeadingPath      []string               `json:"heading_path,omitempty"`
-	Searchable       bool                   `json:"searchable"`
-	QualityNotice    *QualityNotice         `json:"quality_notice,omitempty"`
-	Text             string                 `json:"text"`
+	ID                         string                 `json:"id"`
+	DocumentID                 string                 `json:"document_id"`
+	Index                      int                    `json:"index"`
+	Source                     string                 `json:"source"`
+	URI                        string                 `json:"uri"`
+	AttachmentID               string                 `json:"attachment_id,omitempty"`
+	AttachmentTitle            string                 `json:"attachment_title,omitempty"`
+	AttachmentFile             string                 `json:"attachment_file,omitempty"`
+	AttachmentConversionStatus model.AttachmentStatus `json:"attachment_conversion_status,omitempty"`
+	ArticleID                  string                 `json:"article_id,omitempty"`
+	HeadingPath                []string               `json:"heading_path,omitempty"`
+	Searchable                 bool                   `json:"searchable"`
+	QualityNotice              *QualityNotice         `json:"quality_notice,omitempty"`
+	Text                       string                 `json:"text"`
 }
 
 type SearchRulesInput struct {
@@ -248,6 +256,14 @@ type SearchRulesOutput struct {
 	ScoreNote         string                            `json:"score_note"`
 	QueryExpansion    *searchindex.DomainQueryExpansion `json:"query_expansion,omitempty"`
 	Results           []SearchResultDTO                 `json:"results"`
+
+	// Evaluation-only trace. It is deliberately excluded from MCP JSON so the
+	// golden evaluator can measure first-stage candidate recall without
+	// expanding the public response or creating a second retrieval path.
+	Candidates             []searchindex.ChunkCandidate `json:"-"`
+	RerankerElapsedMillis  float64                      `json:"-"`
+	RerankerCandidateCount int                          `json:"-"`
+	RerankerAdopted        bool                         `json:"-"`
 }
 
 type GetRuleInput struct {
@@ -267,7 +283,7 @@ type RuleOutput struct {
 }
 
 type GetContextInput struct {
-	ChunkID      string `json:"chunk_id" jsonschema:"Chunk id returned by search_rules as matched_chunk_id or attachment_matches[].chunk_id."`
+	ChunkID      string `json:"chunk_id" jsonschema:"Chunk id returned by search_rules as evidence_matches[].chunk_id."`
 	BeforeChunks *int   `json:"before_chunks,omitempty" jsonschema:"Number of previous chunks from the same document body or attachment, default 1, max 5. Set 0 for no previous chunks."`
 	AfterChunks  *int   `json:"after_chunks,omitempty" jsonschema:"Number of following chunks from the same document body or attachment, default 1, max 5. Set 0 for no following chunks."`
 	MaxChars     int    `json:"max_chars,omitempty" jsonschema:"Maximum combined context characters, default 20000, max 50000."`
@@ -363,7 +379,7 @@ func NewServer(service *Service, version string) *mcpsdk.Server {
 	addBoundedTool(server, &mcpsdk.Tool{
 		Name:        "get_context",
 		Title:       "Get matched KRX context",
-		Description: "Read the matched search chunk and nearby chunks from the same rule body or attachment. Use matched_chunk_id or attachment_matches[].chunk_id from search_rules.",
+		Description: "Read a search evidence chunk and nearby chunks from the same rule body or attachment. Use evidence_matches[].chunk_id from search_rules.",
 	}, service, service.getContext)
 	addBoundedTool(server, &mcpsdk.Tool{
 		Name:        "list_rules",
@@ -499,6 +515,7 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	var tokenWeights map[string]float64
 	var evidenceTokenWeights map[string]float64
 	var evidenceTerms []string
+	var evidenceConcepts [][]string
 	domainExpansionMatchedTerms := 0
 	reviewedExpansionApplied := false
 	reviewedExpansionMatchedTerms := 0
@@ -513,6 +530,7 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 		}
 		if len(evidenceExpansion.AppliedTerms) > 0 {
 			evidenceTokenWeights = evidenceExpansion.TokenWeights(0.4)
+			evidenceConcepts = evidenceExpansion.ReviewedEvidenceConcepts()
 		}
 		queryExpansion = &expansion
 		domainExpansionMatchedTerms = expansion.MatchedTermCount()
@@ -520,6 +538,8 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 		reviewedExpansionMatchedTerms = expansion.ReviewedMatchCount()
 		reviewedExpansionExactMatch = expansion.ReviewedExactMatch()
 	}
+	evidenceTerms = append(evidenceTerms, searchindex.ExplicitIdentifierEvidenceTerms(query)...)
+	evidenceConcepts = append(evidenceConcepts, searchindex.ExplicitIdentifierEvidenceConcepts(query)...)
 	filter := searchindex.Filter{
 		DocumentType:  documentType,
 		Language:      language,
@@ -576,7 +596,7 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 			s.countEmbeddingFallback("invalid_vector_count")
 		}
 	}
-	results := s.Repo.Engine.Search(searchindex.SearchOptions{
+	searchOptions := searchindex.SearchOptions{
 		Query:                searchQuery,
 		OriginalQuery:        query,
 		Limit:                in.Limit,
@@ -586,34 +606,93 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 		EvidenceTokenWeights: evidenceTokenWeights,
 		EvidenceTerms:        evidenceTerms,
 		EvidenceClaims:       searchindex.QuantitativeEvidenceTerms(query),
+		EvidenceConcepts:     evidenceConcepts,
 		EvidenceLimit:        3,
-	})
-	mode, vectorScored := refineSearchMode(queryExpansion != nil, queryVectorAdopted, results)
-	if queryVectorAdopted && !vectorScored {
-		s.countEmbeddingFallback("no_vector_scores")
+		CandidateLimit:       s.RetrievalCandidates,
 	}
+	candidates := s.Repo.Engine.RetrieveCandidates(searchOptions)
+	baselineResults := s.Repo.Engine.GroupCandidates(searchOptions, candidates)
 	contractValid := s.Repo != nil && s.Repo.IndexerVersion == searchindex.IndexerVersion
-	if s.Repo != nil && s.Repo.IndexerVersion == "" && s.Repo.GenerationID == "" && s.Repo.BM25ArtifactDigest == "" {
-		// Hermetic in-memory repositories used by callers/tests have no artifact
-		// identity. Loaded generations must always match the versioned contract.
-		contractValid = true
-	}
 	unknownSpecificTerms := 0
 	if s.Repo != nil && s.Repo.Engine != nil {
 		unknownSpecificTerms = s.Repo.Engine.UnknownSpecificTermCount(query)
 	}
-	answerability := searchindex.EvaluateAnswerability(searchindex.AnswerabilityInput{
-		Query:                         query,
-		Filter:                        filter,
-		DomainExpansionApplied:        queryExpansion != nil,
-		DomainExpansionMatchedTerms:   domainExpansionMatchedTerms,
-		ReviewedExpansionApplied:      reviewedExpansionApplied,
-		ReviewedExpansionMatchedTerms: reviewedExpansionMatchedTerms,
-		ReviewedExpansionExactMatch:   reviewedExpansionExactMatch,
-		ContractValid:                 contractValid,
-		UnknownSpecificTermCount:      unknownSpecificTerms,
-		Results:                       results,
-	})
+	decideAnswerability := func(results []searchindex.SearchResult) searchindex.AnswerabilityDecision {
+		return searchindex.EvaluateAnswerability(searchindex.AnswerabilityInput{
+			Query:                         query,
+			Filter:                        filter,
+			DomainExpansionApplied:        queryExpansion != nil,
+			DomainExpansionMatchedTerms:   domainExpansionMatchedTerms,
+			ReviewedExpansionApplied:      reviewedExpansionApplied,
+			ReviewedExpansionMatchedTerms: reviewedExpansionMatchedTerms,
+			ReviewedExpansionExactMatch:   reviewedExpansionExactMatch,
+			ContractValid:                 contractValid,
+			UnknownSpecificTermCount:      unknownSpecificTerms,
+			Results:                       results,
+		})
+	}
+	results := baselineResults
+	answerability := decideAnswerability(results)
+	rerankerElapsedMillis := float64(0)
+	rerankerCandidateCount := 0
+	rerankerApplied := false
+	rerankerAdopted := false
+	if s.Reranker != nil && (s.RerankerAll || shouldRerankDecision(query, language, answerability)) && shouldRerankQuery(query, language) && len(candidates.Chunks) > 1 {
+		rerankerCandidateCount = s.RerankerCandidates
+		if rerankerCandidateCount <= 0 {
+			rerankerCandidateCount = searchindex.DefaultRerankerCandidateLimit
+		}
+		if rerankerCandidateCount > len(candidates.Chunks) {
+			rerankerCandidateCount = len(candidates.Chunks)
+		}
+		passages := s.rerankerPassages(candidates.Chunks[:rerankerCandidateCount])
+		rerankerTimeout := s.RerankerTimeout
+		if rerankerTimeout <= 0 {
+			rerankerTimeout = 30 * time.Minute
+		}
+		rerankStarted := time.Now()
+		rerankCtx, cancel := context.WithTimeout(ctx, rerankerTimeout)
+		scores, rerankErr := s.Reranker.Rerank(rerankCtx, query, passages)
+		cancel()
+		rerankerElapsedMillis = float64(time.Since(rerankStarted).Microseconds()) / 1000
+		if rerankErr == nil {
+			rerankErr = searchindex.ApplyRerankScores(
+				&candidates, scores, rerankerCandidateCount, searchindex.ExplicitIdentifierEvidenceConcepts(query),
+			)
+		}
+		if rerankErr != nil {
+			reason := "reranker_error"
+			if errors.Is(rerankErr, context.DeadlineExceeded) {
+				reason = "deadline"
+			}
+			if s.RerankerRequired {
+				return nil, SearchRulesOutput{}, fmt.Errorf("required reranking failed: %s", reason)
+			}
+			s.countRerankerFallback(reason)
+			if s.Logger != nil {
+				s.Logger.Warn("reranking failed; using first-stage ordering", "reason", reason, "error", rerankErr)
+			}
+			rerankerCandidateCount = 0
+		} else {
+			rerankerApplied = true
+			rerankedResults := s.Repo.Engine.GroupCandidates(searchOptions, candidates)
+			rerankedAnswerability := decideAnswerability(rerankedResults)
+			if rerankedAnswerability.Status == searchindex.AnswerabilitySupported {
+				results = rerankedResults
+				answerability = rerankedAnswerability
+				rerankerAdopted = true
+			}
+		}
+	}
+	mode, vectorScored := refineSearchMode(queryExpansion != nil, queryVectorAdopted, baselineResults)
+	if rerankerAdopted {
+		mode += "+reranker"
+	} else if rerankerApplied {
+		mode += "+reranker-rejected"
+	}
+	if queryVectorAdopted && !vectorScored {
+		s.countEmbeddingFallback("no_vector_scores")
+	}
 	switch answerability.Status {
 	case searchindex.AnswerabilityInsufficient, searchindex.AnswerabilityUnknown:
 		results = nil
@@ -622,15 +701,66 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	}
 	s.addFormulaNotices(results)
 	return nil, SearchRulesOutput{
-		ReleaseGeneration: s.ReleaseGeneration,
-		Answerable:        answerability.Status == searchindex.AnswerabilitySupported,
-		Answerability:     answerability,
-		Mode:              mode,
-		ScoreNote:         "Scores are ranking signals for ordering results; they are not confidence probabilities. Answerable means this release returned direct evidence, not that a legal claim is true. Verify current Korean text at source_url for authoritative use.",
-		QueryExpansion:    queryExpansion,
-		Results:           s.searchResultDTOs(results),
+		ReleaseGeneration:      s.ReleaseGeneration,
+		Answerable:             answerability.Status == searchindex.AnswerabilitySupported,
+		Answerability:          answerability,
+		Mode:                   mode,
+		ScoreNote:              "BM25, vector, RRF, and reranker scores are ranking signals for ordering results; they are not confidence probabilities. Answerable means this release returned direct evidence, not that a legal claim is true. Verify current Korean text at source_url for authoritative use.",
+		QueryExpansion:         queryExpansion,
+		Results:                s.searchResultDTOs(results),
+		Candidates:             append([]searchindex.ChunkCandidate(nil), candidates.Chunks...),
+		RerankerElapsedMillis:  rerankerElapsedMillis,
+		RerankerCandidateCount: rerankerCandidateCount,
+		RerankerAdopted:        rerankerAdopted,
 	}, nil
 
+}
+
+func shouldRerankQuery(query, language string) bool {
+	if language == model.LanguageEnglish {
+		return false
+	}
+	if language == model.LanguageKorean {
+		return true
+	}
+	for _, char := range query {
+		if unicode.In(char, unicode.Hangul) {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldRerankDecision(query, language string, decision searchindex.AnswerabilityDecision) bool {
+	if !shouldRerankQuery(query, language) || decision.Status != searchindex.AnswerabilitySupported {
+		return false
+	}
+	features := decision.Features
+	return !features.MultiDocumentIntent && !features.QuantitativeClaimsPresent && !features.NormativeCounterEvidence &&
+		features.SelectedEvidenceAnchored && features.SelectedEvidenceMaxLexicalCoverage < 0.40
+}
+
+func (s *Service) rerankerPassages(candidates []searchindex.ChunkCandidate) []string {
+	passages := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		document := s.Repo.Documents[candidate.DocumentID]
+		fields := []string{"규정명: " + document.Title}
+		if document.Category != "" {
+			fields = append(fields, "분류: "+document.Category)
+		}
+		if candidate.ArticleID != "" {
+			fields = append(fields, "조문: "+candidate.ArticleID)
+		}
+		if len(candidate.HeadingPath) > 0 {
+			fields = append(fields, "경로: "+strings.Join(candidate.HeadingPath, " > "))
+		}
+		if candidate.AttachmentTitle != "" {
+			fields = append(fields, "첨부: "+candidate.AttachmentTitle)
+		}
+		fields = append(fields, "본문:\n"+candidate.Text)
+		passages = append(passages, strings.Join(fields, "\n"))
+	}
+	return passages
 }
 
 func validateQueryVector(embedder searchindex.Embedder, engine *searchindex.Engine, vector []float64) string {
@@ -1132,6 +1262,15 @@ func (s *Service) countEmbeddingFallback(reason string) {
 	}
 }
 
+func (s *Service) countRerankerFallback(reason string) {
+	if s == nil || s.Observer == nil {
+		return
+	}
+	if observer, ok := s.Observer.(rerankerFallbackObserver); ok {
+		observer.CountRerankerFallback(reason)
+	}
+}
+
 func (s *Service) documentDTO(doc model.Document) DocumentDTO {
 	return DocumentDTO{
 		ID:                    doc.ID,
@@ -1143,7 +1282,7 @@ func (s *Service) documentDTO(doc model.Document) DocumentDTO {
 		EffectiveDate:         doc.EffectiveDate,
 		PublishedDate:         doc.PublishedDate,
 		CollectedAt:           doc.CollectedAt,
-		ContentHash:           doc.ContentHash,
+		BodyHash:              doc.BodyHash,
 		Searchable:            doc.IsSearchable(),
 		QualityStatus:         doc.QualityStatus,
 		QualityCodes:          doc.EffectiveQualityCodes(),
@@ -1206,8 +1345,7 @@ func attachmentDTO(att model.Attachment, parent model.Document) AttachmentDTO {
 		OfficialSource:    officialSourceDTO(parent),
 		ParentDocumentID:  parent.ID,
 		ParentDocumentURI: parentURI,
-		ContentHash:       att.ContentHash,
-		Status:            att.Status,
+		ConversionStatus:  att.EffectiveConversionStatus(),
 		Searchable:        att.IsSearchable(),
 		Size:              att.Size,
 		QualityStatus:     att.QualityStatus,
@@ -1321,7 +1459,8 @@ func (s *Service) attachmentDTO(att model.Attachment) AttachmentDTO {
 func qualityNotice(att model.Attachment) *QualityNotice {
 	codes := att.EffectiveQualityCodes()
 	searchable := att.IsSearchable()
-	failed := !searchable || att.Status == model.AttachmentFailed || (att.Status != "" && att.Status != model.AttachmentConverted)
+	status := att.EffectiveConversionStatus()
+	failed := !searchable || status == model.AttachmentFailed || (status != "" && status != model.AttachmentConverted)
 	degraded := failed || qualityStatusWarns(att.QualityStatus) || len(codes) > 0
 	if !degraded {
 		return nil
@@ -1428,23 +1567,25 @@ func (s *Service) searchResultDTOs(results []searchindex.SearchResult) []SearchR
 				notice = documentQualityNotice(doc)
 			}
 			evidence = append(evidence, EvidenceMatchDTO{
-				ChunkID:          match.ChunkID,
-				ChunkIndex:       match.ChunkIndex,
-				Source:           match.Source,
-				AttachmentID:     match.AttachmentID,
-				AttachmentTitle:  match.AttachmentTitle,
-				AttachmentFile:   publicFileName(match.AttachmentFile),
-				AttachmentStatus: match.AttachmentStatus,
-				SourceURL:        sourceURL,
-				Searchable:       searchable,
-				Score:            match.Score,
-				BM25Score:        match.BM25Score,
-				VectorScore:      match.VectorScore,
-				LexicalCoverage:  match.LexicalCoverage,
-				Snippet:          match.Snippet,
-				ArticleID:        match.ArticleID,
-				HeadingPath:      append([]string(nil), match.HeadingPath...),
-				QualityNotice:    notice,
+				ChunkID:                    match.ChunkID,
+				ChunkIndex:                 match.ChunkIndex,
+				Source:                     match.Source,
+				AttachmentID:               match.AttachmentID,
+				AttachmentTitle:            match.AttachmentTitle,
+				AttachmentFile:             publicFileName(match.AttachmentFile),
+				AttachmentConversionStatus: match.AttachmentStatus,
+				SourceURL:                  sourceURL,
+				Searchable:                 searchable,
+				Score:                      match.Score,
+				BM25Score:                  match.BM25Score,
+				VectorScore:                match.VectorScore,
+				RerankerScore:              match.RerankerScore,
+				RerankerRank:               match.RerankerRank,
+				LexicalCoverage:            match.LexicalCoverage,
+				Snippet:                    match.Snippet,
+				ArticleID:                  match.ArticleID,
+				HeadingPath:                append([]string(nil), match.HeadingPath...),
+				QualityNotice:              notice,
 			})
 		}
 
@@ -1459,21 +1600,21 @@ func (s *Service) searchResultDTOs(results []searchindex.SearchResult) []SearchR
 				sourceURL = publicAttachmentSourceURL(att.Attachment.SourceURL, result.SourceURL)
 			}
 			matches = append(matches, AttachmentMatchDTO{
-				ID:            match.ID,
-				Title:         match.Title,
-				FileName:      publicFileName(match.FileName),
-				SourceURL:     sourceURL,
-				URI:           match.URI,
-				Status:        match.Status,
-				Searchable:    searchable,
-				ChunkID:       match.ChunkID,
-				ChunkIndex:    match.ChunkIndex,
-				ArticleID:     match.ArticleID,
-				HeadingPath:   append([]string(nil), match.HeadingPath...),
-				Score:         match.Score,
-				Snippet:       match.Snippet,
-				QualityNotice: notice,
-				FormulaNotice: match.FormulaNotice,
+				ID:               match.ID,
+				Title:            match.Title,
+				FileName:         publicFileName(match.FileName),
+				SourceURL:        sourceURL,
+				URI:              match.URI,
+				ConversionStatus: match.Status,
+				Searchable:       searchable,
+				ChunkID:          match.ChunkID,
+				ChunkIndex:       match.ChunkIndex,
+				ArticleID:        match.ArticleID,
+				HeadingPath:      append([]string(nil), match.HeadingPath...),
+				Score:            match.Score,
+				Snippet:          match.Snippet,
+				QualityNotice:    notice,
+				FormulaNotice:    match.FormulaNotice,
 			})
 		}
 		var resultNotice *QualityNotice
@@ -1502,12 +1643,8 @@ func (s *Service) searchResultDTOs(results []searchindex.SearchResult) []SearchR
 			Searchable:            true,
 			BM25Score:             result.BM25Score,
 			VectorScore:           result.VectorScore,
+			RerankerScore:         result.RerankerScore,
 			Snippet:               result.Snippet,
-			MatchedSource:         result.MatchedSource,
-			MatchedChunkID:        result.MatchedChunkID,
-			MatchedChunkIndex:     result.MatchedChunkIndex,
-			ArticleID:             result.ArticleID,
-			HeadingPath:           append([]string(nil), result.HeadingPath...),
 			AttachmentMatches:     matches,
 			EvidenceMatches:       evidence,
 			FormulaNotice:         result.FormulaNotice,
@@ -1547,20 +1684,20 @@ func (s *Service) chunkDTOs(chunks []searchindex.ChunkContext, maxChars int) []C
 			searchable = doc.IsSearchable()
 		}
 		out = append(out, ChunkDTO{
-			ID:               chunk.ID,
-			DocumentID:       chunk.DocumentID,
-			Index:            chunk.Index,
-			Source:           chunk.Source,
-			URI:              chunk.URI,
-			AttachmentID:     chunk.AttachmentID,
-			AttachmentTitle:  chunk.AttachmentTitle,
-			AttachmentFile:   chunk.AttachmentFile,
-			AttachmentStatus: chunk.AttachmentStatus,
-			ArticleID:        chunk.ArticleID,
-			HeadingPath:      append([]string(nil), chunk.HeadingPath...),
-			Searchable:       searchable,
-			QualityNotice:    notice,
-			Text:             text,
+			ID:                         chunk.ID,
+			DocumentID:                 chunk.DocumentID,
+			Index:                      chunk.Index,
+			Source:                     chunk.Source,
+			URI:                        chunk.URI,
+			AttachmentID:               chunk.AttachmentID,
+			AttachmentTitle:            chunk.AttachmentTitle,
+			AttachmentFile:             chunk.AttachmentFile,
+			AttachmentConversionStatus: chunk.AttachmentStatus,
+			ArticleID:                  chunk.ArticleID,
+			HeadingPath:                append([]string(nil), chunk.HeadingPath...),
+			Searchable:                 searchable,
+			QualityNotice:              notice,
+			Text:                       text,
 		})
 	}
 	return out

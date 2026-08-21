@@ -258,6 +258,9 @@ entries:
       - 시장가격과 순자산가치
       - NAV에서 너무 벌어
       - LP 호가 의무
+      - 자산가치와
+      - 어긋나지 않게
+      - 유동성 호가
     expansions:
       - ETF
       - 상장지수펀드
@@ -304,6 +307,13 @@ entries:
       - prior consultation
       - 사전 햡의
       - 아무 협의도 하지 않아도
+      - 상장 접수하기 전
+      - 상장예심
+      - 원서 내기 전
+      - 절차랑 타이밍
+      - 입성 심사
+      - 진행 방법을 조율
+      - 신청 전에 거래소
     expansions:
       - 사전협의
       - 사전협의 의무
@@ -320,7 +330,15 @@ entries:
       - 증거금을 자기 자금
       - 위탁증거금을 아무 용도
       - 위탁증거금을 자유롭게
+      - 위탁증거금으로
       - use customer margin
+      - 고객 담보금
+      - posted margin
+      - 고객에게 받은 외화
+      - unrelated company costs
+      - restriction on use of customer margins
+      - 고객 예치 외화증권
+      - 직원 급여로 전용
     expansions:
       - 위탁증거금
       - 사용제한
@@ -359,6 +377,10 @@ entries:
       - intraday clearing margin due
       - 장중에 추가 증거금
       - 통보를 받으면 언제까지
+      - 장중 추가 청산담보
+      - 낮 두 시
+      - 증거금 추가 통지
+      - 몇 시까지 채워
     expansions:
       - 일중청산위탁증거금
       - 예탁시한
@@ -394,6 +416,12 @@ entries:
       - UTI
       - 거래고유식별기호
       - UTI를 적으면
+      - 고유 식별코드
+      - 거래보고 식별코드
+      - 유일 식별값
+      - 거래마다 붙이는
+      - 거래 식별기호
+      - 보고 건을 구별
     expansions:
       - UTI의 사용의무
       - 거래정보를 보고할 때
@@ -412,6 +440,8 @@ entries:
       - 우회해서 제공
       - 우회 제공
       - 간접 제공
+      - 간접 공정공시
+      - 간접 전달 금지
     expansions:
       - 공정공시 대상정보
       - 우회제공 금지
@@ -448,11 +478,43 @@ entries:
       - 닷새보다 적
       - 5일보다 적
       - 시장조성일수가 닷새
+      - 시장조성을 나흘
     expansions:
       - 시장조성일수가 5일 미만
       - 평가대상에서 제외
       - 기간의무이행률
       - 의무충족일수
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: market_maker_score_cap
+    canonical: 상품별 평가항목 점수
+    aliases:
+      - 실적비율과 10
+      - 더 작은 값을 점수
+      - 거래실적 평가점수
+    expansions:
+      - 상품별 평가항목 점수
+      - min 10
+      - 거래실적 평가기준
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: short_sale_uptick_rule
+    canonical: 차입공매도호가의 가격제한
+    aliases:
+      - 업틱룰
+      - 공매도 가격 하락
+      - 가격을 아래로 찍는
+      - 공매도 가격제한
+    expansions:
+      - 차입공매도호가의 가격제한
+      - 업틱룰 예외
+      - 공매도 제도 개정예고
     source_urls:
       - https://rule.krx.co.kr/out/index.do
     confidence: high

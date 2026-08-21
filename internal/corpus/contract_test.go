@@ -15,28 +15,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestLoadAcceptsLegacyDocumentContentHash(t *testing.T) {
-	root := t.TempDir()
-	doc := contractDocument("legacy", "Legacy Rule")
-	doc.ContentHash = model.HashText(doc.Title + "\n" + doc.Body)
-	writeContractMarkdown(t, root, doc, false)
-	if _, err := Load(root); err != nil {
-		t.Fatalf("Load legacy corpus: %v", err)
-	}
-}
-
-func TestLoadRejectsStaleLegacyHashEvenWithV2BodyHash(t *testing.T) {
-	root := t.TempDir()
-	doc := contractDocument("v2", "V2 Rule")
-	doc.SchemaVersion = IndexSourceSchemaVersion
-	doc.ContentHash = model.HashText("stale legacy payload")
-	doc.BodyHash = model.HashText(doc.Body)
-	writeContractMarkdown(t, root, doc, true)
-	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "content_hash_mismatch") {
-		t.Fatalf("Load error = %v, want content_hash_mismatch", err)
-	}
-}
-
 func TestLoadRejectsUnsafePublicSourceAndFileMetadata(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -48,10 +26,10 @@ func TestLoadRejectsUnsafePublicSourceAndFileMetadata(t *testing.T) {
 		{name: "credential URL", mutate: func(doc *model.Document) { doc.SourceURL = "https://user:pass@example.test/rule" }, want: "without credentials"},
 		{name: "document path filename", mutate: func(doc *model.Document) { doc.FileName = "../../private/source.html" }, want: "portable basename"},
 		{name: "attachment local URL", mutate: func(doc *model.Document) {
-			doc.Attachments = []model.Attachment{{ID: "unsafe-url", Status: model.AttachmentPending, SourceURL: "/home/private/file"}}
+			doc.Attachments = []model.Attachment{{ID: "unsafe-url", ConversionStatus: model.AttachmentPending, SourceURL: "/home/private/file"}}
 		}, want: "supported KRX endpoint"},
 		{name: "attachment path filename", mutate: func(doc *model.Document) {
-			doc.Attachments = []model.Attachment{{ID: "unsafe-file", Status: model.AttachmentPending, FileName: `C:\private\file.hwp`}}
+			doc.Attachments = []model.Attachment{{ID: "unsafe-file", ConversionStatus: model.AttachmentPending, FileName: `C:\private\file.hwp`}}
 		}, want: "portable basename"},
 	}
 	for _, test := range tests {
@@ -59,7 +37,7 @@ func TestLoadRejectsUnsafePublicSourceAndFileMetadata(t *testing.T) {
 			root := t.TempDir()
 			doc := contractDocument("public-metadata", "Public Metadata Rule")
 			test.mutate(&doc)
-			writeContractMarkdown(t, root, doc, true)
+			writeContractMarkdown(t, root, doc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Load error = %v, want %q", err, test.want)
 			}
@@ -67,13 +45,12 @@ func TestLoadRejectsUnsafePublicSourceAndFileMetadata(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsV2BodyHashWithoutLegacyHash(t *testing.T) {
+func TestLoadAcceptsCurrentBodyHash(t *testing.T) {
 	root := t.TempDir()
 	doc := contractDocument("v2", "V2 Rule")
 	doc.SchemaVersion = IndexSourceSchemaVersion
-	doc.ContentHash = ""
 	doc.BodyHash = model.HashText(doc.Body)
-	writeContractMarkdown(t, root, doc, true)
+	writeContractMarkdown(t, root, doc)
 	if _, err := Load(root); err != nil {
 		t.Fatalf("Load v2 corpus: %v", err)
 	}
@@ -93,11 +70,11 @@ func TestLoadAllowsEmptyNonSearchableBodyWithValidatedAttachmentFallback(t *test
 	attachmentText := "검색 가능한 PDF 첨부 본문"
 	doc.Attachments = []model.Attachment{{
 		ID: "fallback-pdf", Title: "개정안 PDF", FileName: "fallback.pdf",
-		Status: model.AttachmentConverted, Searchable: &searchableAttachment,
+		ConversionStatus: model.AttachmentConverted, Searchable: &searchableAttachment,
 		TextPath: attachmentRelativePath(doc, "fallback.md"), ConvertedTextHash: model.HashText(attachmentText),
 	}}
 	writeContractAttachment(t, root, doc, "fallback.md", attachmentText)
-	writeContractMarkdown(t, root, doc, true)
+	writeContractMarkdown(t, root, doc)
 	loaded, err := Load(root)
 	if err != nil {
 		t.Fatalf("Load attachment fallback: %v", err)
@@ -113,7 +90,7 @@ func TestLoadRejectsEmptyBodyWithoutCompleteAttachmentFallbackContract(t *testin
 		mutate func(*model.Document)
 		want   string
 	}{
-		{name: "searchable omitted", mutate: func(doc *model.Document) { doc.Searchable = nil }, want: "explicit searchable=false"},
+		{name: "searchable omitted", mutate: func(doc *model.Document) { doc.Searchable = nil }, want: "searchable is required"},
 		{name: "searchable true", mutate: func(doc *model.Document) { value := true; doc.Searchable = &value }, want: "explicit searchable=false"},
 		{name: "quality not warn", mutate: func(doc *model.Document) { doc.QualityStatus = "ok" }, want: "quality_status=warn"},
 		{name: "quality code missing", mutate: func(doc *model.Document) { doc.QualityCodes = nil }, want: "document_empty_body quality code"},
@@ -135,14 +112,14 @@ func TestLoadRejectsEmptyBodyWithoutCompleteAttachmentFallbackContract(t *testin
 			doc.QualityCodes = []string{"document_empty_body"}
 			attachmentText := "fallback text"
 			doc.Attachments = []model.Attachment{{
-				ID: "fallback", Status: model.AttachmentConverted, Searchable: &attachmentSearchable,
+				ID: "fallback", ConversionStatus: model.AttachmentConverted, Searchable: &attachmentSearchable,
 				TextPath: attachmentRelativePath(doc, "fallback.md"), ConvertedTextHash: model.HashText(attachmentText),
 			}}
 			test.mutate(&doc)
 			if len(doc.Attachments) > 0 {
 				writeContractAttachment(t, root, doc, "fallback.md", attachmentText)
 			}
-			writeContractMarkdown(t, root, doc, true)
+			writeContractMarkdown(t, root, doc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Load error = %v, want %q", err, test.want)
 			}
@@ -172,7 +149,7 @@ func TestLoadValidatesAndPopulatesSanitizedSourceProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(root, requestPath), string(requestJSON))
-	writeContractMarkdown(t, root, doc, true)
+	writeContractMarkdown(t, root, doc)
 
 	loaded, err := Load(root)
 	if err != nil {
@@ -255,7 +232,7 @@ func TestLoadRejectsUnsafeOrMalformedSourceRequestDescriptors(t *testing.T) {
 			if err := os.WriteFile(requestFile, test.request(sourceHash), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			writeContractMarkdown(t, root, doc, true)
+			writeContractMarkdown(t, root, doc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Load error = %v, want %q", err, test.want)
 			}
@@ -274,7 +251,7 @@ func TestLoadRejectsSourceContentHashMismatchAndOversizedRequest(t *testing.T) {
 		doc.SourceRequestPath = requestPath
 		writeFile(t, filepath.Join(root, contentPath), "actual")
 		writeFile(t, filepath.Join(root, requestPath), `{}`)
-		writeContractMarkdown(t, root, doc, true)
+		writeContractMarkdown(t, root, doc)
 		if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "source_content_hash_mismatch") {
 			t.Fatalf("Load error = %v", err)
 		}
@@ -290,7 +267,7 @@ func TestLoadRejectsSourceContentHashMismatchAndOversizedRequest(t *testing.T) {
 		doc.SourceRequestPath = requestPath
 		writeFile(t, filepath.Join(root, contentPath), source)
 		writeFile(t, filepath.Join(root, requestPath), strings.Repeat(" ", maxSourceRequestBytes+1))
-		writeContractMarkdown(t, root, doc, true)
+		writeContractMarkdown(t, root, doc)
 		if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "byte limit") {
 			t.Fatalf("Load error = %v", err)
 		}
@@ -300,7 +277,7 @@ func TestLoadRejectsSourceContentHashMismatchAndOversizedRequest(t *testing.T) {
 func TestLoadRejectsOversizedCorpusTextInputs(t *testing.T) {
 	t.Run("document markdown", func(t *testing.T) {
 		root := t.TempDir()
-		path := writeContractMarkdown(t, root, contractDocument("large-document", "Large Document"), true)
+		path := writeContractMarkdown(t, root, contractDocument("large-document", "Large Document"))
 		truncateFile(t, path, maxDocumentMarkdownBytes+1)
 		if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "byte limit") {
 			t.Fatalf("Load error = %v, want document byte limit", err)
@@ -309,7 +286,7 @@ func TestLoadRejectsOversizedCorpusTextInputs(t *testing.T) {
 
 	t.Run("release manifest", func(t *testing.T) {
 		root := t.TempDir()
-		writeContractMarkdown(t, root, contractDocument("large-manifest", "Large Manifest"), true)
+		writeContractMarkdown(t, root, contractDocument("large-manifest", "Large Manifest"))
 		manifestPath := filepath.Join(root, releaseManifestFile)
 		writeFile(t, manifestPath, "{}")
 		truncateFile(t, manifestPath, maxReleaseManifestBytes+1)
@@ -325,7 +302,7 @@ func TestLoadRejectsOversizedCorpusTextInputs(t *testing.T) {
 		path := filepath.Join(root, doc.TextPath)
 		writeFile(t, path, doc.Body)
 		truncateFile(t, path, maxDocumentTextBytes+1)
-		writeContractMarkdown(t, root, doc, true)
+		writeContractMarkdown(t, root, doc)
 		if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "byte limit") {
 			t.Fatalf("Load error = %v, want document text byte limit", err)
 		}
@@ -337,13 +314,13 @@ func TestLoadRejectsOversizedCorpusTextInputs(t *testing.T) {
 		textPath := attachmentRelativePath(doc, "attachment.md")
 		doc.Attachments = []model.Attachment{{
 			ID: "large-attachment", Title: "Large Attachment", FileName: "attachment.hwp",
-			Status: model.AttachmentConverted, TextPath: textPath,
+			ConversionStatus: model.AttachmentConverted, TextPath: textPath,
 			ConvertedTextHash: model.HashText("placeholder"),
 		}}
 		path := filepath.Join(root, textPath)
 		writeFile(t, path, "placeholder")
 		truncateFile(t, path, maxAttachmentTextBytes+1)
-		writeContractMarkdown(t, root, doc, true)
+		writeContractMarkdown(t, root, doc)
 		if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "byte limit") {
 			t.Fatalf("Load error = %v, want attachment text byte limit", err)
 		}
@@ -400,7 +377,7 @@ func TestLoadRejectsUnsafeSourceProvenancePaths(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeFile(t, filepath.Join(root, requestPath), string(request))
-			writeContractMarkdown(t, root, doc, true)
+			writeContractMarkdown(t, root, doc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Load error = %v, want %q", err, test.want)
 			}
@@ -413,13 +390,14 @@ func TestLoadRejectsDuplicateAttachmentID(t *testing.T) {
 	for i, title := range []string{"First Rule", "Second Rule"} {
 		doc := contractDocument(string(rune('a'+i)), title)
 		doc.Attachments = []model.Attachment{{
-			ID:       "shared-attachment",
-			Title:    "attachment",
-			Status:   model.AttachmentConverted,
-			TextPath: attachmentRelativePath(doc, "attachment.md"),
+			ID:                "shared-attachment",
+			Title:             "attachment",
+			ConversionStatus:  model.AttachmentConverted,
+			TextPath:          attachmentRelativePath(doc, "attachment.md"),
+			ConvertedTextHash: model.HashText("converted text"),
 		}}
 		writeContractAttachment(t, root, doc, "attachment.md", "converted text")
-		writeContractMarkdown(t, root, doc, true)
+		writeContractMarkdown(t, root, doc)
 	}
 	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "duplicate attachment id") {
 		t.Fatalf("Load error = %v, want duplicate attachment id", err)
@@ -429,16 +407,17 @@ func TestLoadRejectsDuplicateAttachmentID(t *testing.T) {
 func TestLoadRejectsDocumentAttachmentIDCollision(t *testing.T) {
 	root := t.TempDir()
 	first := contractDocument("shared-id", "First Rule")
-	writeContractMarkdown(t, root, first, true)
+	writeContractMarkdown(t, root, first)
 	second := contractDocument("second", "Second Rule")
 	second.Attachments = []model.Attachment{{
-		ID:       first.ID,
-		Title:    "attachment",
-		Status:   model.AttachmentConverted,
-		TextPath: attachmentRelativePath(second, "attachment.md"),
+		ID:                first.ID,
+		Title:             "attachment",
+		ConversionStatus:  model.AttachmentConverted,
+		TextPath:          attachmentRelativePath(second, "attachment.md"),
+		ConvertedTextHash: model.HashText("converted text"),
 	}}
 	writeContractAttachment(t, root, second, "attachment.md", "converted text")
-	writeContractMarkdown(t, root, second, true)
+	writeContractMarkdown(t, root, second)
 	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "duplicate attachment id") {
 		t.Fatalf("Load error = %v, want global duplicate ID", err)
 	}
@@ -460,9 +439,11 @@ func TestLoadRejectsInvalidStatusAndQualityCode(t *testing.T) {
 		{
 			name: "failed quality searchable attachment",
 			mutate: func(doc *model.Document) {
+				searchable := true
 				doc.Attachments = []model.Attachment{{
-					ID: "quality-fail", Status: model.AttachmentConverted, QualityStatus: "fail",
-					TextPath: attachmentRelativePath(*doc, "quality.md"),
+					ID: "quality-fail", ConversionStatus: model.AttachmentConverted, QualityStatus: "fail",
+					Searchable: &searchable, TextPath: attachmentRelativePath(*doc, "quality.md"),
+					ConvertedTextHash: model.HashText("quality text"),
 				}}
 			},
 			want: "invalid_status_combination",
@@ -483,7 +464,7 @@ func TestLoadRejectsInvalidStatusAndQualityCode(t *testing.T) {
 			if len(doc.Attachments) > 0 {
 				writeContractAttachment(t, root, doc, "quality.md", "quality text")
 			}
-			writeContractMarkdown(t, root, doc, true)
+			writeContractMarkdown(t, root, doc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Load error = %v, want %q", err, tc.want)
 			}
@@ -497,7 +478,7 @@ func TestLoadRejectsMissingOrFailedDocumentPreservation(t *testing.T) {
 			root := t.TempDir()
 			doc := contractDocument("preservation", "Preservation Rule")
 			doc.PreservationStatus = status
-			writeContractMarkdown(t, root, doc, true)
+			writeContractMarkdown(t, root, doc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "required_source_missing") {
 				t.Fatalf("Load error = %v, want required_source_missing", err)
 			}
@@ -509,7 +490,7 @@ func TestReleaseManifestVerification(t *testing.T) {
 	root := t.TempDir()
 	doc := contractDocument("release", "Release Rule")
 	doc.SchemaVersion = IndexSourceSchemaVersion
-	path := writeContractMarkdown(t, root, doc, true)
+	path := writeContractMarkdown(t, root, doc)
 	loaded, err := Load(root)
 	if err != nil {
 		t.Fatal(err)
@@ -605,7 +586,7 @@ func TestStrictManifestParityAllowsCleanedRefreshFailureFields(t *testing.T) {
 		ID:                     "refresh-parity-attachment",
 		Title:                  "Refresh Parity Attachment",
 		FileName:               "attachment.pdf",
-		Status:                 model.AttachmentConverted,
+		ConversionStatus:       model.AttachmentConverted,
 		PreservationStatus:     "preserved",
 		TextPath:               attachmentRelativePath(doc, "attachment.md"),
 		ConvertedTextHash:      model.HashText(attachmentText),
@@ -613,7 +594,7 @@ func TestStrictManifestParityAllowsCleanedRefreshFailureFields(t *testing.T) {
 		ConvertedNonSpaceChars: int64(len(strings.ReplaceAll(attachmentText, " ", ""))),
 	}}
 	writeContractAttachment(t, root, doc, "attachment.md", attachmentText)
-	path := writeContractMarkdown(t, root, doc, true)
+	path := writeContractMarkdown(t, root, doc)
 	frontmatter, err := readFrontmatterMapping(path)
 	if err != nil {
 		t.Fatal(err)
@@ -632,7 +613,7 @@ func TestStrictManifestParityAllowsCleanedRefreshFailureFields(t *testing.T) {
 
 	loaded, err := Load(root)
 	if err != nil {
-		t.Fatalf("Load legacy frontmatter: %v", err)
+		t.Fatalf("Load frontmatter with operational refresh metadata: %v", err)
 	}
 	indexHash, err := IndexSourceHash(loaded.Documents, loaded.AttachmentTexts)
 	if err != nil {
@@ -724,76 +705,9 @@ func TestReleaseHashIgnoresRefreshFailureOperationalFieldsRecursively(t *testing
 	}
 }
 
-func TestStrictLoadAcceptsLegacyV2RefreshFailureReleaseHash(t *testing.T) {
-	root := t.TempDir()
-	doc := contractDocument("legacy-release", "Legacy Release Rule")
-	doc.SchemaVersion = IndexSourceSchemaVersion
-	path := writeContractMarkdown(t, root, doc, true)
-	loaded, err := Load(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	indexHash, err := IndexSourceHash(loaded.Documents, loaded.AttachmentTexts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	frontmatter, err := readFrontmatterMapping(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	relativePath, err := filepath.Rel(root, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifestDocument := make(map[string]any, len(frontmatter)+1)
-	for key, value := range frontmatter {
-		manifestDocument[key] = value
-	}
-	manifestDocument["path"] = filepath.ToSlash(relativePath)
-	refreshRecord := map[string]any{
-		"id":                     "historical-refresh",
-		"status":                 "converted",
-		"last_refresh_error":     "temporary upstream failure",
-		"last_refresh_failed_at": "2026-07-01T00:00:00Z",
-	}
-	payload := map[string]any{
-		"schema_version":    IndexSourceSchemaVersion,
-		"version":           "legacy-v2",
-		"generated_at":      "2026-07-01T00:00:00Z",
-		"release_profile":   map[string]any{"version": 1, "default": "strict", "allowed_failure_ids": []any{}},
-		"documents":         []any{manifestDocument},
-		"attachment_log":    []any{refreshRecord},
-		"index_source_hash": indexHash,
-	}
-	legacyHash := legacyRefreshReleaseHashFixture(t, payload)
-	payload["release_hash"] = legacyHash
-	currentHash, err := releaseHash(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if currentHash == legacyHash {
-		t.Fatalf("current release hash still includes legacy refresh failure fields: %s", currentHash)
-	}
-	writeManifestFixture(t, root, payload)
-
-	verified, err := LoadWithOptions(root, LoadOptions{RequireManifest: true})
-	if err != nil {
-		t.Fatalf("LoadWithOptions legacy v2 release: %v", err)
-	}
-	if verified.ReleaseHash != legacyHash {
-		t.Fatalf("release hash = %q, want declared legacy hash %q", verified.ReleaseHash, legacyHash)
-	}
-
-	refreshRecord["status"] = "failed"
-	writeManifestFixture(t, root, payload)
-	if _, err := LoadWithOptions(root, LoadOptions{RequireManifest: true}); err == nil || !strings.Contains(err.Error(), "release_hash_mismatch") {
-		t.Fatalf("substantively tampered legacy release error = %v, want release_hash_mismatch", err)
-	}
-}
-
 func TestReleaseModeRequiresManifest(t *testing.T) {
 	root := t.TempDir()
-	writeContractMarkdown(t, root, contractDocument("required", "Required Manifest Rule"), true)
+	writeContractMarkdown(t, root, contractDocument("required", "Required Manifest Rule"))
 	if _, err := LoadWithOptions(root, LoadOptions{RequireManifest: true}); err == nil || !strings.Contains(err.Error(), "manifest") {
 		t.Fatalf("LoadWithOptions error = %v, want required manifest", err)
 	}
@@ -803,7 +717,7 @@ func TestStrictReleaseProfileValidatesFailureAllowlist(t *testing.T) {
 	searchableFalse := false
 	failedPreserved := model.Attachment{
 		ID:                 "failed-preserved",
-		Status:             model.AttachmentFailed,
+		ConversionStatus:   model.AttachmentFailed,
 		PreservationStatus: "preserved",
 		Searchable:         &searchableFalse,
 	}
@@ -829,9 +743,9 @@ func TestStrictReleaseProfileValidatesFailureAllowlist(t *testing.T) {
 		{name: "duplicate", docs: documentWith(failedPreserved), ids: []any{"failed-preserved", "failed-preserved"}, want: "duplicate"},
 		{name: "unknown", docs: documentWith(failedPreserved), ids: []any{"unknown"}, want: "unknown attachment"},
 		{name: "failed omitted", docs: documentWith(failedPreserved), ids: []any{}, want: "not in allowed_failure_ids"},
-		{name: "not failed", docs: documentWith(model.Attachment{ID: "converted", Status: model.AttachmentConverted, PreservationStatus: "preserved", Searchable: &searchableFalse}), ids: []any{"converted"}, want: "must be failed, preserved"},
-		{name: "not preserved", docs: documentWith(model.Attachment{ID: "failed", Status: model.AttachmentFailed, PreservationStatus: "failed", Searchable: &searchableFalse}), ids: []any{"failed"}, want: "must be failed, preserved"},
-		{name: "searchable", docs: documentWith(model.Attachment{ID: "failed", Status: model.AttachmentFailed, PreservationStatus: "preserved"}), ids: []any{"failed"}, want: "searchable=false"},
+		{name: "not failed", docs: documentWith(model.Attachment{ID: "converted", ConversionStatus: model.AttachmentConverted, PreservationStatus: "preserved", Searchable: &searchableFalse}), ids: []any{"converted"}, want: "must be failed, preserved"},
+		{name: "not preserved", docs: documentWith(model.Attachment{ID: "failed", ConversionStatus: model.AttachmentFailed, PreservationStatus: "failed", Searchable: &searchableFalse}), ids: []any{"failed"}, want: "must be failed, preserved"},
+		{name: "searchable", docs: documentWith(model.Attachment{ID: "failed", ConversionStatus: model.AttachmentFailed, PreservationStatus: "preserved"}), ids: []any{"failed"}, want: "searchable=false"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -850,12 +764,12 @@ func TestLoadRejectsMissingConvertedText(t *testing.T) {
 	root := t.TempDir()
 	doc := contractDocument("missing", "Missing Text Rule")
 	doc.Attachments = []model.Attachment{{
-		ID:       "missing-attachment",
-		Title:    "missing",
-		Status:   model.AttachmentConverted,
-		TextPath: attachmentRelativePath(doc, "missing.md"),
+		ID:               "missing-attachment",
+		Title:            "missing",
+		ConversionStatus: model.AttachmentConverted,
+		TextPath:         attachmentRelativePath(doc, "missing.md"),
 	}}
-	writeContractMarkdown(t, root, doc, true)
+	writeContractMarkdown(t, root, doc)
 	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "text_path") {
 		t.Fatalf("Load error = %v, want missing converted text", err)
 	}
@@ -911,15 +825,15 @@ func TestLoadRejectsUnsafeAttachmentPaths(t *testing.T) {
 			doc := contractDocument("unsafe", "Unsafe Rule")
 			path := tc.path(root, doc)
 			doc.Attachments = []model.Attachment{{
-				ID:       "unsafe-attachment",
-				Title:    "unsafe",
-				Status:   model.AttachmentConverted,
-				TextPath: path,
+				ID:               "unsafe-attachment",
+				Title:            "unsafe",
+				ConversionStatus: model.AttachmentConverted,
+				TextPath:         path,
 			}}
 			if tc.prepare != nil {
 				tc.prepare(t, root, doc, path)
 			}
-			writeContractMarkdown(t, root, doc, true)
+			writeContractMarkdown(t, root, doc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Load error = %v, want %q", err, tc.want)
 			}
@@ -943,7 +857,7 @@ func TestLoadValidatesDocumentAndAttachmentAssets(t *testing.T) {
 	assetSearchable := false
 	doc.Attachments = []model.Attachment{{
 		ID: "asset-attachment", Title: "Asset Attachment", FileName: "attachment.hwp",
-		Status: model.AttachmentConverted, Searchable: &searchable,
+		ConversionStatus: model.AttachmentConverted, Searchable: &searchable,
 		TextPath: attachmentRelativePath(doc, "attachment.md"), ConvertedTextHash: model.HashText(attachmentText),
 		Assets: []model.Asset{{
 			ID: "attachment-image", SourceKind: assetSourceHWPBinData,
@@ -956,7 +870,7 @@ func TestLoadValidatesDocumentAndAttachmentAssets(t *testing.T) {
 	writeBytes(t, filepath.Join(root, documentAsset.Path), documentImage)
 	writeBytes(t, filepath.Join(root, attachmentPath), attachmentImage)
 	writeContractAttachment(t, root, doc, "attachment.md", attachmentText)
-	writeContractMarkdown(t, root, doc, true)
+	writeContractMarkdown(t, root, doc)
 
 	loaded, err := Load(root)
 	if err != nil {
@@ -1068,7 +982,7 @@ func TestLoadRejectsInvalidAssetContracts(t *testing.T) {
 			} else if asset.Path != "" && !filepath.IsAbs(asset.Path) && !strings.Contains(filepath.ToSlash(asset.Path), "../") {
 				writeBytes(t, filepath.Join(root, asset.Path), data)
 			}
-			writeContractMarkdown(t, root, doc, true)
+			writeContractMarkdown(t, root, doc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Load error = %v, want %q", err, test.want)
 			}
@@ -1101,7 +1015,7 @@ func TestLoadRejectsInvalidHWPAssetSource(t *testing.T) {
 			}
 			doc.Assets = []model.Asset{asset}
 			writeBytes(t, filepath.Join(root, asset.Path), data)
-			writeContractMarkdown(t, root, doc, true)
+			writeContractMarkdown(t, root, doc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Load error = %v, want %q", err, test.want)
 			}
@@ -1167,7 +1081,6 @@ func TestSharedCorpusContractV2Fixture(t *testing.T) {
 		Expected struct {
 			CanonicalBody            string `json:"canonical_body"`
 			BodyHash                 string `json:"body_hash"`
-			LegacyContentHash        string `json:"legacy_content_hash"`
 			IndexSourceCanonicalJSON string `json:"index_source_canonical_json"`
 			IndexSourceHash          string `json:"index_source_hash"`
 		} `json:"expected"`
@@ -1195,9 +1108,6 @@ func TestSharedCorpusContractV2Fixture(t *testing.T) {
 	}
 	if got := model.HashText(doc.Body); got != fixture.Expected.BodyHash {
 		t.Fatalf("body hash = %s, want %s", got, fixture.Expected.BodyHash)
-	}
-	if got := model.HashText(doc.Title + "\n" + doc.Body); got != fixture.Expected.LegacyContentHash {
-		t.Fatalf("legacy content hash = %s, want %s", got, fixture.Expected.LegacyContentHash)
 	}
 	attachmentTexts := map[string]string{}
 	for _, attachment := range textFixture.Documents[0].Attachments {
@@ -1228,7 +1138,7 @@ func TestSharedCorpusContractV2Fixture(t *testing.T) {
 	validAssetDocument := contractDocument("rule-1", "Café 규정")
 	validAssetDocument.Assets = []model.Asset{doc.Assets[0]}
 	writeBytes(t, filepath.Join(validAssetRoot, doc.Assets[0].Path), assetBytes)
-	writeContractMarkdown(t, validAssetRoot, validAssetDocument, true)
+	writeContractMarkdown(t, validAssetRoot, validAssetDocument)
 	if _, err := Load(validAssetRoot); err != nil {
 		t.Fatalf("Load shared valid asset fixture: %v", err)
 	}
@@ -1269,7 +1179,7 @@ func TestSharedCorpusContractV2Fixture(t *testing.T) {
 			if !strings.Contains(filepath.ToSlash(asset.Path), "../") {
 				writeBytes(t, filepath.Join(root, asset.Path), assetBytes)
 			}
-			writeContractMarkdown(t, root, testDoc, true)
+			writeContractMarkdown(t, root, testDoc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), negative.ExpectedError) {
 				t.Fatalf("Load shared asset negative error = %v, want %q", err, negative.ExpectedError)
 			}
@@ -1283,7 +1193,7 @@ func TestSharedCorpusContractV2Fixture(t *testing.T) {
 			root := t.TempDir()
 			doc := contractDocument("fixture-negative", "Fixture Negative Rule")
 			doc.PreservationStatus = negative.Overrides.PreservationStatus
-			writeContractMarkdown(t, root, doc, true)
+			writeContractMarkdown(t, root, doc)
 			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), negative.ExpectedError) {
 				t.Fatalf("Load error = %v, want %q", err, negative.ExpectedError)
 			}
@@ -1293,19 +1203,25 @@ func TestSharedCorpusContractV2Fixture(t *testing.T) {
 
 func contractDocument(id, title string) model.Document {
 	body := "Rule body"
+	searchable := true
 	return model.Document{
-		ID:           id,
-		Title:        title,
-		SourceURL:    "https://example.test/" + id,
-		CollectedAt:  time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC),
-		DocumentType: model.DocumentTypeRule,
-		Language:     model.LanguageKorean,
-		Body:         body,
-		BodyHash:     model.HashText(body),
+		SchemaVersion:      IndexSourceSchemaVersion,
+		ID:                 id,
+		Title:              title,
+		SourceURL:          "https://example.test/" + id,
+		CollectedAt:        time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC),
+		DocumentType:       model.DocumentTypeRule,
+		Language:           model.LanguageKorean,
+		Body:               body,
+		BodyHash:           model.HashText(body),
+		ConversionStatus:   string(model.AttachmentConverted),
+		PreservationStatus: "preserved",
+		Searchable:         &searchable,
+		QualityStatus:      "ok",
 	}
 }
 
-func writeContractMarkdown(t *testing.T, root string, doc model.Document, v2 bool) string {
+func writeContractMarkdown(t *testing.T, root string, doc model.Document) string {
 	t.Helper()
 	path := filepath.Join(root, doc.Language, "rules", model.Slug(doc.Title), "index.md")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -1314,8 +1230,17 @@ func writeContractMarkdown(t *testing.T, root string, doc model.Document, v2 boo
 	meta := doc
 	meta.Body = ""
 	meta.Path = ""
-	if !v2 {
-		meta.BodyHash = ""
+	for index := range meta.Attachments {
+		attachment := &meta.Attachments[index]
+		if attachment.PreservationStatus == "" {
+			attachment.PreservationStatus = "preserved"
+		}
+		if attachment.Searchable == nil {
+			attachment.Searchable = boolPointer(false)
+		}
+		if attachment.QualityStatus == "" {
+			attachment.QualityStatus = "ok"
+		}
 	}
 	var out bytes.Buffer
 	out.WriteString("---\n")
@@ -1442,41 +1367,4 @@ func refreshReleaseHash(t *testing.T, payload map[string]any) {
 		t.Fatal(err)
 	}
 	payload["release_hash"] = hash
-}
-
-func legacyRefreshReleaseHashFixture(t *testing.T, payload map[string]any) string {
-	t.Helper()
-	legacyOperationalFields := map[string]struct{}{
-		"release_hash":         {},
-		"generated_at":         {},
-		"last_checked_at":      {},
-		"source_response_hash": {},
-	}
-	var scrub func(any) any
-	scrub = func(value any) any {
-		switch typed := value.(type) {
-		case map[string]any:
-			out := make(map[string]any, len(typed))
-			for key, item := range typed {
-				if _, excluded := legacyOperationalFields[key]; excluded {
-					continue
-				}
-				out[key] = scrub(item)
-			}
-			return out
-		case []any:
-			out := make([]any, len(typed))
-			for i, item := range typed {
-				out[i] = scrub(item)
-			}
-			return out
-		default:
-			return typed
-		}
-	}
-	hash, err := canonicalJSONHash(scrub(payload))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return hash
 }

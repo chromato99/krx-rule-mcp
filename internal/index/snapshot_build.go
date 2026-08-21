@@ -39,7 +39,6 @@ type VectorMetadata struct {
 	IndexSourceHash      string               `json:"index_source_hash"`
 	IndexBuildHash       string               `json:"index_build_hash"`
 	CorpusReleaseHash    string               `json:"corpus_release_hash,omitempty"`
-	CorpusHash           string               `json:"corpus_hash,omitempty"`
 	Model                string               `json:"model"`
 	ModelRevision        string               `json:"model_revision,omitempty"`
 	Dimensions           int                  `json:"dimensions"`
@@ -102,7 +101,6 @@ func buildSnapshot(dataRoot string, requireManifest bool) (Snapshot, []model.Doc
 		IndexSourceHash:   indexSourceHash,
 		IndexBuildHash:    indexBuildHash,
 		CorpusReleaseHash: loaded.ReleaseHash,
-		CorpusHash:        indexSourceHash,
 		Documents:         documents,
 		AvgDocLength:      engine.avgDocLength,
 		DF:                engine.df,
@@ -111,7 +109,6 @@ func buildSnapshot(dataRoot string, requireManifest bool) (Snapshot, []model.Doc
 }
 
 func WriteSnapshot(path string, snap Snapshot) error {
-	normalizeSnapshotHashes(&snap)
 	snap.Version = indexSnapshotFormatVersion
 	snap.IndexerVersion = firstNonEmpty(snap.IndexerVersion, indexerVersion)
 	if err := validateSnapshotStructure(snap); err != nil {
@@ -127,7 +124,7 @@ func WriteSnapshot(path string, snap Snapshot) error {
 	writeU32(&payload, uint32(len(snap.Documents)))
 	for _, doc := range snap.Documents {
 		writeString(&payload, doc.ID)
-		writeString(&payload, doc.ContentHash)
+		writeString(&payload, doc.BodyHash)
 		writeString(&payload, doc.IndexHash)
 	}
 	writeF64(&payload, snap.AvgDocLength)
@@ -175,7 +172,6 @@ type VectorWriteOptions struct {
 }
 
 func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float64, model string, dimensions int, options ...VectorWriteOptions) error {
-	normalizeSnapshotHashes(&snap)
 	if strings.TrimSpace(model) == "" {
 		return fmt.Errorf("embedding model is required")
 	}
@@ -210,7 +206,7 @@ func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float6
 	writeU32(&payload, uint32(len(snap.Documents)))
 	for _, doc := range snap.Documents {
 		writeString(&payload, doc.ID)
-		writeString(&payload, doc.ContentHash)
+		writeString(&payload, doc.BodyHash)
 		writeString(&payload, doc.IndexHash)
 	}
 	ids := make([]string, 0, len(vectors))
@@ -232,12 +228,6 @@ func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float6
 
 func WriteVectorMetadata(path string, metadata VectorMetadata) error {
 	metadata.Version = VectorMetadataFormatVersion
-	if metadata.IndexSourceHash == "" {
-		metadata.IndexSourceHash = metadata.CorpusHash
-	}
-	if metadata.CorpusHash == "" {
-		metadata.CorpusHash = metadata.IndexSourceHash
-	}
 	if metadata.GeneratedAt == "" {
 		metadata.GeneratedAt = nowRFC3339()
 	}
@@ -274,9 +264,6 @@ func LoadVectorMetadataWithDigest(path string) (VectorMetadata, string, error) {
 		}
 		return VectorMetadata{}, digest, fmt.Errorf("vector metadata contains trailing data: %w", err)
 	}
-	if metadata.Version == 3 && metadata.InputFormat == "" {
-		metadata.InputFormat = EmbeddingInputTextV1
-	}
 	return metadata, digest, nil
 }
 
@@ -293,9 +280,9 @@ func snapshotDocuments(docs []model.Document, attachments map[string]AttachmentD
 			return nil, err
 		}
 		out = append(out, SnapshotDocument{
-			ID:          doc.ID,
-			ContentHash: doc.EffectiveBodyHash(),
-			IndexHash:   indexHash,
+			ID:        doc.ID,
+			BodyHash:  strings.TrimSpace(doc.BodyHash),
+			IndexHash: indexHash,
 		})
 	}
 	return out, nil

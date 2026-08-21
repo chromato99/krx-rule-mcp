@@ -19,8 +19,7 @@ func TestRealDataDomainLexiconProbe(t *testing.T) {
 	if dataRoot == "" {
 		dataRoot = filepath.Join("..", "..", "data")
 	}
-	indexPath := realDataIndexPath()
-	repo, err := searchindex.LoadRepository(dataRoot, indexPath)
+	repo, err := searchindex.LoadRepositoryGeneration(dataRoot, realDataIndexDir(), searchindex.RepositoryLoadOptions{})
 	if err != nil {
 		t.Fatalf("load repository: %v", err)
 	}
@@ -163,29 +162,9 @@ func resultsContainTitle(results []SearchResultDTO, value string) bool {
 	return false
 }
 
-func realDataIndexPath() string {
-	if value := strings.TrimSpace(os.Getenv("KRX_INDEX_PATH")); value != "" {
-		return resolveRealDataPath(value)
-	}
+func realDataIndexDir() string {
 	if value := strings.TrimSpace(os.Getenv("KRX_RULE_INDEX_DIR")); value != "" {
-		return searchindex.DefaultBM25Path(value)
+		return value
 	}
-	if value := strings.TrimSpace(os.Getenv("KRX_INDEX_DIR")); value != "" {
-		return searchindex.DefaultBM25Path(value)
-	}
-	return resolveRealDataPath(filepath.Join("..", "..", searchindex.DefaultIndexDir, searchindex.BM25SnapshotFile))
-}
-
-func resolveRealDataPath(path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	if _, err := os.Stat(path); err == nil {
-		return path
-	}
-	repoRelative := filepath.Join("..", "..", path)
-	if _, err := os.Stat(repoRelative); err == nil {
-		return repoRelative
-	}
-	return path
+	return filepath.Join("..", "..", searchindex.DefaultIndexDir)
 }

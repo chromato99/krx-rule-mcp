@@ -19,9 +19,10 @@
 4. A completed content-addressed `generations/<id>/generation.json` records fixed artifact names, byte sizes and SHA-256 digests. Publication atomically replaces only the `current` pointer.
 5. `krx-rule-mcp` resolves `current` once, reads only that immutable directory, and compares the digest of the exact decoded bytes with the descriptor. It refuses to start without a valid matching BM25 artifact.
 6. When vector search is disabled, vector files are not opened. Optional mode falls back to BM25 with a bounded reason; required mode rejects missing, sample, partial, stale, malformed, or incompatible vector data.
-7. Legal chunking records owning Korean and English `article_id` plus `heading_path`, keeps citations distinct, and treats formula pairs and table rows as atomic semantic units. BM25/vector retrieve bounded chunk candidates, fuse by chunk ID, select diverse evidence, and group documents only afterward.
-8. `search_rules` applies a versioned answerability gate to original-query coverage, channel agreement, structural anchors, filter constraints, and claim-specific evidence checks. `insufficient` and incompatible `unknown` outcomes fail closed; scores remain ranking signals.
-9. At runtime, a canonical release descriptor binds corpus release, index source/build hashes, fixed artifact digests, optional vector metadata and input format, domain lexicon, active vector mode, and the server and TEI runtime image digests. Its SHA-256 is exposed as `release_generation`; HTTP readiness optionally requires an exact configured match and, in required-vector mode, a valid live canary embedding.
+7. Legal chunking records owning Korean and English `article_id` plus `heading_path`, keeps citations distinct, and treats formula pairs and table rows as atomic semantic units. BM25/vector retrieve bounded chunk candidates and fuse by chunk ID.
+8. The service groups baseline documents and evaluates answerability. An optional Korean cross-encoder reranks only weak-but-supported single-document evidence, never document RRF ordering. The reranked evidence is adopted only when answerability remains `supported`; model scores are not confidence.
+9. `search_rules` applies the versioned answerability gate to original-query coverage, channel agreement, structural anchors, filter constraints, and claim-specific evidence checks. `insufficient` and incompatible `unknown` outcomes fail closed.
+10. At runtime, a canonical release descriptor binds corpus release, index source/build hashes, fixed artifact digests, optional vector metadata and input format, first-stage candidate limit, domain lexicon, active vector mode, optional reranker model/revision/K/batch/mode, and runtime image digests. Its SHA-256 is exposed as `release_generation`; required services must pass live identity and canary checks.
 
 ## Packages
 
@@ -43,12 +44,15 @@ input format that the selected runtime must match.
 Default settings:
 
 - model: `intfloat/multilingual-e5-small`
+- revision: `614241f622f53c4eeff9890bdc4f31cfecc418b3`
 - dimensions: `384`
 - document prefix: `passage: `
 - query prefix: `query: `
 - document input: `text-v1`
 
-Other OpenAI-compatible embedding models can be used, but vector indexing and serving must use identical model, revision, dimension, prefix, and input-format settings. Prefix-free models should set both prefix environment variables to empty strings before rebuilding the vector snapshot. The maintained generation uses raw chunk text with `text-v1`; `structured-v1` remains available for controlled comparisons and embeds fixed title/category/article/path/source fields with the chunk.
+The release uses one embedding model only: the pinned multilingual E5 contract above. A historical full-vector Qwen3-Embedding-0.6B comparison improved one English precision metric but regressed Korean retrieval and refusal safety while requiring a much larger artifact, so it is closed as an operational candidate. The architecture does not add a Qwen vector channel or cross-model rank fusion. Future candidate-recall work must retain E5 and use reviewed Korean hard negatives, E5-only structural representations, or domain adaptation without regressing the pinned English baseline.
+
+The release evaluator rejects other embedding models. A research-only comparison may rebuild an isolated generation with another OpenAI-compatible model, but it is not a deployable release artifact and cannot refresh the English non-regression baseline. The maintained generation uses raw chunk text with `text-v1`; `structured-v1` remains available only for controlled E5 comparisons and embeds fixed title/category/article/path/source fields with the chunk.
 
 Indexing failures are strict: if vector indexing is explicitly requested and the embeddings API fails, `krx-rule-index` exits non-zero. Runtime query embedding failure falls back to BM25 only under the optional vector policy; required-vector mode returns a tool error and fails its readiness canary.
 

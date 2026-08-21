@@ -93,25 +93,37 @@ type QueryExpansionExpectation struct {
 }
 
 type Provenance struct {
-	EvaluatorVersion    string             `json:"evaluator_version"`
-	ServerCommit        string             `json:"server_commit"`
-	ReleaseGeneration   string             `json:"release_generation"`
-	CorpusReleaseHash   string             `json:"corpus_release_hash"`
-	IndexGeneration     string             `json:"index_generation"`
-	IndexSourceHash     string             `json:"index_source_hash"`
-	IndexBuildHash      string             `json:"index_build_hash"`
-	IndexerVersion      string             `json:"indexer_version"`
-	BM25ArtifactDigest  string             `json:"bm25_artifact_digest"`
-	BM25SnapshotVersion uint16             `json:"bm25_snapshot_version"`
-	Embedding           *EmbeddingIdentity `json:"embedding,omitempty"`
-	LexiconDigest       string             `json:"lexicon_digest"`
-	RuntimeVectorMode   string             `json:"runtime_vector_mode"`
-	RetrievalContract   string             `json:"retrieval_contract"`
-	AnswerabilityGate   string             `json:"answerability_gate"`
-	FixtureVersion      string             `json:"fixture_version"`
-	FixtureSHA256       string             `json:"fixture_sha256"`
-	SourceFixtureSHA256 string             `json:"source_fixture_sha256"`
-	Extra               map[string]string  `json:"extra,omitempty"`
+	EvaluatorVersion        string             `json:"evaluator_version"`
+	ServerCommit            string             `json:"server_commit"`
+	ReleaseGeneration       string             `json:"release_generation"`
+	CorpusReleaseHash       string             `json:"corpus_release_hash"`
+	IndexGeneration         string             `json:"index_generation"`
+	IndexSourceHash         string             `json:"index_source_hash"`
+	IndexBuildHash          string             `json:"index_build_hash"`
+	IndexerVersion          string             `json:"indexer_version"`
+	BM25ArtifactDigest      string             `json:"bm25_artifact_digest"`
+	BM25SnapshotVersion     uint16             `json:"bm25_snapshot_version"`
+	Embedding               *EmbeddingIdentity `json:"embedding,omitempty"`
+	Reranker                *RerankerIdentity  `json:"reranker,omitempty"`
+	LexiconDigest           string             `json:"lexicon_digest"`
+	RuntimeVectorMode       string             `json:"runtime_vector_mode"`
+	RetrievalCandidateLimit int                `json:"retrieval_candidate_limit"`
+	RetrievalContract       string             `json:"retrieval_contract"`
+	AnswerabilityGate       string             `json:"answerability_gate"`
+	FixtureVersion          string             `json:"fixture_version"`
+	FixtureSHA256           string             `json:"fixture_sha256"`
+	SourceFixtureSHA256     string             `json:"source_fixture_sha256"`
+	Extra                   map[string]string  `json:"extra,omitempty"`
+}
+
+type RerankerIdentity struct {
+	Model          string `json:"model"`
+	Revision       string `json:"revision"`
+	CandidateLimit int    `json:"candidate_limit"`
+	BatchSize      int    `json:"batch_size"`
+	Mode           string `json:"mode"`
+	Timeout        string `json:"timeout"`
+	InputFormat    string `json:"input_format"`
 }
 
 type EmbeddingIdentity struct {
@@ -130,53 +142,66 @@ type EmbeddingIdentity struct {
 }
 
 type Report struct {
-	SchemaVersion int                     `json:"schema_version"`
-	GeneratedAt   time.Time               `json:"generated_at"`
-	Provenance    Provenance              `json:"provenance"`
-	Summary       Summary                 `json:"summary"`
-	Slices        map[string]SliceMetrics `json:"slices"`
-	Cases         []CaseResult            `json:"cases"`
+	SchemaVersion          int                           `json:"schema_version"`
+	GeneratedAt            time.Time                     `json:"generated_at"`
+	Provenance             Provenance                    `json:"provenance"`
+	Summary                Summary                       `json:"summary"`
+	SplitSummaries         map[string]Summary            `json:"split_summaries"`
+	LanguageSummaries      map[string]Summary            `json:"language_summaries"`
+	LanguageSplitSummaries map[string]map[string]Summary `json:"language_split_summaries"`
+	Slices                 map[string]SliceMetrics       `json:"slices"`
+	Cases                  []CaseResult                  `json:"cases"`
 }
 
 type Summary struct {
-	Cases                      int     `json:"cases"`
-	SupportedCases             int     `json:"supported_cases"`
-	InsufficientCases          int     `json:"insufficient_cases"`
-	AmbiguousCases             int     `json:"ambiguous_cases"`
-	DocumentEligible           int     `json:"document_eligible"`
-	DocumentHitAt1             int     `json:"document_hit_at_1"`
-	DocumentHitAt5             int     `json:"document_hit_at_5"`
-	DocumentHitAt5Rate         float64 `json:"document_hit_at_5_rate"`
-	MRRAt5                     float64 `json:"mrr_at_5"`
-	EvidenceEligible           int     `json:"evidence_eligible"`
-	EvidenceHitAt1             int     `json:"evidence_hit_at_1"`
-	EvidenceHitAt1Rate         float64 `json:"evidence_hit_at_1_rate"`
-	EvidenceRecallAt3          int     `json:"evidence_recall_at_3"`
-	EvidenceRecallAt3Rate      float64 `json:"evidence_recall_at_3_rate"`
-	ManualEvidenceEligible     int     `json:"manual_evidence_eligible"`
-	ManualEvidenceHitAt1       int     `json:"manual_evidence_hit_at_1"`
-	ManualEvidenceHitAt1Rate   float64 `json:"manual_evidence_hit_at_1_rate"`
-	StatusCorrect              int     `json:"status_correct"`
-	StatusAccuracy             float64 `json:"status_accuracy"`
-	InsufficientRefused        int     `json:"insufficient_refused"`
-	InsufficientRefusalRate    float64 `json:"insufficient_refusal_rate"`
-	FalseSupported             int     `json:"false_supported"`
-	FalseSupportedRate         float64 `json:"false_supported_rate"`
-	AmbiguousClarified         int     `json:"ambiguous_clarified"`
-	AmbiguousClarificationRate float64 `json:"ambiguous_clarification_rate"`
-	ContextChecks              int     `json:"context_checks"`
-	ContextConsistent          int     `json:"context_consistent"`
-	ContextConsistencyRate     float64 `json:"context_consistency_rate"`
-	FilterLeaks                int     `json:"filter_leaks"`
-	ExpansionChecks            int     `json:"expansion_checks"`
-	ExpansionPassed            int     `json:"expansion_passed"`
-	EnglishCanonicalChecks     int     `json:"english_canonical_checks"`
-	EnglishCanonicalPassed     int     `json:"english_canonical_passed"`
-	HWPAttachmentChecks        int     `json:"hwp_attachment_checks"`
-	HWPAttachmentPassed        int     `json:"hwp_attachment_passed"`
-	AutomaticPassed            int     `json:"automatic_passed"`
-	ManualReviewCases          int     `json:"manual_review_cases"`
-	P95LatencyMillis           float64 `json:"p95_latency_ms"`
+	Cases                         int     `json:"cases"`
+	SupportedCases                int     `json:"supported_cases"`
+	InsufficientCases             int     `json:"insufficient_cases"`
+	AmbiguousCases                int     `json:"ambiguous_cases"`
+	DocumentEligible              int     `json:"document_eligible"`
+	DocumentHitAt1                int     `json:"document_hit_at_1"`
+	DocumentHitAt5                int     `json:"document_hit_at_5"`
+	DocumentHitAt5Rate            float64 `json:"document_hit_at_5_rate"`
+	MRRAt5                        float64 `json:"mrr_at_5"`
+	EvidenceEligible              int     `json:"evidence_eligible"`
+	EvidenceHitAt1                int     `json:"evidence_hit_at_1"`
+	EvidenceHitAt1Rate            float64 `json:"evidence_hit_at_1_rate"`
+	EvidenceRecallAt3             int     `json:"evidence_recall_at_3"`
+	EvidenceRecallAt3Rate         float64 `json:"evidence_recall_at_3_rate"`
+	CandidateEvidenceEligible     int     `json:"candidate_evidence_eligible"`
+	CandidateEvidenceRecall64     int     `json:"candidate_evidence_recall_at_64"`
+	CandidateEvidenceRecall64Rate float64 `json:"candidate_evidence_recall_at_64_rate"`
+	RerankerPoolEligible          int     `json:"reranker_pool_eligible"`
+	RerankerPoolHit               int     `json:"reranker_pool_hit"`
+	RerankerPoolHitRate           float64 `json:"reranker_pool_hit_rate"`
+	RerankerAttempted             int     `json:"reranker_attempted"`
+	RerankerAdopted               int     `json:"reranker_adopted"`
+	ManualEvidenceEligible        int     `json:"manual_evidence_eligible"`
+	ManualEvidenceHitAt1          int     `json:"manual_evidence_hit_at_1"`
+	ManualEvidenceHitAt1Rate      float64 `json:"manual_evidence_hit_at_1_rate"`
+	StatusCorrect                 int     `json:"status_correct"`
+	StatusAccuracy                float64 `json:"status_accuracy"`
+	InsufficientRefused           int     `json:"insufficient_refused"`
+	InsufficientRefusalRate       float64 `json:"insufficient_refusal_rate"`
+	FalseSupported                int     `json:"false_supported"`
+	FalseSupportedRate            float64 `json:"false_supported_rate"`
+	AmbiguousClarified            int     `json:"ambiguous_clarified"`
+	AmbiguousClarificationRate    float64 `json:"ambiguous_clarification_rate"`
+	ContextChecks                 int     `json:"context_checks"`
+	ContextConsistent             int     `json:"context_consistent"`
+	ContextConsistencyRate        float64 `json:"context_consistency_rate"`
+	FilterLeaks                   int     `json:"filter_leaks"`
+	ExpansionChecks               int     `json:"expansion_checks"`
+	ExpansionPassed               int     `json:"expansion_passed"`
+	EnglishCanonicalChecks        int     `json:"english_canonical_checks"`
+	EnglishCanonicalPassed        int     `json:"english_canonical_passed"`
+	HWPAttachmentChecks           int     `json:"hwp_attachment_checks"`
+	HWPAttachmentPassed           int     `json:"hwp_attachment_passed"`
+	AutomaticPassed               int     `json:"automatic_passed"`
+	ManualReviewCases             int     `json:"manual_review_cases"`
+	P95SearchLatencyMillis        float64 `json:"p95_search_latency_ms"`
+	P95RerankerLatencyMillis      float64 `json:"p95_reranker_latency_ms"`
+	P95LatencyMillis              float64 `json:"p95_latency_ms"`
 }
 
 type SliceMetrics struct {
@@ -191,27 +216,38 @@ type SliceMetrics struct {
 }
 
 type CaseResult struct {
-	ID                    string           `json:"id"`
-	Group                 string           `json:"group"`
-	Split                 string           `json:"split"`
-	ExpectedStatus        string           `json:"expected_status"`
-	ObservedStatus        string           `json:"observed_status"`
-	Answerable            bool             `json:"answerable"`
-	StatusCorrect         bool             `json:"status_correct"`
-	ClarificationProvided bool             `json:"clarification_provided"`
-	DocumentRank          int              `json:"document_rank,omitempty"`
-	EvidenceRank          int              `json:"evidence_rank,omitempty"`
-	EvidenceEligible      bool             `json:"evidence_eligible"`
-	EvidenceManualReview  bool             `json:"evidence_manual_review"`
-	FilterLeaks           int              `json:"filter_leaks"`
-	ExpansionPassed       *bool            `json:"expansion_passed,omitempty"`
-	ContextChecks         []ContextCheck   `json:"context_checks,omitempty"`
-	Results               []ObservedResult `json:"results"`
-	Answerability         any              `json:"answerability"`
-	Mode                  string           `json:"mode"`
-	ElapsedMillis         float64          `json:"elapsed_ms"`
-	AutomaticPassed       bool             `json:"automatic_passed"`
-	Failures              []string         `json:"failures,omitempty"`
+	ID                     string           `json:"id"`
+	Group                  string           `json:"group"`
+	Split                  string           `json:"split"`
+	Language               string           `json:"language,omitempty"`
+	ClaimRelation          string           `json:"claim_relation"`
+	ExpectedStatus         string           `json:"expected_status"`
+	ObservedStatus         string           `json:"observed_status"`
+	Answerable             bool             `json:"answerable"`
+	StatusCorrect          bool             `json:"status_correct"`
+	ClarificationProvided  bool             `json:"clarification_provided"`
+	DocumentRank           int              `json:"document_rank,omitempty"`
+	EvidenceRank           int              `json:"evidence_rank,omitempty"`
+	CandidateBM25Rank      int              `json:"candidate_bm25_rank,omitempty"`
+	CandidateVectorRank    int              `json:"candidate_vector_rank,omitempty"`
+	CandidateFusedRank     int              `json:"candidate_fused_rank,omitempty"`
+	CandidateFinalRank     int              `json:"candidate_final_rank,omitempty"`
+	RerankerPoolIncluded   bool             `json:"reranker_pool_included"`
+	RerankerCandidateCount int              `json:"reranker_candidate_count,omitempty"`
+	RerankerAdopted        bool             `json:"reranker_adopted"`
+	EvidenceEligible       bool             `json:"evidence_eligible"`
+	EvidenceManualReview   bool             `json:"evidence_manual_review"`
+	FilterLeaks            int              `json:"filter_leaks"`
+	ExpansionPassed        *bool            `json:"expansion_passed,omitempty"`
+	ContextChecks          []ContextCheck   `json:"context_checks,omitempty"`
+	Results                []ObservedResult `json:"results"`
+	Answerability          any              `json:"answerability"`
+	Mode                   string           `json:"mode"`
+	SearchElapsedMillis    float64          `json:"search_elapsed_ms"`
+	RerankerElapsedMillis  float64          `json:"reranker_elapsed_ms,omitempty"`
+	ElapsedMillis          float64          `json:"elapsed_ms"`
+	AutomaticPassed        bool             `json:"automatic_passed"`
+	Failures               []string         `json:"failures,omitempty"`
 }
 
 type ObservedResult struct {
@@ -220,22 +256,22 @@ type ObservedResult struct {
 	Score                 float64                             `json:"score"`
 	BM25Score             float64                             `json:"bm25_score,omitempty"`
 	VectorScore           float64                             `json:"vector_score,omitempty"`
-	MatchedChunkID        string                              `json:"matched_chunk_id,omitempty"`
-	ArticleID             string                              `json:"article_id,omitempty"`
 	AttachmentIDs         []string                            `json:"attachment_ids,omitempty"`
 	Evidence              []ObservedEvidence                  `json:"evidence,omitempty"`
 	CanonicalKoreanSource *mcpserver.CanonicalKoreanSourceDTO `json:"canonical_korean_source,omitempty"`
 }
 
 type ObservedEvidence struct {
-	ChunkID      string   `json:"chunk_id"`
-	Source       string   `json:"source"`
-	AttachmentID string   `json:"attachment_id,omitempty"`
-	ArticleID    string   `json:"article_id,omitempty"`
-	HeadingPath  []string `json:"heading_path,omitempty"`
-	Score        float64  `json:"score"`
-	BM25Score    float64  `json:"bm25_score,omitempty"`
-	VectorScore  float64  `json:"vector_score,omitempty"`
+	ChunkID       string   `json:"chunk_id"`
+	Source        string   `json:"source"`
+	AttachmentID  string   `json:"attachment_id,omitempty"`
+	ArticleID     string   `json:"article_id,omitempty"`
+	HeadingPath   []string `json:"heading_path,omitempty"`
+	Score         float64  `json:"score"`
+	BM25Score     float64  `json:"bm25_score,omitempty"`
+	VectorScore   float64  `json:"vector_score,omitempty"`
+	RerankerScore float64  `json:"reranker_score,omitempty"`
+	RerankerRank  int      `json:"reranker_rank,omitempty"`
 }
 
 type ContextCheck struct {

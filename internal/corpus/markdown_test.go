@@ -42,8 +42,8 @@ func TestParseRenderedMarkdown(t *testing.T) {
 	if !strings.Contains(parsed.Body, "제1조") {
 		t.Fatalf("body not preserved: %q", parsed.Body)
 	}
-	if parsed.ContentHash == "" {
-		t.Fatal("content_hash should be generated")
+	if parsed.BodyHash == "" {
+		t.Fatal("body_hash should be generated")
 	}
 }
 
@@ -54,7 +54,6 @@ func TestWriteDocumentUsesLanguageDirectory(t *testing.T) {
 		Title:        "KOSPI Market Listing Regulation",
 		SourceURL:    "https://example.test/rule",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "hash",
 		DocumentType: model.DocumentTypeRule,
 		Language:     model.LanguageEnglish,
 		SourceID:     "rule-1",
@@ -81,7 +80,6 @@ func TestLoadDocumentsIgnoresBundleAttachmentMarkdown(t *testing.T) {
 		Title:        "Bundle Rule",
 		SourceURL:    "https://example.test/rule",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "hash",
 		DocumentType: model.DocumentTypeRule,
 		Language:     model.LanguageEnglish,
 		Body:         "Article 1 Purpose",
@@ -113,7 +111,6 @@ func TestLoadDocumentsRejectsDuplicateIDs(t *testing.T) {
 		Title:        "First Rule",
 		SourceURL:    "https://example.test/first",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "first",
 		DocumentType: model.DocumentTypeRule,
 		Language:     model.LanguageKorean,
 		Body:         "first body",
@@ -121,7 +118,6 @@ func TestLoadDocumentsRejectsDuplicateIDs(t *testing.T) {
 	second := first
 	second.Title = "Second Rule"
 	second.SourceURL = "https://example.test/second"
-	second.ContentHash = "second"
 	second.Body = "second body"
 	writeTestDocument(t, root, first)
 	writeTestDocument(t, root, second)
@@ -152,8 +148,12 @@ func renderTestMarkdown(t *testing.T, doc model.Document) []byte {
 	meta.Body = ""
 	meta.Path = ""
 	meta.Language = model.NormalizeLanguage(meta.Language)
+	meta.SchemaVersion = IndexSourceSchemaVersion
 	meta.BodyHash = model.HashText(doc.Body)
-	meta.ContentHash = model.HashText(doc.Title + "\n" + doc.Body)
+	meta.ConversionStatus = string(model.AttachmentConverted)
+	meta.PreservationStatus = "preserved"
+	meta.Searchable = boolPointer(true)
+	meta.QualityStatus = "ok"
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
 	enc := yaml.NewEncoder(&buf)
@@ -169,3 +169,5 @@ func renderTestMarkdown(t *testing.T, doc model.Document) []byte {
 	buf.WriteString("\n")
 	return buf.Bytes()
 }
+
+func boolPointer(value bool) *bool { return &value }

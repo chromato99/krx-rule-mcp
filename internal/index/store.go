@@ -23,7 +23,6 @@ type Snapshot struct {
 	IndexSourceHash   string
 	IndexBuildHash    string
 	CorpusReleaseHash string
-	CorpusHash        string
 	Documents         []SnapshotDocument
 	AvgDocLength      float64
 	DF                map[string]int
@@ -31,9 +30,9 @@ type Snapshot struct {
 }
 
 type SnapshotDocument struct {
-	ID          string
-	ContentHash string
-	IndexHash   string
+	ID        string
+	BodyHash  string
+	IndexHash string
 }
 
 type SnapshotChunk struct {
@@ -59,7 +58,6 @@ type VectorSnapshot struct {
 	IndexSourceHash    string
 	IndexBuildHash     string
 	CorpusReleaseHash  string
-	CorpusHash         string
 	Model              string
 	ModelRevision      string
 	Dimensions         int
@@ -127,18 +125,9 @@ const (
 	maxSnapshotVectors      = 10_000_000
 )
 
-func LoadRepository(dataRoot, indexPath string, vectorIndexPaths ...string) (*Repository, error) {
-	return LoadRepositoryWithOptions(dataRoot, indexPath, RepositoryLoadOptions{
-		VectorEnabled:    len(vectorIndexPaths) > 0,
-		VectorIndexPaths: vectorIndexPaths,
-	})
-}
-
 type RepositoryLoadOptions struct {
-	VectorEnabled         bool
-	RequireVector         bool
-	RequireCorpusManifest bool
-	VectorIndexPaths      []string
+	VectorEnabled bool
+	RequireVector bool
 }
 
 // LoadRepositoryGeneration resolves the current generation pointer once and
@@ -151,12 +140,11 @@ func LoadRepositoryGeneration(dataRoot, indexDir string, options RepositoryLoadO
 		return nil, fmt.Errorf("resolve current index generation: %w", err)
 	}
 	indexPath := filepath.Join(generationDir, BM25SnapshotFile)
-	options.RequireCorpusManifest = true
-	options.VectorIndexPaths = nil
+	vectorPath := ""
 	if options.VectorEnabled && descriptor.Vector != nil {
-		options.VectorIndexPaths = []string{filepath.Join(generationDir, VectorSnapshotFile)}
+		vectorPath = filepath.Join(generationDir, VectorSnapshotFile)
 	}
-	repo, err := LoadRepositoryWithOptions(dataRoot, indexPath, options)
+	repo, err := loadRepositoryArtifacts(dataRoot, indexPath, vectorPath, options, true)
 	if err != nil {
 		return nil, err
 	}
@@ -186,76 +174,67 @@ func LoadRepositoryGeneration(dataRoot, indexDir string, options RepositoryLoadO
 	return repo, nil
 }
 
-func LoadRepositoryWithOptions(dataRoot, indexPath string, options RepositoryLoadOptions) (*Repository, error) {
+func loadRepositoryArtifacts(dataRoot, indexPath, vectorPath string, options RepositoryLoadOptions, requireCorpusManifest bool) (*Repository, error) {
 	if options.RequireVector && !options.VectorEnabled {
 		return nil, fmt.Errorf("require-vector policy requires vector search to be enabled")
 	}
-	loadedCorpus, err := corpus.LoadWithOptions(dataRoot, corpus.LoadOptions{RequireManifest: options.RequireCorpusManifest})
+	loadedCorpus, err := corpus.LoadWithOptions(dataRoot, corpus.LoadOptions{RequireManifest: requireCorpusManifest})
 	if err != nil {
 		return nil, fmt.Errorf("load markdown corpus: %w", err)
 	}
 	docs := loadedCorpus.Documents
 	snap, bm25Digest, err := LoadSnapshotWithDigest(indexPath)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("BM25 index snapshot %q not found; run krx-rule-index --data-dir %s --index %s", indexPath, dataRoot, indexPath)
+		return nil, fmt.Errorf("BM25 index snapshot %q not found; run krx-rule-index --data-dir %s --index-dir %s", indexPath, dataRoot, filepath.Dir(filepath.Dir(filepath.Dir(indexPath))))
 	}
 	if err != nil {
 		return nil, err
 	}
 	attachments := attachmentDocuments(docs, loadedCorpus.AttachmentTexts)
 	if !snapshotMatches(snap, docs, attachments) {
-		return nil, fmt.Errorf("BM25 index snapshot %q does not match Markdown corpus; run krx-rule-index --data-dir %s --index %s", indexPath, dataRoot, indexPath)
+		return nil, fmt.Errorf("BM25 index snapshot %q does not match Markdown corpus; rebuild the published generation", indexPath)
 	}
 	if snap.CorpusReleaseHash != loadedCorpus.ReleaseHash {
 		return nil, fmt.Errorf("BM25 index corpus release %q does not match corpus manifest release %q", snap.CorpusReleaseHash, loadedCorpus.ReleaseHash)
 	}
 	vectors := map[string][]float64{}
-	var vectorPath string
+	loadedVectorPath := ""
 	var vectorStatuses []VectorIndexStatus
-	if options.VectorEnabled && len(options.VectorIndexPaths) == 0 && options.RequireVector {
-		return nil, fmt.Errorf("require-vector policy needs at least one vector snapshot path")
+	if options.VectorEnabled && strings.TrimSpace(vectorPath) == "" && options.RequireVector {
+		return nil, fmt.Errorf("required generation has no vector artifact")
 	}
-	for _, path := range options.VectorIndexPaths {
-		if !options.VectorEnabled {
-			break
-		}
-		path = strings.TrimSpace(path)
-		if path == "" {
-			continue
-		}
+	if options.VectorEnabled && strings.TrimSpace(vectorPath) != "" {
+		path := strings.TrimSpace(vectorPath)
 		status := VectorIndexStatus{Path: path}
 		loadedResult, err := loadVectorArtifactForSnapshot(path, docs, attachments, snap, options.RequireVector)
 		status.ArtifactDigest = loadedResult.ArtifactDigest
 		status.MetadataDigest = loadedResult.MetadataDigest
 		status.Metadata = loadedResult.Metadata
-		if errors.Is(err, os.ErrNotExist) {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			status.RejectedReason = "missing"
 			vectorStatuses = append(vectorStatuses, status)
 			if options.RequireVector {
 				return nil, fmt.Errorf("required vector snapshot %q is missing", path)
 			}
-			continue
-		}
-		if err != nil {
+		case err != nil:
 			status.RejectedReason = boundedVectorRejection("load_failed: " + err.Error())
 			vectorStatuses = append(vectorStatuses, status)
 			if options.RequireVector {
 				return nil, fmt.Errorf("load required vector snapshot %q: %w", path, err)
 			}
-			continue
-		}
-		loaded := loadedResult.Vectors
-		status.LoadedVectors = len(loaded)
-		status.RejectedReason = boundedVectorRejection(loadedResult.Reason)
-		vectorStatuses = append(vectorStatuses, status)
-		if loadedResult.Reason != "" && options.RequireVector {
-			return nil, fmt.Errorf("required vector snapshot %q rejected: %s", path, loadedResult.Reason)
-		}
-		for id, vector := range loaded {
-			vectors[id] = vector
-		}
-		if len(loaded) > 0 && vectorPath == "" {
-			vectorPath = path
+		default:
+			loaded := loadedResult.Vectors
+			status.LoadedVectors = len(loaded)
+			status.RejectedReason = boundedVectorRejection(loadedResult.Reason)
+			vectorStatuses = append(vectorStatuses, status)
+			if loadedResult.Reason != "" && options.RequireVector {
+				return nil, fmt.Errorf("required vector snapshot %q rejected: %s", path, loadedResult.Reason)
+			}
+			vectors = loaded
+			if len(loaded) > 0 {
+				loadedVectorPath = path
+			}
 		}
 	}
 	if options.RequireVector && len(vectors) == 0 {
@@ -269,7 +248,7 @@ func LoadRepositoryWithOptions(dataRoot, indexPath string, options RepositoryLoa
 	repo := &Repository{
 		DataRoot:            dataRoot,
 		IndexPath:           indexPath,
-		VectorPath:          vectorPath,
+		VectorPath:          loadedVectorPath,
 		BM25ArtifactDigest:  bm25Digest,
 		BM25SnapshotVersion: snap.Version,
 		IndexerVersion:      snap.IndexerVersion,
@@ -338,42 +317,28 @@ func decodeSnapshot(data []byte) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if snap.Version != indexSnapshotFormatVersion && snap.Version != 5 && snap.Version != 4 {
+	if snap.Version != indexSnapshotFormatVersion {
 		return Snapshot{}, fmt.Errorf("read index snapshot: unsupported snapshot version %d", snap.Version)
 	}
 	snap.GeneratedAt, err = readString(r)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if snap.Version >= 5 {
-		snap.IndexSourceHash, err = readString(r)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		snap.IndexBuildHash, err = readString(r)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if snap.Version >= 6 {
-			snap.CorpusReleaseHash, err = readString(r)
-			if err != nil {
-				return Snapshot{}, err
-			}
-		}
-		snap.CorpusHash = snap.IndexSourceHash
-	} else {
-		snap.CorpusHash, err = readString(r)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		snap.IndexSourceHash = snap.CorpusHash
+	snap.IndexSourceHash, err = readString(r)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snap.IndexBuildHash, err = readString(r)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snap.CorpusReleaseHash, err = readString(r)
+	if err != nil {
+		return Snapshot{}, err
 	}
 	snap.IndexerVersion, err = readString(r)
 	if err != nil {
 		return Snapshot{}, err
-	}
-	if snap.IndexBuildHash == "" {
-		snap.IndexBuildHash = buildHash(snap.IndexSourceHash, snap.IndexerVersion)
 	}
 	docCount, err := readU32(r)
 	if err != nil {
@@ -420,7 +385,7 @@ func decodeSnapshot(data []byte) (Snapshot, error) {
 	}
 	snap.Chunks = make([]SnapshotChunk, 0, chunkCount)
 	for range chunkCount {
-		chunk, err := readSnapshotChunk(r, snap.Version)
+		chunk, err := readSnapshotChunk(r)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -472,49 +437,36 @@ func decodeVectorSnapshot(data []byte) (VectorSnapshot, error) {
 	if err != nil {
 		return VectorSnapshot{}, err
 	}
-	if snap.Version != vectorSnapshotFormatVersion && snap.Version != 1 {
+	if snap.Version != vectorSnapshotFormatVersion {
 		return VectorSnapshot{}, fmt.Errorf("read vector snapshot: unsupported snapshot version %d", snap.Version)
 	}
 	snap.GeneratedAt, err = readString(r)
 	if err != nil {
 		return VectorSnapshot{}, err
 	}
-	if snap.Version >= 2 {
-		snap.GenerationID, err = readString(r)
-		if err != nil {
-			return VectorSnapshot{}, err
-		}
-		snap.IndexSourceHash, err = readString(r)
-		if err != nil {
-			return VectorSnapshot{}, err
-		}
-		snap.IndexBuildHash, err = readString(r)
-		if err != nil {
-			return VectorSnapshot{}, err
-		}
-		if snap.Version >= 3 {
-			snap.CorpusReleaseHash, err = readString(r)
-			if err != nil {
-				return VectorSnapshot{}, err
-			}
-		}
-		snap.CorpusHash = snap.IndexSourceHash
-	} else {
-		snap.CorpusHash, err = readString(r)
-		if err != nil {
-			return VectorSnapshot{}, err
-		}
-		snap.IndexSourceHash = snap.CorpusHash
+	snap.GenerationID, err = readString(r)
+	if err != nil {
+		return VectorSnapshot{}, err
+	}
+	snap.IndexSourceHash, err = readString(r)
+	if err != nil {
+		return VectorSnapshot{}, err
+	}
+	snap.IndexBuildHash, err = readString(r)
+	if err != nil {
+		return VectorSnapshot{}, err
+	}
+	snap.CorpusReleaseHash, err = readString(r)
+	if err != nil {
+		return VectorSnapshot{}, err
 	}
 	snap.Model, err = readString(r)
 	if err != nil {
 		return VectorSnapshot{}, err
 	}
-	if snap.Version >= 2 {
-		snap.ModelRevision, err = readString(r)
-		if err != nil {
-			return VectorSnapshot{}, err
-		}
+	snap.ModelRevision, err = readString(r)
+	if err != nil {
+		return VectorSnapshot{}, err
 	}
 	dimensions, err := readU32(r)
 	if err != nil {
@@ -524,29 +476,27 @@ func decodeVectorSnapshot(data []byte) (VectorSnapshot, error) {
 		return VectorSnapshot{}, fmt.Errorf("read vector snapshot: dimensions %d outside limit", dimensions)
 	}
 	snap.Dimensions = int(dimensions)
-	if snap.Version >= 2 {
-		snap.QueryPrefix, err = readString(r)
-		if err != nil {
-			return VectorSnapshot{}, err
-		}
-		snap.DocumentPrefix, err = readString(r)
-		if err != nil {
-			return VectorSnapshot{}, err
-		}
-		scope, err := readString(r)
-		if err != nil {
-			return VectorSnapshot{}, err
-		}
-		snap.Scope = VectorScope(scope)
-		expectedCount, err := readU32(r)
-		if err != nil {
-			return VectorSnapshot{}, err
-		}
-		snap.ExpectedChunkCount = int(expectedCount)
-		snap.ChunkIDSetHash, err = readString(r)
-		if err != nil {
-			return VectorSnapshot{}, err
-		}
+	snap.QueryPrefix, err = readString(r)
+	if err != nil {
+		return VectorSnapshot{}, err
+	}
+	snap.DocumentPrefix, err = readString(r)
+	if err != nil {
+		return VectorSnapshot{}, err
+	}
+	scope, err := readString(r)
+	if err != nil {
+		return VectorSnapshot{}, err
+	}
+	snap.Scope = VectorScope(scope)
+	expectedCount, err := readU32(r)
+	if err != nil {
+		return VectorSnapshot{}, err
+	}
+	snap.ExpectedChunkCount = int(expectedCount)
+	snap.ChunkIDSetHash, err = readString(r)
+	if err != nil {
+		return VectorSnapshot{}, err
 	}
 	docCount, err := readU32(r)
 	if err != nil {
@@ -634,10 +584,6 @@ func loadVectorArtifactForSnapshot(path string, docs []model.Document, attachmen
 	if vectorErr != nil {
 		return result, vectorErr
 	}
-	if snap.Version < vectorSnapshotFormatVersion {
-		result.Reason = "legacy_vector_format"
-		return result, nil
-	}
 	if snap.IndexSourceHash != bm25.IndexSourceHash {
 		result.Reason = "index_source_hash_mismatch"
 		return result, nil
@@ -713,9 +659,9 @@ func vectorMetadataRejectReason(metadata VectorMetadata, snap VectorSnapshot) st
 		return "embedding_model_revision_mismatch"
 	case metadata.Dimensions != embedder.Dimensions:
 		return "embedding_dimensions_mismatch"
-	case metadata.QueryPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: "):
+	case metadata.QueryPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", DefaultEmbeddingQueryPrefix):
 		return "embedding_query_prefix_mismatch"
-	case metadata.DocumentPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: "):
+	case metadata.DocumentPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", DefaultEmbeddingDocumentPrefix):
 		return "embedding_document_prefix_mismatch"
 	case metadata.InputFormat != inputFormat:
 		return "embedding_input_format_mismatch"
@@ -726,7 +672,7 @@ func vectorMetadataRejectReason(metadata VectorMetadata, snap VectorSnapshot) st
 
 func vectorMetadataRejectReasonWithoutEnvironment(metadata VectorMetadata, snap VectorSnapshot) string {
 	switch {
-	case metadata.Version != VectorMetadataFormatVersion && !(metadata.Version == 3 && metadata.InputFormat == EmbeddingInputTextV1):
+	case metadata.Version != VectorMetadataFormatVersion:
 		return "metadata_version_mismatch"
 	case metadata.GenerationID != snap.GenerationID:
 		return "metadata_generation_mismatch"
@@ -844,7 +790,7 @@ func snapshotDocumentsEqual(got, want []SnapshotDocument) bool {
 	}
 	for _, document := range got {
 		expected, ok := wantByID[document.ID]
-		if !ok || expected.IndexHash != document.IndexHash || expected.ContentHash != document.ContentHash {
+		if !ok || expected.IndexHash != document.IndexHash || expected.BodyHash != document.BodyHash {
 			return false
 		}
 	}
@@ -856,7 +802,7 @@ func readSnapshotDocument(r *bytes.Reader) (SnapshotDocument, error) {
 	if err != nil {
 		return SnapshotDocument{}, err
 	}
-	contentHash, err := readString(r)
+	bodyHash, err := readString(r)
 	if err != nil {
 		return SnapshotDocument{}, err
 	}
@@ -864,10 +810,10 @@ func readSnapshotDocument(r *bytes.Reader) (SnapshotDocument, error) {
 	if err != nil {
 		return SnapshotDocument{}, err
 	}
-	return SnapshotDocument{ID: id, ContentHash: contentHash, IndexHash: indexHash}, nil
+	return SnapshotDocument{ID: id, BodyHash: bodyHash, IndexHash: indexHash}, nil
 }
 
-func readSnapshotChunk(r *bytes.Reader, version uint16) (SnapshotChunk, error) {
+func readSnapshotChunk(r *bytes.Reader) (SnapshotChunk, error) {
 	id, err := readString(r)
 	if err != nil {
 		return SnapshotChunk{}, err
@@ -904,34 +850,24 @@ func readSnapshotChunk(r *bytes.Reader, version uint16) (SnapshotChunk, error) {
 	if err != nil {
 		return SnapshotChunk{}, err
 	}
-	articleID := ""
-	var headingPath []string
-	if version >= 6 {
-		articleID, err = readString(r)
+	articleID, err := readString(r)
+	if err != nil {
+		return SnapshotChunk{}, err
+	}
+	headingCount, err := readU32(r)
+	if err != nil {
+		return SnapshotChunk{}, err
+	}
+	if headingCount > 64 {
+		return SnapshotChunk{}, fmt.Errorf("heading path depth %d exceeds limit", headingCount)
+	}
+	headingPath := make([]string, 0, headingCount)
+	for range headingCount {
+		heading, err := readString(r)
 		if err != nil {
 			return SnapshotChunk{}, err
 		}
-		headingCount, err := readU32(r)
-		if err != nil {
-			return SnapshotChunk{}, err
-		}
-		if headingCount > 64 {
-			return SnapshotChunk{}, fmt.Errorf("heading path depth %d exceeds limit", headingCount)
-		}
-		headingPath = make([]string, 0, headingCount)
-		for range headingCount {
-			heading, err := readString(r)
-			if err != nil {
-				return SnapshotChunk{}, err
-			}
-			headingPath = append(headingPath, heading)
-		}
-	} else {
-		// v4/v5 stored the untrusted article_range field here. Consume it for
-		// binary compatibility, but never expose or use it as an anchor.
-		if _, err := readString(r); err != nil {
-			return SnapshotChunk{}, err
-		}
+		headingPath = append(headingPath, heading)
 	}
 	tokenCount, err := readU32(r)
 	if err != nil {
