@@ -363,7 +363,7 @@ Release CI에서 Go build metadata가 제공되지 않는 실행 방식이면 `K
 
 영어는 절대 합격선을 병합 기준으로 사용하지 않습니다. 감사된 현행 E5의 영어 전체·holdout 문서/근거/candidate/status/refusal/context/canonical-source 수치를 [고정 비회귀 baseline](eval/baselines/rag-v1-e5-english.json)으로 두고 하나라도 낮아지면 실패합니다. baseline은 fixture SHA와 E5 model/revision/input contract가 다르면 비교 자체를 거부합니다. 속도는 품질 gate에서 제외하되 `p95_search_latency_ms`, `p95_reranker_latency_ms`, 모든 `get_context` 검증을 포함한 `p95_latency_ms`를 계속 기록·비교합니다. `eval/baselines/`의 그 밖의 report는 생성 당시 provenance를 보존하는 역사 자료이며 현재 head의 release 기준선으로 간주하지 않습니다.
 
-`.github/workflows/rag-release-eval.yml`은 같은 저장소의 PR, 주간 schedule 또는 수동 실행에서 고정 corpus와 full-vector generation을 검증한 뒤 위 gate를 실행합니다. Fork PR은 self-hosted runner에서 실행하지 않습니다. 보호된 `rag-release` environment와 `[self-hosted, linux, x64, krx-rag-eval]` runner가 필요하며, embedding endpoint는 repository variable로 지정합니다. Reranker는 보호된 audit에서 release gate를 충족하지 못했으므로 기본 CI 경로에서 활성화하지 않고 수동 비교만 지원합니다. `--split`과 `--case-prefix` 실행은 표본 수가 작은 진단용이므로 `--fail-on-gate`와 함께 사용할 수 없습니다. Baseline과 현재 report의 evaluator/corpus/index/vector/reranker/lexicon/gate/fixture provenance가 다르면 workflow는 수치 delta를 만들지 않고 비교 불가 필드를 기록합니다.
+`.github/workflows/rag-release-eval.yml`은 `workflow_dispatch`로 명시적으로 요청할 때만 고정 corpus와 full-vector generation을 검증한 뒤 위 gate를 실행합니다. PR과 schedule에서는 자동 실행하지 않습니다. 보호된 `rag-release` environment와 `[self-hosted, linux, x64, krx-rag-eval]` runner가 필요하며, embedding endpoint는 repository variable로 지정합니다. Reranker는 보호된 audit에서 release gate를 충족하지 못했으므로 기본 CI 경로에서 활성화하지 않고 수동 비교만 지원합니다. `--split`과 `--case-prefix` 실행은 표본 수가 작은 진단용이므로 `--fail-on-gate`와 함께 사용할 수 없습니다. Baseline과 현재 report의 evaluator/corpus/index/vector/reranker/lexicon/gate/fixture provenance가 다르면 workflow는 수치 delta를 만들지 않고 비교 불가 필드를 기록합니다.
 
 
 ## 테스트
