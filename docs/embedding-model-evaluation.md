@@ -118,11 +118,11 @@ before/after deltas are meaningful only when the complete embedding profile and
 the remaining evaluation provenance match.
 
 Latest audited local full report SHA-256:
-`610e9f684bf29fb0be5648c4114d6bfd60b7f05c7f84232942ec12e65c9cc77d`.
+`003f8e013b2784f7f504fa884361190bebc36c49ec654bf147925cb440f1c5a1`.
 
-The full search p95 is 237.13 ms, versus 222.92 ms in the previous report.
-This 14.21 ms increase is recorded for capacity planning but is not a quality
-gate.
+The full search p95 for commit `7dcedaa` is 239.53 ms, versus 222.92 ms in the
+previous report. This 16.61 ms increase is recorded for capacity planning but
+is not a quality gate.
 
 The final BM25-only development diagnostic records Document Hit@5 85.53%, MRR
 0.797, Evidence Hit@1 and Recall@3 87.67%, Candidate Recall@64 95.89%, status
@@ -144,7 +144,7 @@ The full Qwen generation took 30,686.31 seconds (8 hours 31 minutes 26 seconds)
 on the local GTX 1650 Ti path, produced a 190,716,171-byte vector artifact, and
 had a 304.33 ms search p95. The E5 vector artifact is 72,264,816 bytes; the
 previous E5 report had a 222.92 ms search p95 and the current report has
-237.13 ms. Speed remains diagnostic, not a quality gate.
+239.53 ms. Speed remains diagnostic, not a quality gate.
 
 These Qwen values are historical rejection evidence only. Qwen is not rerun on
 the corrected fixture and must not be used as a current baseline.
