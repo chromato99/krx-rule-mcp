@@ -63,7 +63,6 @@ provides a contrary rule:
 - `hard-uti-resident-id`
 - `audit-a-uti-phone-alternative`
 - `audit-a-english-uti-passport`
-- `audit-b-english-uti-license`
 - `hard-margin-consent-exception`
 
 They are now `supported` with `claim_relation: contradicts`. UTI cases require
@@ -71,19 +70,42 @@ the Article 18 phrase that a UTI shall be included for each reportable
 transaction. The margin case requires the Article 139 phrase prohibiting uses
 outside the enumerated purposes.
 
+`audit-b-english-uti-license` is different: it asks whether a driver's-license
+number is additionally required, not whether it can replace UTI. Article 18's
+UTI duty does not establish the absence of every other reporting field, and
+Article 16 delegates detailed data elements to the Enforcement Rules. The case
+is therefore `insufficient`; treating regulatory silence as a contradiction
+would be unsafe.
+
 ### Time and notice evidence
 
-- Intraday clearing-margin cases now require both `14시 이내` and the qualifier
+- Intraday client-margin cases now require both `14시 이내` and the qualifier
   that the deadline is the time determined by the general clearing member.
+- The audit subsequently separated Article 82's intraday *member* margin from
+  Article 88's intraday *client* margin. Queries that name the clearing member
+  or member margin target Article 82 (`14시까지`); queries that name a client,
+  customer, or entrusted margin target Article 88 (`14시 이내에서
+  일반청산회원이 정하는 시간`). Two queries that specify neither market nor
+  margin owner are labelled `ambiguous`, because exchange-traded and OTC rules
+  return different deadlines.
 - Dual-listing and short-sale notices now require the relevant notice-body
   phrases. Document identity alone is no longer evidence success.
+
+### Multiple valid evidence locations
+
+- `attachment-margin-vars` and its holdout variant previously accepted only the
+  detailed HWP attachment. Article 20 of the same rule directly defines
+  `상품군 구성`, `가격상관율`, and `상대적규모비율` as margin-reduction
+  variables, so that article is also an evidence-valid target. This broadens
+  valid evidence rather than changing the query or weakening its required
+  terms.
 
 ## Result
 
 After correction, all 210 cases and all labelled document/article/attachment
 targets pass the corpus-grounding audit. Fixture SHA-256 is:
 
-`5026836077883452ba19c64882fd8908e7463ed383ba318d7c877bf8afd07764`.
+`00fd17323cb91e8f11a143fcccf7f13bc6db32daf2dd060d9f6d3ce3af4d9cb6`.
 
 The corrected E5 evaluation has lower retrieval metrics because it now counts
 six legitimate contradiction questions as answerable and requires actual HWP
@@ -97,6 +119,22 @@ structured chunker clears the article owner before the substantive paragraph.
 The raw article audit confirms that the fixture is correct; the missing search
 anchor remains a retrieval defect.
 
+## Holdout lifecycle
+
+The 46-case holdout was opened only after the compositional-expansion and
+evidence-selection design had been frozen. It correctly rejected a proposed
+rule that treated every unscoped deadline query spanning multiple result
+categories as ambiguous: that rule also rejected clearly scoped ESG, gold
+market, and emissions-market questions, so it was removed rather than tuned.
+
+The same run exposed the missing Article 20 alternative on
+`attachment-margin-vars-variant`; the already-established fixture correction
+was applied consistently. Because a candidate was rejected and one fixture
+label was corrected after observing this set, these 46 cases are now a consumed
+validation set, not an untouched final test. Any next retrieval or
+answerability tuning must finish against regression/development data and then
+use a new document-disjoint holdout before merge.
+
 ## Limits
 
 The executable audit proves consistency with the collected derivative corpus,
@@ -104,4 +142,4 @@ not current legal authority or every possible interpretation. The manual review
 checked query-to-target meaning, but compliance-sensitive answers must still
 verify the current Korean official source. Any corpus refresh that changes a
 target, formula, or effective date must rerun this audit and deliberately
-refresh the fixture checksum and English non-regression baseline.
+refresh the fixture checksum and model-independent English quality floor.

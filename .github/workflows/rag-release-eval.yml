@@ -33,7 +33,7 @@ jobs:
           go-version-file: krx-rule-mcp/go.mod
           cache-dependency-path: krx-rule-mcp/go.sum
 
-      - name: Verify pinned full-vector generation
+      - name: Verify repository default full-vector generation
         working-directory: krx-rule-mcp
         env:
           KRX_RULE_DATA_DIR: ${{ github.workspace }}/krx-rule-markdown/data
@@ -70,63 +70,18 @@ jobs:
           go run ./cmd/krx-rule-eval \
             --data-dir "$KRX_RULE_DATA_DIR" \
             --index-dir "$KRX_RULE_INDEX_DIR" \
-            --english-baseline eval/baselines/rag-v1-e5-english.json \
+            --english-quality-floor eval/baselines/rag-v1-english-floor.json \
             --vector --require-vector --fail-on-gate \
             --output eval/results/rag-v1-vector.json
 
-      - name: Record metric diff
+      - name: Record evaluation summary
         if: always()
         working-directory: krx-rule-mcp
         run: |
           if [ ! -f eval/results/rag-v1-vector.json ]; then
             exit 0
           fi
-          jq -n \
-            --slurpfile baseline eval/baselines/rag-v1-text-vector.json \
-            --slurpfile current eval/results/rag-v1-vector.json \
-            'def comparable_keys: [
-              "evaluator_version",
-              "corpus_release_hash",
-              "index_generation",
-              "index_source_hash",
-              "index_build_hash",
-              "indexer_version",
-              "bm25_artifact_digest",
-              "bm25_snapshot_version",
-              "embedding",
-              "reranker",
-              "lexicon_digest",
-              "runtime_vector_mode",
-              "retrieval_candidate_limit",
-              "retrieval_contract",
-              "answerability_gate",
-              "fixture_version",
-              "fixture_sha256",
-              "source_fixture_sha256"
-            ];
-            [comparable_keys[] as $key |
-              select($baseline[0].provenance[$key] != $current[0].provenance[$key]) |
-              $key
-            ] as $incompatible |
-            {
-              comparable: ($incompatible | length == 0),
-              incompatible_provenance_fields: $incompatible,
-              baseline_provenance: $baseline[0].provenance,
-              current_provenance: $current[0].provenance,
-              korean_summary_delta: (if ($incompatible | length) == 0 then {
-                document_hit_at_5_rate: ($current[0].language_summaries.ko.document_hit_at_5_rate - $baseline[0].language_summaries.ko.document_hit_at_5_rate),
-                mrr_at_5: ($current[0].language_summaries.ko.mrr_at_5 - $baseline[0].language_summaries.ko.mrr_at_5),
-                evidence_hit_at_1_rate: ($current[0].language_summaries.ko.evidence_hit_at_1_rate - $baseline[0].language_summaries.ko.evidence_hit_at_1_rate),
-                evidence_recall_at_3_rate: ($current[0].language_summaries.ko.evidence_recall_at_3_rate - $baseline[0].language_summaries.ko.evidence_recall_at_3_rate),
-                candidate_evidence_recall_at_64_rate: ($current[0].language_summaries.ko.candidate_evidence_recall_at_64_rate - $baseline[0].language_summaries.ko.candidate_evidence_recall_at_64_rate),
-                reranker_pool_hit_rate: ($current[0].language_summaries.ko.reranker_pool_hit_rate - $baseline[0].language_summaries.ko.reranker_pool_hit_rate),
-                insufficient_refusal_rate: ($current[0].language_summaries.ko.insufficient_refusal_rate - $baseline[0].language_summaries.ko.insufficient_refusal_rate),
-                p95_search_latency_ms: ($current[0].language_summaries.ko.p95_search_latency_ms - $baseline[0].language_summaries.ko.p95_search_latency_ms),
-                p95_reranker_latency_ms: ($current[0].language_summaries.ko.p95_reranker_latency_ms - $baseline[0].language_summaries.ko.p95_reranker_latency_ms),
-                p95_evaluation_latency_ms: ($current[0].language_summaries.ko.p95_latency_ms - $baseline[0].language_summaries.ko.p95_latency_ms)
-              } else null end)
-            }' > eval/results/rag-v1-vector-diff.json
-          jq '{provenance, summary, korean: .language_summaries.ko, korean_holdout: .language_split_summaries.ko.holdout, english: .language_summaries.en, english_holdout: .language_split_summaries.en.holdout}' eval/results/rag-v1-vector.json >> "$GITHUB_STEP_SUMMARY"
+          jq '{provenance, failure_stage_counts, summary, korean: .language_summaries.ko, korean_holdout: .language_split_summaries.ko.holdout, english: .language_summaries.en, english_holdout: .language_split_summaries.en.holdout}' eval/results/rag-v1-vector.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload evaluation reports
         if: always()

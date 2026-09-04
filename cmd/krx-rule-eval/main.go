@@ -25,7 +25,7 @@ func main() {
 	sourceFixturePath := flag.String("source-fixture", "eval/source/rag-queries-2026-07-28.json", "checksummed original 50-case fixture")
 	lexiconPath := flag.String("domain-lexicon", env("KRX_DOMAIN_LEXICON_PATH", searchindex.DefaultDomainLexiconPath), "domain lexicon YAML")
 	outputPath := flag.String("output", "eval/results/rag-v1-latest.json", "evaluation report output")
-	englishBaselinePath := flag.String("english-baseline", "eval/baselines/rag-v1-e5-english.json", "pinned E5 English non-regression baseline")
+	englishQualityFloorPath := flag.String("english-quality-floor", "eval/baselines/rag-v1-english-floor.json", "model-independent English minimum quality floor")
 	split := flag.String("split", "", "optional fixture split for diagnostic runs")
 	casePrefix := flag.String("case-prefix", "", "optional case-id prefix for diagnostic runs")
 	vectorEnabled := flag.Bool("vector", envBool("KRX_VECTOR_SEARCH_ENABLED"), "load full vector generation and query embedder")
@@ -126,9 +126,9 @@ func main() {
 		*outputPath,
 	)
 	if *failOnGate {
-		englishBaseline, err := loadEnglishNonRegressionBaseline(*englishBaselinePath)
+		englishFloor, err := loadEnglishQualityFloor(*englishQualityFloorPath)
 		fatalIf(err)
-		failures := qualityGateFailures(report, &englishBaseline)
+		failures := qualityGateFailures(report, &englishFloor)
 		if len(failures) > 0 {
 			for _, failure := range failures {
 				fmt.Fprintln(os.Stderr, "gate:", failure)
@@ -300,21 +300,12 @@ func writeReport(path string, report evaluation.Report) error {
 	return nil
 }
 
-func qualityGateFailures(report evaluation.Report, englishBaseline *englishNonRegressionBaseline) []string {
+func qualityGateFailures(report evaluation.Report, englishFloor *englishQualityFloor) []string {
 	var failures []string
 	if report.Summary.Cases < 120 {
 		failures = append(failures, "evaluation cases < 120")
 	}
-	embedding := report.Provenance.Embedding
-	if embedding == nil || embedding.Model != searchindex.DefaultEmbeddingModel ||
-		embedding.Revision != searchindex.DefaultEmbeddingModelRevision ||
-		embedding.Dimensions != searchindex.DefaultEmbeddingDimensions ||
-		embedding.QueryPrefix != searchindex.DefaultEmbeddingQueryPrefix ||
-		embedding.DocumentPrefix != searchindex.DefaultEmbeddingDocumentPrefix ||
-		embedding.InputFormat != string(searchindex.EmbeddingInputTextV1) ||
-		embedding.Scope != string(searchindex.VectorScopeFull) || embedding.Coverage < 1 {
-		failures = append(failures, "release embedding is not the pinned full-coverage multilingual-e5-small contract")
-	}
+	failures = append(failures, embeddingIntegrityFailures(report.Provenance.Embedding)...)
 
 	korean, ok := report.LanguageSummaries["ko"]
 	if !ok || korean.Cases < 150 || korean.DocumentEligible < 100 || korean.EvidenceEligible < 90 || korean.InsufficientCases < 20 || korean.AmbiguousCases < 10 {
@@ -366,8 +357,45 @@ func qualityGateFailures(report evaluation.Report, englishBaseline *englishNonRe
 	} else {
 		failures = append(failures, koreanQualityFailures("Korean holdout", koreanHoldout, report.Provenance.Reranker != nil)...)
 	}
-	failures = append(failures, englishNonRegressionFailures(report, englishBaseline)...)
+	failures = append(failures, englishQualityFloorFailures(report, englishFloor)...)
 	return failures
+}
+
+func embeddingIntegrityFailures(embedding *evaluation.EmbeddingIdentity) []string {
+	if embedding == nil {
+		return []string{"full-vector embedding provenance is missing"}
+	}
+	var failures []string
+	if strings.TrimSpace(embedding.Model) == "" {
+		failures = append(failures, "embedding model identity is missing")
+	}
+	if embedding.Dimensions <= 0 {
+		failures = append(failures, "embedding dimensions must be positive")
+	}
+	if strings.TrimSpace(embedding.InputFormat) == "" {
+		failures = append(failures, "embedding input format is missing")
+	} else if _, err := searchindex.ParseEmbeddingInputFormat(embedding.InputFormat); err != nil {
+		failures = append(failures, "embedding input format is unsupported")
+	}
+	if embedding.Scope != string(searchindex.VectorScopeFull) {
+		failures = append(failures, "embedding vector scope is not full")
+	}
+	if embedding.ExpectedChunkCount <= 0 || embedding.StoredVectorCount != embedding.ExpectedChunkCount || embedding.Coverage != 1 {
+		failures = append(failures, "embedding vector coverage is incomplete")
+	}
+	if !isSHA256Hex(embedding.ArtifactDigest) || !isSHA256Hex(embedding.MetadataDigest) {
+		failures = append(failures, "embedding artifact provenance is incomplete")
+	}
+	return failures
+}
+
+func isSHA256Hex(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size
 }
 
 func koreanGroupEvidenceHitAt1(cases []evaluation.CaseResult, group string) (count, eligible, hitAt1 int) {
@@ -416,41 +444,35 @@ func koreanQualityFailures(label string, summary evaluation.Summary, rerankerEna
 	return failures
 }
 
-func englishNonRegressionFailures(report evaluation.Report, baseline *englishNonRegressionBaseline) []string {
-	if baseline == nil {
-		return []string{"English non-regression baseline is missing"}
+func englishQualityFloorFailures(report evaluation.Report, floor *englishQualityFloor) []string {
+	if floor == nil {
+		return []string{"English quality floor is missing"}
 	}
 	var failures []string
-	if report.Provenance.FixtureSHA256 != baseline.FixtureSHA256 {
-		return []string{fmt.Sprintf("English baseline fixture mismatch: report=%s baseline=%s", report.Provenance.FixtureSHA256, baseline.FixtureSHA256)}
-	}
-	embedding := report.Provenance.Embedding
-	if embedding == nil || embedding.Model != baseline.Embedding.Model || embedding.Revision != baseline.Embedding.Revision ||
-		embedding.Dimensions != baseline.Embedding.Dimensions || embedding.QueryPrefix != baseline.Embedding.QueryPrefix ||
-		embedding.DocumentPrefix != baseline.Embedding.DocumentPrefix || embedding.InputFormat != baseline.Embedding.InputFormat {
-		return []string{"English baseline embedding contract mismatch"}
+	if report.Provenance.FixtureSHA256 != floor.FixtureSHA256 {
+		return []string{fmt.Sprintf("English quality floor fixture mismatch: report=%s floor=%s", report.Provenance.FixtureSHA256, floor.FixtureSHA256)}
 	}
 	overall, ok := report.LanguageSummaries["en"]
 	if !ok {
 		failures = append(failures, "English summary is missing")
 	} else {
-		failures = append(failures, compareEnglishBaseline("English", englishBaselineMetricsFromSummary(overall), baseline.Overall)...)
+		failures = append(failures, compareEnglishQualityFloor("English", englishQualityMetricsFromSummary(overall), floor.Overall)...)
 	}
 	holdout, ok := report.LanguageSplitSummaries["en"]["holdout"]
 	if !ok {
 		failures = append(failures, "English holdout summary is missing")
 	} else {
-		failures = append(failures, compareEnglishBaseline("English holdout", englishBaselineMetricsFromSummary(holdout), baseline.Holdout)...)
+		failures = append(failures, compareEnglishQualityFloor("English holdout", englishQualityMetricsFromSummary(holdout), floor.Holdout)...)
 	}
 	return failures
 }
 
-func compareEnglishBaseline(label string, current, baseline englishBaselineMetrics) []string {
+func compareEnglishQualityFloor(label string, current, floor englishQualityMetrics) []string {
 	var failures []string
-	if current.Cases != baseline.Cases || current.DocumentEligible != baseline.DocumentEligible ||
-		current.EvidenceEligible != baseline.EvidenceEligible || current.InsufficientCases != baseline.InsufficientCases ||
-		current.EnglishCanonicalChecks != baseline.EnglishCanonicalChecks {
-		failures = append(failures, label+" baseline coverage mismatch")
+	if current.Cases != floor.Cases || current.DocumentEligible != floor.DocumentEligible ||
+		current.EvidenceEligible != floor.EvidenceEligible || current.InsufficientCases != floor.InsufficientCases ||
+		current.EnglishCanonicalChecks != floor.EnglishCanonicalChecks {
+		failures = append(failures, label+" quality-floor coverage mismatch")
 		return failures
 	}
 	checks := []struct {
@@ -459,14 +481,14 @@ func compareEnglishBaseline(label string, current, baseline englishBaselineMetri
 		baseline   int
 		lowerIsBad bool
 	}{
-		{name: "Document Hit@5", current: current.DocumentHitAt5, baseline: baseline.DocumentHitAt5, lowerIsBad: true},
-		{name: "evidence Hit@1", current: current.EvidenceHitAt1, baseline: baseline.EvidenceHitAt1, lowerIsBad: true},
-		{name: "evidence Recall@3", current: current.EvidenceRecallAt3, baseline: baseline.EvidenceRecallAt3, lowerIsBad: true},
-		{name: "candidate Recall@64", current: current.CandidateRecallAt64, baseline: baseline.CandidateRecallAt64, lowerIsBad: true},
-		{name: "status accuracy", current: current.StatusCorrect, baseline: baseline.StatusCorrect, lowerIsBad: true},
-		{name: "insufficient refusal", current: current.InsufficientRefused, baseline: baseline.InsufficientRefused, lowerIsBad: true},
-		{name: "false-supported", current: current.FalseSupported, baseline: baseline.FalseSupported},
-		{name: "canonical Korean source", current: current.EnglishCanonicalPassed, baseline: baseline.EnglishCanonicalPassed, lowerIsBad: true},
+		{name: "Document Hit@5", current: current.DocumentHitAt5, baseline: floor.DocumentHitAt5, lowerIsBad: true},
+		{name: "evidence Hit@1", current: current.EvidenceHitAt1, baseline: floor.EvidenceHitAt1, lowerIsBad: true},
+		{name: "evidence Recall@3", current: current.EvidenceRecallAt3, baseline: floor.EvidenceRecallAt3, lowerIsBad: true},
+		{name: "candidate Recall@64", current: current.CandidateRecallAt64, baseline: floor.CandidateRecallAt64, lowerIsBad: true},
+		{name: "status accuracy", current: current.StatusCorrect, baseline: floor.StatusCorrect, lowerIsBad: true},
+		{name: "insufficient refusal", current: current.InsufficientRefused, baseline: floor.InsufficientRefused, lowerIsBad: true},
+		{name: "false-supported", current: current.FalseSupported, baseline: floor.FalseSupported},
+		{name: "canonical Korean source", current: current.EnglishCanonicalPassed, baseline: floor.EnglishCanonicalPassed, lowerIsBad: true},
 	}
 	for _, check := range checks {
 		regressed := check.current > check.baseline
@@ -474,11 +496,11 @@ func compareEnglishBaseline(label string, current, baseline englishBaselineMetri
 			regressed = check.current < check.baseline
 		}
 		if regressed {
-			failures = append(failures, fmt.Sprintf("%s %s regressed: current=%d baseline=%d", label, check.name, check.current, check.baseline))
+			failures = append(failures, fmt.Sprintf("%s %s fell below quality floor: current=%d floor=%d", label, check.name, check.current, check.baseline))
 		}
 	}
-	if current.MRRAt5+1e-12 < baseline.MRRAt5 {
-		failures = append(failures, fmt.Sprintf("%s MRR@5 regressed: current=%.6f baseline=%.6f", label, current.MRRAt5, baseline.MRRAt5))
+	if current.MRRAt5+1e-12 < floor.MRRAt5 {
+		failures = append(failures, fmt.Sprintf("%s MRR@5 fell below quality floor: current=%.6f floor=%.6f", label, current.MRRAt5, floor.MRRAt5))
 	}
 	return failures
 }

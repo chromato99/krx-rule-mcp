@@ -1,15 +1,26 @@
-# Embedding model and retrieval evaluation
+# Embedding profiles and retrieval evaluation
 
 ## Decision
 
-Use only `intfloat/multilingual-e5-small` revision
-`614241f622f53c4eeff9890bdc4f31cfecc418b3` for document and query
-embeddings. The release gate rejects every other model, revision, dimension,
-prefix, input format, partial vector scope, or incomplete coverage.
+The project accepts any OpenAI-compatible embedding model that can produce a
+complete immutable generation. A generation uses exactly one embedding profile:
+model, optional revision, dimensions, query/document prefixes, and input format.
+Runtime settings must match that profile exactly. The release gate rejects
+missing or partial coverage and incompatible provenance, but does not whitelist
+a model name.
 
-The prior Qwen experiment is closed. It was substantially heavier, did not
-produce a clear aggregate improvement, regressed Korean retrieval and refusal
-safety, and is not a candidate for a second vector channel or rank fusion.
+`intfloat/multilingual-e5-small` revision
+`614241f622f53c4eeff9890bdc4f31cfecc418b3` remains the repository's default
+and currently audited reference profile. Its defaults are not inherited by a
+different model: non-default profiles must specify dimensions, and use empty
+prefixes unless the operator explicitly configures model-appropriate values.
+
+The prior Qwen experiment is closed as a replacement for the current default.
+It was substantially heavier, did not produce a clear aggregate improvement,
+and regressed Korean retrieval and refusal safety. This evidence does not ban
+other compatible profiles. Cross-model score fusion remains out of scope: raw
+similarity distributions are not comparable and each generation selects one
+profile.
 No application, evaluator, fixture, gate, or release-schema version was raised
 for this unmerged PR.
 
@@ -36,11 +47,20 @@ The review found and corrected several label defects:
   labelled `insufficient`, although the regulations directly require UTI and
   prohibit non-enumerated uses of customer margin. They are now supported
   contradiction cases.
+- A different UTI question asked whether a driver's-license number was also
+  required. The UTI article is not an exhaustive list of reporting fields, so
+  that question is now `insufficient` instead of inferring a prohibition from
+  silence.
+- Intraday member margin in Article 82 and intraday client margin in Article 88
+  were conflated. Formal member/client queries now target the corresponding
+  article, while two market-unspecified deadline questions are `ambiguous`.
 - HWP and notice cases previously passed on attachment or document identity
   alone. They now require the actual formula or notice text.
+- Both margin-variable cases accept Article 20's direct definition as well as
+  the detailed HWP attachment.
 
 Fixture SHA-256:
-`5026836077883452ba19c64882fd8908e7463ed383ba318d7c877bf8afd07764`.
+`00fd17323cb91e8f11a143fcccf7f13bc6db32daf2dd060d9f6d3ce3af4d9cb6`.
 
 ## Current E5 results
 
@@ -50,55 +70,66 @@ and `text-v1` input.
 | Metric | Korean overall | Korean holdout |
 | --- | ---: | ---: |
 | Cases | 180 | 35 |
-| Document Hit@5 | 89.52% | 85.71% |
-| MRR@5 | 0.810 | 0.746 |
-| Evidence Hit@1 | 77.59% | 60.00% |
-| Evidence Recall@3 | 85.34% | 75.00% |
-| Candidate Recall@64 | 93.97% | 90.00% |
-| Status accuracy | 93.89% | 94.29% |
+| Document Hit@5 | 98.36% | 90.48% |
+| MRR@5 | 0.894 | 0.794 |
+| Evidence Hit@1 | 94.74% | 75.00% |
+| Evidence Recall@3 | 97.37% | 85.00% |
+| Candidate Recall@64 | 99.12% | 95.00% |
+| Status accuracy | 98.33% | 97.14% |
 | Insufficient refusal | 100.00% | 100.00% |
 | False-supported | 0 | 0 |
 | Context consistency | 100.00% | 100.00% |
 
-The lower numbers compared with the earlier report are primarily an evaluation
-correction, not a search-code regression: six false-negative queries are now
-properly treated as answerable contradictions, document-only notices require
-their actual body evidence, and HWP targets require the requested formula.
+The current implementation separates broad recall expansions from reviewed
+evidence terms, uses compositional intent groups instead of evaluation-sentence
+aliases, checks explicit identifiers across a multi-chunk evidence bundle, and
+validates English calculation targets. On the 173 Korean cases whose status,
+relation, and target meaning were unchanged, document Hit@5 increased from 108
+to 115 cases, Evidence Hit@1 from 93 to 103, Evidence Recall@3 from 98 to 106,
+and correct status from 165 to 172.
 
-The 116 Korean evidence cases expose all three retrieval stages:
+The current Korean diagnostic failures are one candidate-generation/document
+ranking miss, two evidence-selection misses, three top-one ranking misses, and
+three answerability misses. HWP evidence is 21/21, supported Korean
+contradiction Evidence Hit@1 is 15/16, and both the `semantic` and
+`semantic-variant` groups are 8/8 at rank one. Two of the answerability misses
+are deliberately retained development cases where a deadline question omits
+the applicable market; a simple category-count ambiguity rule was rejected
+because it also rejected scoped ESG, gold, and emissions questions.
 
-- 7 targets are absent from fused candidate rank 64, including the margin
-  variable attachment, retrospective listing/margin paraphrases, and dispute
-  record retention.
-- 11 cases have a qualifying first-stage candidate but no matching final
-  evidence in the top three contexts. Most are contradiction, notice, or HWP
-  formula cases rejected by evidence selection or answerability.
-- 9 cases have the right evidence at rank two or three rather than rank one.
-
-Korean status errors are 11 false negatives (`supported` observed as
-`insufficient`); false-supported remains zero. This is why candidate generation,
-final evidence ranking, and the conservative answerability gate must be measured
-separately.
-
-English is monitored for non-regression rather than used as an absolute merge
-criterion:
+English is monitored as a model-independent quality floor rather than using the
+Korean absolute merge thresholds:
 
 | Metric | English overall | English holdout |
 | --- | ---: | ---: |
 | Cases | 28 | 11 |
-| Document Hit@5 | 88.89% | 90.91% |
-| MRR@5 | 0.827 | 0.818 |
-| Evidence Hit@1 | 70.37% | 72.73% |
-| Evidence Recall@3 | 88.89% | 90.91% |
-| Candidate Recall@64 | 92.59% | 90.91% |
-| Status accuracy | 92.86% | 100.00% |
+| Document Hit@5 | 96.15% | 90.91% |
+| MRR@5 | 0.872 | 0.818 |
+| Evidence Hit@1 | 76.92% | 72.73% |
+| Evidence Recall@3 | 96.15% | 90.91% |
+| Candidate Recall@64 | 92.31% | 90.91% |
+| Status accuracy | 100.00% | 100.00% |
 
 The exact counts are pinned in
-`eval/baselines/rag-v1-e5-english.json`. A release fails if any English count
-or MRR regresses, or if the fixture SHA or E5 embedding contract differs.
+`eval/baselines/rag-v1-english-floor.json`. A release using any embedding
+profile fails if an English count or MRR falls below this floor. The fixture SHA
+must match, but the floor does not require the E5 model identity. Same-profile
+before/after deltas are meaningful only when the complete embedding profile and
+the remaining evaluation provenance match.
 
-Audited E5 report SHA-256:
-`f7b84af82895ea0a152d1d026cdc0a51672a5f3756961bdac4f24073deb7e60c`.
+Latest audited local full report SHA-256:
+`610e9f684bf29fb0be5648c4114d6bfd60b7f05c7f84232942ec12e65c9cc77d`.
+
+The full search p95 is 237.13 ms, versus 222.92 ms in the previous report.
+This 14.21 ms increase is recorded for capacity planning but is not a quality
+gate.
+
+The final BM25-only development diagnostic records Document Hit@5 85.53%, MRR
+0.797, Evidence Hit@1 and Recall@3 87.67%, Candidate Recall@64 95.89%, status
+accuracy 90.35%, insufficient refusal 100%, false-supported zero, and a
+169.28 ms search p95. It confirms that the structural changes are usable
+without one named embedding model, but full hybrid retrieval remains materially
+better and is the release path being gated.
 
 ## Historical rejected Qwen experiment
 
@@ -111,9 +142,9 @@ three false-supported cases.
 
 The full Qwen generation took 30,686.31 seconds (8 hours 31 minutes 26 seconds)
 on the local GTX 1650 Ti path, produced a 190,716,171-byte vector artifact, and
-had a 304.33 ms search p95. The E5 vector artifact is 72,264,816 bytes and the
-audited E5 run had a search p95 around 191-193 ms. Speed remains diagnostic,
-not a quality gate.
+had a 304.33 ms search p95. The E5 vector artifact is 72,264,816 bytes; the
+previous E5 report had a 222.92 ms search p95 and the current report has
+237.13 ms. Speed remains diagnostic, not a quality gate.
 
 These Qwen values are historical rejection evidence only. Qwen is not rerun on
 the corrected fixture and must not be used as a current baseline.
@@ -133,48 +164,62 @@ Korean overall and Korean holdout independently require:
 
 Korean `semantic`, `semantic-variant`, and supported contradiction cases
 additionally require Evidence Hit@1 of at least 90%. Global protocol invariants
-and all HWP checks must pass. English has no independent absolute threshold; it
-must equal or exceed the pinned audited E5 baseline.
+and all HWP checks must pass. English must equal or exceed the model-independent
+quality floor established by the audited reference result.
 
-## Next stage: E5 only
+The current result does not pass this gate. Korean overall misses MRR by 0.006
+(0.894) and has 17/19 ambiguous clarifications (89.47%). Korean holdout misses
+Document Hit@5 (90.48%), MRR (0.794), Evidence Hit@1 (75%), and Evidence
+Recall@3 (85%). Holdout candidate Recall@64 is exactly 95%, status accuracy is
+97.14%, HWP is 5/5, semantic groups are 100%, and contradiction Hit@1 is above
+90%. Thus the threshold set is somewhat coarse on the small holdout, but the
+ranking and evidence gaps are too large to justify lowering it for this PR.
 
-Do not change aliases, weights, or answerability rules in response to sealed
-holdout failures.
+## Next stage: model-independent retrieval
 
-1. Keep the corrected 46 holdout cases sealed. Use regression and development
-   data only for model or retrieval design.
-2. Separate candidate misses from final-ranking misses. For each Korean
-   development query, retain the labelled positive chunk and review the closest
-   wrong BM25 and E5 chunks, especially same-document wrong articles, adjacent
-   articles, similar market rules, notices, and formula attachments.
-3. Correct general evidence semantics using development cases only. Direct
-   mandatory or exhaustive norms such as "include UTI" and "uses other than
-   these are prohibited" must be able to refute a proposed replacement without
-   requiring the replacement word itself in the article. Keep the existing
-   unknown-term and composite-claim checks so mixed in-domain/OOD questions
-   still fail closed. Normalize formula operators and spacing before HWP
-   evidence matching rather than adding formula-specific query aliases.
-4. Mine hard negatives using the maintained E5 model and BM25 only. Sentence
-   Transformers documents
-   [hard-negative mining](https://www.sbert.net/docs/package_reference/util/hard_negatives.html)
-   and optional cross-encoder rescoring for this purpose.
-5. Compare an E5-only multi-view candidate index: retain the canonical
-   `text-v1` vector and add a second E5 representation containing the document
-   title, article heading/path, and canonical text. Fuse ranks by chunk ID; do
-   not mix raw cosine scores. This tests whether structure fixes candidate
-   recall without training a new model.
-6. If Korean Candidate Recall@64 remains below 95%, fine-tune the same E5 model
-   with reviewed Korean query-positive-hard-negative examples. Include the
-   English evaluation pairs as replay data and reject the model if the pinned
-   English baseline regresses. The [E5 paper](https://arxiv.org/abs/2212.03533)
-   reports strong fine-tuned retrieval performance from contrastive training,
-   and Sentence Transformers provides
-   [task-specific losses](https://www.sbert.net/docs/package_reference/sentence_transformer/losses.html).
-7. Only after candidate recall passes should a Korean cross-encoder be retried
-   for Evidence Hit@1. A reranker cannot repair a positive chunk absent from
-   the candidate pool and remains disabled unless it improves sealed Korean
-   holdout without an English or safety regression.
+The existing 46-case holdout has been consumed: it rejected an over-broad
+deadline ambiguity rule, and the margin-variable alternative target was then
+made consistent with the regression case. Do not tune against it again.
 
-If these E5-only stages still miss the Korean gate, the next proposal must be
-based on the remaining error stage and fresh document-disjoint holdout evidence;
-it must not reintroduce Qwen or loosen the gate.
+1. Promote the consumed cases to development/audit status and reserve a new
+   document-disjoint holdout only after the next design is frozen. Keep source
+   and fixture checksums so later reports cannot silently reinterpret either
+   set.
+2. Add hierarchical retrieval rather than merely increasing a fixed candidate
+   depth. First retrieve document/section candidates from title, category, and
+   article-heading fields; then retrieve chunks inside those candidates. Fuse
+   independent BM25 and vector ranks by chunk ID. The earlier 120-to-256 depth
+   experiment increased raw recall but reduced Evidence Recall@3 and introduced
+   a false-supported result, demonstrating why pool depth and final evidence
+   selection must remain separate.
+3. Repair structural ownership before ranking. The known English JCF failure is
+   caused by a PDF `CHAPTER 3` marker clearing the Article 10 owner. Preserve
+   article/section ancestry in `krx-rule-markdown`, rebuild the immutable index,
+   and validate chunk-to-source provenance before measuring retrieval.
+4. Introduce parent-child evidence assembly. Retrieve compact paragraphs, then
+   assemble the selected article and narrowly bounded neighbors so a heading,
+   condition, exception, and answer value can be judged together. Candidate
+   recall, document rank, and returned evidence order must remain separately
+   observable.
+5. Rank evidence with general legal structure: query-to-heading alignment,
+   normative predicates, requested answer facets, and body-versus-attachment
+   intent. Forms should not displace a directly responsive rule article merely
+   because they repeat more query nouns; explicit annex/formula queries must
+   still prefer their attachments.
+6. Replace category-count ambiguity heuristics with competing-interpretation
+   detection. Generate the best answer-bearing evidence per document scope,
+   compare market/product metadata and extracted deadline/value spans, and ask
+   for clarification only when credible scopes conflict. A product or rule name
+   already grounded in the top document should suppress that clarification.
+7. Mine reusable hard negatives from same-title articles, neighboring
+   provisions, forms, and parallel market rules. Keep them phrase-independent
+   and run BM25-only plus every candidate embedding profile. Compare `text-v1`
+   with `structured-v1` across representative profiles; a view that helps only
+   one model remains opt-in.
+8. Retry an optional cross-encoder only after the new candidate stage is stable.
+   It may improve Evidence Hit@1 but cannot repair a missing positive and must
+   not become a baseline requirement.
+
+After these steps, freeze all retrieval and answerability choices, create the
+new holdout, and run it once. Do not lower the gate or add query-specific
+exceptions to favor E5 or any other model.

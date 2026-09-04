@@ -152,7 +152,7 @@ docker run --rm \
 ```
 
 The vector command builds the full corpus by default. For a cheap smoke test, add `--vector-sample-query "상장 심사" --vector-sample-per-query 16`.
-`--vector` publishes BM25, vector, metadata, and `generation.json` together below `generations/<id>/`. Release artifacts use only `intfloat/multilingual-e5-small` revision `614241f622f53c4eeff9890bdc4f31cfecc418b3`, 384 dimensions, `query: ` / `passage: ` prefixes, and `text-v1` document input. A different model or input format is a research-only generation and is rejected by the release quality gate.
+`--vector` publishes BM25, vector, metadata, and `generation.json` together below `generations/<id>/`. The checked-in reference artifact uses `intfloat/multilingual-e5-small` revision `614241f622f53c4eeff9890bdc4f31cfecc418b3`, 384 dimensions, `query: ` / `passage: ` prefixes, and `text-v1` document input. Other OpenAI-compatible embedding profiles are valid release candidates when rebuilt with their own explicit settings, complete coverage, matching runtime provenance, and the same Korean-primary quality gate.
 
 ## Images
 
@@ -189,8 +189,8 @@ Before applying, update:
 
 - the immutable server image digest in both the `image:` reference and `RULE_MCP_SERVER_IMAGE_DIGEST`
 - the operator-selected immutable TEI image and matching
-  `RULE_MCP_TEI_IMAGE_DIGEST`; it must support the pinned E5 model/revision
-  already shared by TEI, `KRX_EMBEDDING_MODEL_REVISION`, and the vector build metadata
+  `RULE_MCP_TEI_IMAGE_DIGEST`; it must support the selected embedding profile
+  shared by TEI, the `KRX_EMBEDDING_*` settings, and the vector build metadata
 - the rejected bearer-registry placeholder in `krx-rule-mcp-secret`
 - `RULE_MCP_EXPECTED_RELEASE_GENERATION`
 - ingress host and TLS secret

@@ -260,6 +260,7 @@ When using a different TEI model, set both the sidecar model and the MCP embeddi
 ```bash
 export RULE_MCP_TEI_MODEL_ID=BAAI/bge-m3
 export KRX_EMBEDDING_MODEL=BAAI/bge-m3
+export KRX_EMBEDDING_MODEL_REVISION=replace-with-pinned-model-revision
 export KRX_EMBEDDING_DIMENSIONS=1024
 export KRX_EMBEDDING_QUERY_PREFIX=""
 export KRX_EMBEDDING_DOCUMENT_PREFIX=""
@@ -275,7 +276,7 @@ go run ./cmd/krx-rule-index \
   --force
 ```
 
-Use the prefixes and document format recommended by the model. E5 uses `query: ` and `passage: `; the maintained generation's `text-v1` embeds only raw chunk text. `structured-v1` prepends fixed `title`, `category`, `article`, `path`, and `source` fields and remains available for controlled comparisons. Any format change requires a full vector rebuild because `input_format` is validated in vector metadata and the immutable generation descriptor.
+Use the prefixes and document format recommended by the model. E5 uses `query: ` and `passage: `; those prefixes and the pinned E5 revision are defaults only when the selected model is the repository default. A non-default model must set `KRX_EMBEDDING_DIMENSIONS` and otherwise starts with an empty revision and empty prefixes, preventing E5 conventions from silently contaminating another profile. The maintained generation's `text-v1` embeds only raw chunk text. `structured-v1` prepends fixed `title`, `category`, `article`, `path`, and `source` fields and remains available for controlled comparisons. Any format change requires a full vector rebuild because `input_format` is validated in vector metadata and the immutable generation descriptor.
 
 ## External Embeddings API
 

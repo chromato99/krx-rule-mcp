@@ -149,6 +149,7 @@ type Report struct {
 	SplitSummaries         map[string]Summary            `json:"split_summaries"`
 	LanguageSummaries      map[string]Summary            `json:"language_summaries"`
 	LanguageSplitSummaries map[string]map[string]Summary `json:"language_split_summaries"`
+	FailureStageCounts     map[string]int                `json:"failure_stage_counts"`
 	Slices                 map[string]SliceMetrics       `json:"slices"`
 	Cases                  []CaseResult                  `json:"cases"`
 }
@@ -232,6 +233,8 @@ type CaseResult struct {
 	CandidateVectorRank    int              `json:"candidate_vector_rank,omitempty"`
 	CandidateFusedRank     int              `json:"candidate_fused_rank,omitempty"`
 	CandidateFinalRank     int              `json:"candidate_final_rank,omitempty"`
+	CandidateTrace         []CandidateTrace `json:"candidate_trace,omitempty"`
+	FailureStages          []string         `json:"failure_stages,omitempty"`
 	RerankerPoolIncluded   bool             `json:"reranker_pool_included"`
 	RerankerCandidateCount int              `json:"reranker_candidate_count,omitempty"`
 	RerankerAdopted        bool             `json:"reranker_adopted"`
@@ -248,6 +251,25 @@ type CaseResult struct {
 	ElapsedMillis          float64          `json:"elapsed_ms"`
 	AutomaticPassed        bool             `json:"automatic_passed"`
 	Failures               []string         `json:"failures,omitempty"`
+}
+
+// CandidateTrace is a bounded evaluator-only view of the first-stage retrieval
+// path. It makes model-independent candidate and ranking failures inspectable
+// without changing the public MCP response.
+type CandidateTrace struct {
+	ChunkID         string   `json:"chunk_id"`
+	DocumentID      string   `json:"document_id"`
+	Source          string   `json:"source"`
+	AttachmentID    string   `json:"attachment_id,omitempty"`
+	ArticleID       string   `json:"article_id,omitempty"`
+	HeadingPath     []string `json:"heading_path,omitempty"`
+	TextPreview     string   `json:"text_preview,omitempty"`
+	TargetMatch     bool     `json:"target_match"`
+	BM25Rank        int      `json:"bm25_rank,omitempty"`
+	VectorRank      int      `json:"vector_rank,omitempty"`
+	FusedRank       int      `json:"fused_rank,omitempty"`
+	FinalRank       int      `json:"final_rank,omitempty"`
+	LexicalCoverage float64  `json:"lexical_coverage,omitempty"`
 }
 
 type ObservedResult struct {

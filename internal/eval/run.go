@@ -3,6 +3,7 @@ package evaluation
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -83,7 +84,18 @@ func runFixture(ctx context.Context, fixture Fixture, client Client, provenance 
 	report.SplitSummaries = summarizeSplits(fixture, report.Cases)
 	report.LanguageSummaries = summarizeLanguages(fixture, report.Cases)
 	report.LanguageSplitSummaries = summarizeLanguageSplits(fixture, report.Cases)
+	report.FailureStageCounts = summarizeFailureStages(report.Cases)
 	return report, nil
+}
+
+func summarizeFailureStages(cases []CaseResult) map[string]int {
+	counts := map[string]int{}
+	for _, result := range cases {
+		for _, stage := range result.FailureStages {
+			counts[stage]++
+		}
+	}
+	return counts
 }
 
 func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
@@ -103,6 +115,7 @@ func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
 	result.SearchElapsedMillis = float64(time.Since(searchStarted).Microseconds()) / 1000
 	if err != nil {
 		result.Failures = append(result.Failures, "search_rules: "+err.Error())
+		result.FailureStages = []string{"search"}
 		return result
 	}
 	result.ObservedStatus = string(search.Answerability.Status)
@@ -116,6 +129,7 @@ func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
 	result.CandidateVectorRank = candidatePolicyRank(item.Expectation, search.Candidates, func(candidate searchindex.ChunkCandidate) int { return candidate.VectorRank })
 	result.CandidateFusedRank = candidatePolicyRank(item.Expectation, search.Candidates, func(candidate searchindex.ChunkCandidate) int { return candidate.BaselineRank })
 	result.CandidateFinalRank = candidatePolicyRank(item.Expectation, search.Candidates, func(candidate searchindex.ChunkCandidate) int { return candidate.FinalRank })
+	result.CandidateTrace = buildCandidateTrace(item.Expectation, search.Candidates, 8)
 	result.RerankerPoolIncluded = candidatePolicyRank(item.Expectation, search.Candidates, func(candidate searchindex.ChunkCandidate) int { return candidate.RerankerRank }) > 0
 	result.StatusCorrect = result.ObservedStatus == result.ExpectedStatus && search.Answerable == (result.ExpectedStatus == "supported")
 	result.ClarificationProvided = strings.TrimSpace(search.Answerability.Clarification) != ""
@@ -204,7 +218,111 @@ func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
 	if result.ExpansionPassed != nil && !*result.ExpansionPassed {
 		result.Failures = append(result.Failures, "query expansion expectation failed")
 	}
+	result.FailureStages = classifyFailureStages(item, result)
 	return result
+}
+
+func buildCandidateTrace(expectation Expectation, candidates []searchindex.ChunkCandidate, limit int) []CandidateTrace {
+	if limit <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	ranked := append([]searchindex.ChunkCandidate(nil), candidates...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		left, right := ranked[i].BaselineRank, ranked[j].BaselineRank
+		if left == 0 {
+			left = int(^uint(0) >> 1)
+		}
+		if right == 0 {
+			right = int(^uint(0) >> 1)
+		}
+		if left == right {
+			return ranked[i].ChunkID < ranked[j].ChunkID
+		}
+		return left < right
+	})
+	selected := ranked
+	if len(ranked) > limit {
+		selected = append([]searchindex.ChunkCandidate(nil), ranked[:limit]...)
+		hasTarget := false
+		for _, candidate := range selected {
+			if len(matchingCandidateTargetIndexes(expectation, candidate)) > 0 {
+				hasTarget = true
+				break
+			}
+		}
+		if !hasTarget {
+			for _, candidate := range ranked[limit:] {
+				if len(matchingCandidateTargetIndexes(expectation, candidate)) > 0 {
+					selected = append(selected, candidate)
+					break
+				}
+			}
+		}
+	}
+	trace := make([]CandidateTrace, 0, len(selected))
+	for _, candidate := range selected {
+		trace = append(trace, CandidateTrace{
+			ChunkID: candidate.ChunkID, DocumentID: candidate.DocumentID, Source: candidate.Source,
+			AttachmentID: candidate.AttachmentID, ArticleID: candidate.ArticleID,
+			HeadingPath: append([]string(nil), candidate.HeadingPath...), TextPreview: candidateTextPreview(candidate.Text, 240),
+			TargetMatch: len(matchingCandidateTargetIndexes(expectation, candidate)) > 0,
+			BM25Rank:    candidate.BM25Rank, VectorRank: candidate.VectorRank, FusedRank: candidate.BaselineRank,
+			FinalRank: candidate.FinalRank, LexicalCoverage: candidate.LexicalCoverage,
+		})
+	}
+	return trace
+}
+
+func candidateTextPreview(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if limit > 0 && len(runes) > limit {
+		return string(runes[:limit]) + "…"
+	}
+	return value
+}
+
+func classifyFailureStages(item Case, result CaseResult) []string {
+	var stages []string
+	add := func(stage string) {
+		for _, existing := range stages {
+			if existing == stage {
+				return
+			}
+		}
+		stages = append(stages, stage)
+	}
+	if result.FilterLeaks > 0 {
+		add("filtering")
+	}
+	for _, check := range result.ContextChecks {
+		if check.Error != "" || !check.ChunkPresent || !check.DocumentMatches {
+			add("context-contract")
+			break
+		}
+	}
+	if item.Expectation.EvidenceStatus == "supported" {
+		if result.ObservedStatus == "supported" && (result.DocumentRank == 0 || result.DocumentRank > 5) {
+			add("document-ranking")
+		}
+		if result.EvidenceEligible && !result.EvidenceManualReview {
+			switch {
+			case result.CandidateFusedRank == 0 || result.CandidateFusedRank > 64:
+				add("candidate-generation")
+			case result.EvidenceRank == 0 || result.EvidenceRank > 3:
+				add("evidence-selection")
+			case result.EvidenceRank > 1:
+				add("top1-ranking")
+			}
+		}
+	}
+	if !result.StatusCorrect {
+		add("answerability")
+	}
+	if result.ExpansionPassed != nil && !*result.ExpansionPassed {
+		add("query-expansion")
+	}
+	return stages
 }
 
 func candidatePolicyRank(expectation Expectation, candidates []searchindex.ChunkCandidate, rankOf func(searchindex.ChunkCandidate) int) int {
@@ -403,8 +521,19 @@ func evidenceTextMatches(expectation EvidenceExpectation, text string) bool {
 	return true
 }
 
+var (
+	formulaTimesPattern = regexp.MustCompile(`(?i)(\\times|\btimes\b)`)
+	formulaGEPattern    = regexp.MustCompile(`(?i)(\\geq?|\bgeq?\b)`)
+)
+
 func normalizeEvidenceText(value string) string {
-	return strings.ToLower(strings.Join(strings.Fields(value), " "))
+	value = strings.ToLower(value)
+	value = strings.NewReplacer(
+		"`", "",
+	).Replace(value)
+	value = formulaTimesPattern.ReplaceAllString(value, "×")
+	value = formulaGEPattern.ReplaceAllString(value, "≥")
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func countFilterLeaks(input CaseInput, results []mcpserver.SearchResultDTO) int {

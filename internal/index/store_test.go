@@ -462,9 +462,7 @@ func writeTestVectorSnapshot(t *testing.T, root, path string, vectors map[string
 		t.Fatalf("build vector snapshot source: %v", err)
 	}
 	options := VectorWriteOptions{
-		ModelRevision:  "test-revision",
-		QueryPrefix:    DefaultEmbeddingQueryPrefix,
-		DocumentPrefix: DefaultEmbeddingDocumentPrefix,
+		ModelRevision: "test-revision",
 	}
 	if err := WriteVectorSnapshot(path, snap, vectors, "test-model", 2, options); err != nil {
 		t.Fatalf("write vector snapshot: %v", err)

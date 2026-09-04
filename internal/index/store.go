@@ -659,9 +659,9 @@ func vectorMetadataRejectReason(metadata VectorMetadata, snap VectorSnapshot) st
 		return "embedding_model_revision_mismatch"
 	case metadata.Dimensions != embedder.Dimensions:
 		return "embedding_dimensions_mismatch"
-	case metadata.QueryPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", DefaultEmbeddingQueryPrefix):
+	case metadata.QueryPrefix != EmbeddingQueryPrefixFromEnv(embedder.Model):
 		return "embedding_query_prefix_mismatch"
-	case metadata.DocumentPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", DefaultEmbeddingDocumentPrefix):
+	case metadata.DocumentPrefix != EmbeddingDocumentPrefixFromEnv(embedder.Model):
 		return "embedding_document_prefix_mismatch"
 	case metadata.InputFormat != inputFormat:
 		return "embedding_input_format_mismatch"

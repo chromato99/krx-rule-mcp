@@ -205,6 +205,19 @@ func TestEvidenceTextMatchesNormalizesWhitespace(t *testing.T) {
 	}
 }
 
+func TestEvidenceTextMatchesNormalizesFormulaOperators(t *testing.T) {
+	expectation := EvidenceExpectation{MustContainAll: []string{"10 TIMES", "A GEQ B"}}
+	for _, text := range []string{
+		"10 \\times A, A \\geq B",
+		"10 × A, A ≥ B",
+		"10` TIMES `A, A GEQ B",
+	} {
+		if !evidenceTextMatches(expectation, text) {
+			t.Errorf("formula-equivalent evidence did not match: %q", text)
+		}
+	}
+}
+
 func TestEvaluateCaseAccumulatesTargetsAcrossEvidenceContexts(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -339,5 +352,41 @@ func TestExpansionTermsUseLexiconWhitespaceNormalization(t *testing.T) {
 	}
 	if !expansionMatches(expectation, search) {
 		t.Fatal("spacing-only lexicon equivalent did not satisfy expansion expectation")
+	}
+}
+
+func TestCandidateTraceAndFailureStagesExposeRetrievalLayer(t *testing.T) {
+	expectation := Expectation{
+		EvidenceStatus: "supported", ClaimRelation: "supports", TargetPolicy: "any",
+		Targets: []Target{{DocumentID: "rule-target", ArticleID: "제2조"}},
+	}
+	candidates := []searchindex.ChunkCandidate{
+		{ChunkID: "wrong#0", DocumentID: "rule-wrong", ArticleID: "제1조", Text: "  잘못된\n 인접 조문  ", BaselineRank: 1, FinalRank: 1},
+		{ChunkID: "target#0", DocumentID: "rule-target", ArticleID: "제2조", Text: "정답 조문", BaselineRank: 2, FinalRank: 4},
+	}
+	trace := buildCandidateTrace(expectation, candidates, 1)
+	if len(trace) != 2 || trace[0].ChunkID != "wrong#0" || trace[0].TextPreview != "잘못된 인접 조문" || trace[0].TargetMatch || !trace[1].TargetMatch {
+		t.Fatalf("candidate trace = %#v", trace)
+	}
+
+	item := Case{Expectation: expectation}
+	stages := classifyFailureStages(item, CaseResult{
+		StatusCorrect: true, DocumentRank: 1, EvidenceEligible: true,
+		CandidateFusedRank: 2, EvidenceRank: 0,
+	})
+	if len(stages) != 1 || stages[0] != "evidence-selection" {
+		t.Fatalf("evidence-selection stages = %#v", stages)
+	}
+	stages = classifyFailureStages(item, CaseResult{
+		StatusCorrect: false, EvidenceEligible: true, CandidateFusedRank: 0,
+	})
+	if len(stages) != 2 || stages[0] != "candidate-generation" || stages[1] != "answerability" {
+		t.Fatalf("candidate/answerability stages = %#v", stages)
+	}
+	stages = classifyFailureStages(item, CaseResult{
+		ObservedStatus: "supported", StatusCorrect: true, DocumentRank: 6,
+	})
+	if len(stages) != 1 || stages[0] != "document-ranking" {
+		t.Fatalf("document-ranking stages = %#v", stages)
 	}
 }

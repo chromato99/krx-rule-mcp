@@ -9,17 +9,17 @@ import (
 	evaluation "github.com/chromato99/krx-rule-mcp/internal/eval"
 )
 
-func TestRepositoryEnglishBaselineMatchesFixture(t *testing.T) {
-	baseline, err := loadEnglishNonRegressionBaseline(filepath.Join("..", "..", "eval", "baselines", "rag-v1-e5-english.json"))
+func TestRepositoryEnglishQualityFloorMatchesFixture(t *testing.T) {
+	floor, err := loadEnglishQualityFloor(filepath.Join("..", "..", "eval", "baselines", "rag-v1-english-floor.json"))
 	if err != nil {
-		t.Fatalf("loadEnglishNonRegressionBaseline: %v", err)
+		t.Fatalf("loadEnglishQualityFloor: %v", err)
 	}
 	_, fixtureHash, err := evaluation.LoadFixture(filepath.Join("..", "..", "eval", "golden", "rag-v1.json"))
 	if err != nil {
 		t.Fatalf("LoadFixture: %v", err)
 	}
-	if baseline.FixtureSHA256 != fixtureHash {
-		t.Fatalf("baseline fixture sha256 = %s, want %s", baseline.FixtureSHA256, fixtureHash)
+	if floor.FixtureSHA256 != fixtureHash {
+		t.Fatalf("quality floor fixture sha256 = %s, want %s", floor.FixtureSHA256, fixtureHash)
 	}
 }
 
@@ -40,35 +40,35 @@ func TestSplitEvaluationCannotUseReleaseGate(t *testing.T) {
 }
 
 func TestQualityGateThresholds(t *testing.T) {
-	passing, baseline := passingQualityGateReport()
-	if failures := qualityGateFailures(passing, baseline); len(failures) != 0 {
+	passing, floor := passingQualityGateReport()
+	if failures := qualityGateFailures(passing, floor); len(failures) != 0 {
 		t.Fatalf("threshold values should pass: %v", failures)
 	}
 	tooSmall := passing
 	tooSmall.Summary.Cases = 119
-	if failures := qualityGateFailures(tooSmall, baseline); !slices.Contains(failures, "evaluation cases < 120") {
+	if failures := qualityGateFailures(tooSmall, floor); !slices.Contains(failures, "evaluation cases < 120") {
 		t.Fatalf("case-count failures = %v", failures)
 	}
 
-	koreanRegression, baseline := passingQualityGateReport()
+	koreanRegression, floor := passingQualityGateReport()
 	korean := koreanRegression.LanguageSummaries["ko"]
 	korean.MRRAt5 = 0.899
 	koreanRegression.LanguageSummaries["ko"] = korean
-	if failures := qualityGateFailures(koreanRegression, baseline); !slices.Contains(failures, "Korean MRR@5 < 0.90") {
+	if failures := qualityGateFailures(koreanRegression, floor); !slices.Contains(failures, "Korean MRR@5 < 0.90") {
 		t.Fatalf("Korean failures = %v", failures)
 	}
 
-	semanticRegression, baseline := passingQualityGateReport()
+	semanticRegression, floor := passingQualityGateReport()
 	for index := range semanticRegression.Cases {
 		if semanticRegression.Cases[index].Group == "semantic" {
 			semanticRegression.Cases[index].EvidenceRank = 2
 		}
 	}
-	if failures := qualityGateFailures(semanticRegression, baseline); !slices.Contains(failures, "semantic evidence Hit@1 < 90%") {
+	if failures := qualityGateFailures(semanticRegression, floor); !slices.Contains(failures, "semantic evidence Hit@1 < 90%") {
 		t.Fatalf("semantic failures = %v", failures)
 	}
 
-	contradictionRegression, baseline := passingQualityGateReport()
+	contradictionRegression, floor := passingQualityGateReport()
 	contradictionRegression.Cases = make([]evaluation.CaseResult, 10)
 	for index := range contradictionRegression.Cases {
 		contradictionRegression.Cases[index] = evaluation.CaseResult{
@@ -77,34 +77,70 @@ func TestQualityGateThresholds(t *testing.T) {
 	}
 	contradictionRegression.Cases[8].EvidenceRank = 2
 	contradictionRegression.Cases[9].EvidenceRank = 2
-	if failures := qualityGateFailures(contradictionRegression, baseline); !slices.Contains(failures, "Korean contradiction target-evidence Hit@1 < 90%") {
+	if failures := qualityGateFailures(contradictionRegression, floor); !slices.Contains(failures, "Korean contradiction target-evidence Hit@1 < 90%") {
 		t.Fatalf("contradiction failures = %v", failures)
 	}
 
-	holdoutRegression, baseline := passingQualityGateReport()
+	holdoutRegression, floor := passingQualityGateReport()
 	holdout := holdoutRegression.LanguageSplitSummaries["ko"]["holdout"]
 	holdout.EvidenceRecallAt3Rate = 0.94
 	holdoutRegression.LanguageSplitSummaries["ko"]["holdout"] = holdout
-	if failures := qualityGateFailures(holdoutRegression, baseline); !slices.Contains(failures, "Korean holdout evidence Recall@3 < 95%") {
+	if failures := qualityGateFailures(holdoutRegression, floor); !slices.Contains(failures, "Korean holdout evidence Recall@3 < 95%") {
 		t.Fatalf("holdout failures = %v", failures)
 	}
 
-	englishRegression, baseline := passingQualityGateReport()
+	englishRegression, floor := passingQualityGateReport()
 	english := englishRegression.LanguageSummaries["en"]
 	english.EvidenceHitAt1--
 	englishRegression.LanguageSummaries["en"] = english
-	if failures := qualityGateFailures(englishRegression, baseline); !slices.Contains(failures, "English evidence Hit@1 regressed: current=9 baseline=10") {
+	if failures := qualityGateFailures(englishRegression, floor); !slices.Contains(failures, "English evidence Hit@1 fell below quality floor: current=9 floor=10") {
 		t.Fatalf("English holdout failures = %v", failures)
 	}
 
-	qwenRegression, baseline := passingQualityGateReport()
-	qwenRegression.Provenance.Embedding.Model = "Qwen/Qwen3-Embedding-0.6B"
-	if failures := qualityGateFailures(qwenRegression, baseline); !slices.Contains(failures, "release embedding is not the pinned full-coverage multilingual-e5-small contract") {
-		t.Fatalf("embedding failures = %v", failures)
+	alternateProfile, floor := passingQualityGateReport()
+	alternateProfile.Provenance.Embedding.Model = "vendor/multilingual-embedding"
+	alternateProfile.Provenance.Embedding.Revision = "revision-2"
+	alternateProfile.Provenance.Embedding.Dimensions = 768
+	alternateProfile.Provenance.Embedding.QueryPrefix = "search_query: "
+	alternateProfile.Provenance.Embedding.DocumentPrefix = "search_document: "
+	alternateProfile.Provenance.Embedding.InputFormat = "structured-v1"
+	if failures := qualityGateFailures(alternateProfile, floor); len(failures) != 0 {
+		t.Fatalf("model-independent gate rejected a valid alternate profile: %v", failures)
 	}
 }
 
-func passingQualityGateReport() (evaluation.Report, *englishNonRegressionBaseline) {
+func TestEmbeddingIntegrityFailures(t *testing.T) {
+	valid, _ := passingQualityGateReport()
+	if failures := embeddingIntegrityFailures(valid.Provenance.Embedding); len(failures) != 0 {
+		t.Fatalf("valid embedding provenance failed: %v", failures)
+	}
+	tests := []struct {
+		name string
+		edit func(*evaluation.EmbeddingIdentity)
+		want string
+	}{
+		{name: "model", edit: func(value *evaluation.EmbeddingIdentity) { value.Model = "" }, want: "embedding model identity is missing"},
+		{name: "dimensions", edit: func(value *evaluation.EmbeddingIdentity) { value.Dimensions = 0 }, want: "embedding dimensions must be positive"},
+		{name: "input format", edit: func(value *evaluation.EmbeddingIdentity) { value.InputFormat = "model-private-format" }, want: "embedding input format is unsupported"},
+		{name: "scope", edit: func(value *evaluation.EmbeddingIdentity) { value.Scope = "sample" }, want: "embedding vector scope is not full"},
+		{name: "coverage", edit: func(value *evaluation.EmbeddingIdentity) { value.StoredVectorCount-- }, want: "embedding vector coverage is incomplete"},
+		{name: "digest", edit: func(value *evaluation.EmbeddingIdentity) { value.MetadataDigest = "" }, want: "embedding artifact provenance is incomplete"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			report, _ := passingQualityGateReport()
+			test.edit(report.Provenance.Embedding)
+			if failures := embeddingIntegrityFailures(report.Provenance.Embedding); !slices.Contains(failures, test.want) {
+				t.Fatalf("failures = %v, want %q", failures, test.want)
+			}
+		})
+	}
+	if failures := embeddingIntegrityFailures(nil); !slices.Contains(failures, "full-vector embedding provenance is missing") {
+		t.Fatalf("nil embedding failures = %v", failures)
+	}
+}
+
+func passingQualityGateReport() (evaluation.Report, *englishQualityFloor) {
 	korean := evaluation.Summary{
 		Cases: 150, DocumentEligible: 100, EvidenceEligible: 90, InsufficientCases: 30, AmbiguousCases: 20,
 		DocumentHitAt5Rate: 0.95, MRRAt5: 0.90, EvidenceHitAt1Rate: 0.90, EvidenceRecallAt3Rate: 0.95,
@@ -131,7 +167,8 @@ func passingQualityGateReport() (evaluation.Report, *englishNonRegressionBaselin
 			Embedding: &evaluation.EmbeddingIdentity{
 				Model: "intfloat/multilingual-e5-small", Revision: "614241f622f53c4eeff9890bdc4f31cfecc418b3",
 				Dimensions: 384, QueryPrefix: "query: ", DocumentPrefix: "passage: ", InputFormat: "text-v1",
-				Scope: "full", Coverage: 1,
+				Scope: "full", ExpectedChunkCount: 100, StoredVectorCount: 100, Coverage: 1,
+				ArtifactDigest: strings.Repeat("a", 64), MetadataDigest: strings.Repeat("b", 64),
 			},
 		},
 		Summary:           evaluation.Summary{Cases: 170, FilterLeaks: 0, ContextChecks: 110, ContextConsistent: 110, ContextConsistencyRate: 1, HWPAttachmentChecks: 1, HWPAttachmentPassed: 1},
@@ -147,16 +184,12 @@ func passingQualityGateReport() (evaluation.Report, *englishNonRegressionBaselin
 			{Language: "ko", ExpectedStatus: "supported", ClaimRelation: "contradicts", EvidenceRank: 1},
 		},
 	}
-	baseline := &englishNonRegressionBaseline{
+	floor := &englishQualityFloor{
 		SchemaVersion: 1, FixtureSHA256: "fixture-sha",
-		Embedding: englishEmbeddingContract{
-			Model: "intfloat/multilingual-e5-small", Revision: "614241f622f53c4eeff9890bdc4f31cfecc418b3",
-			Dimensions: 384, QueryPrefix: "query: ", DocumentPrefix: "passage: ", InputFormat: "text-v1",
-		},
-		Overall: englishBaselineMetricsFromSummary(english),
-		Holdout: englishBaselineMetricsFromSummary(english),
+		Overall: englishQualityMetricsFromSummary(english),
+		Holdout: englishQualityMetricsFromSummary(english),
 	}
-	return report, baseline
+	return report, floor
 }
 
 func TestVCSRevisionUsesExplicitReleaseRevision(t *testing.T) {

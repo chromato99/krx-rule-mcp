@@ -804,7 +804,7 @@ func TestExpandedEvidencePrefersDirectHeadingPhrase(t *testing.T) {
 			},
 		},
 	}
-	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms, nil, nil)
+	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms, nil, nil, "")
 	if len(selected) != 2 || selected[0].ChunkID != "direct" {
 		t.Fatalf("direct heading was not preferred: %#v", selected)
 	}
@@ -833,7 +833,7 @@ func TestExpandedEvidenceRewardsMatchingAttachmentPhrase(t *testing.T) {
 			Text:         "가격상관율을 기초자산별로 산술평균한 값 중 최솟값으로 한다.",
 		},
 	}
-	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms, nil, nil)
+	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, terms, nil, nil, "")
 	if len(selected) != 2 || selected[0].ChunkID != "attachment" {
 		t.Fatalf("matching attachment was not preferred: %#v", selected)
 	}
@@ -845,7 +845,7 @@ func TestExpandedEvidenceKeepsQuantitativeClaimsInSelectedBundle(t *testing.T) {
 		{ChunkID: "three", DocumentID: "rule", ChunkIndex: 10, ArticleID: "제18조", FusedScore: 0.02, Text: "괴리율 3퍼센트"},
 		{ChunkID: "six", DocumentID: "rule", ChunkIndex: 20, ArticleID: "제19조", FusedScore: 0.02, Text: "괴리율 6퍼센트"},
 	}
-	selected := selectExpandedEvidenceCandidates(candidates, 3, nil, nil, []string{"3퍼센트", "6퍼센트"}, nil)
+	selected := selectExpandedEvidenceCandidates(candidates, 3, nil, nil, []string{"3퍼센트", "6퍼센트"}, nil, "")
 	if len(selected) != 3 || selected[0].ChunkID == "generic" {
 		t.Fatalf("quantitative evidence was not promoted: %#v", selected)
 	}
@@ -861,13 +861,51 @@ func TestExpandedEvidenceCoversExplicitIdentifierConcepts(t *testing.T) {
 		{"ETF", "상장지수집합투자기구"},
 		{"ETN", "상장지수증권"},
 	}
-	selected := selectExpandedEvidenceCandidates(candidates, 3, nil, nil, nil, concepts)
+	selected := selectExpandedEvidenceCandidates(candidates, 3, nil, nil, nil, concepts, "")
 	seen := map[string]bool{}
 	for _, candidate := range selected {
 		seen[candidate.ChunkID] = true
 	}
 	if !seen["etf"] || !seen["etn"] {
 		t.Fatalf("identifier concepts were not covered: %#v", selected)
+	}
+}
+
+func TestExpandedEvidencePromotesReviewedEvidenceConcept(t *testing.T) {
+	candidates := []ChunkCandidate{
+		{ChunkID: "generic", DocumentID: "rule", FusedScore: 0.040, Text: "상장예비심사 신청 절차"},
+		{ChunkID: "direct", DocumentID: "rule", FusedScore: 0.030, Text: "신청인은 상장예비심사 전에 거래소와 사전협의하여야 한다."},
+	}
+	concepts := [][]string{{"사전협의 의무", "사전협의", "미리 거래소와 협의"}}
+	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, nil, nil, concepts, "")
+	if len(selected) != 2 || selected[0].ChunkID != "direct" {
+		t.Fatalf("reviewed evidence concept was not promoted: %#v", selected)
+	}
+}
+
+func TestEvidenceSetConceptCoverageUsesWholeDocumentCandidateSet(t *testing.T) {
+	candidates := []ChunkCandidate{
+		{ChunkID: "direct-rule", Text: "순자산가치 괴리율이 기준을 초과하지 않도록 유동성공급호가를 제출한다."},
+		{ChunkID: "document-context", Text: "상장지수집합투자기구 ETF"},
+	}
+	concepts := [][]string{
+		{"ETF", "상장지수집합투자기구"},
+		{"NAV", "순자산가치"},
+		{"LP", "유동성공급호가"},
+	}
+	if got := evidenceSetConceptCoverage(candidates, concepts); got != 1 {
+		t.Fatalf("evidenceSetConceptCoverage() = %v, want 1", got)
+	}
+}
+
+func TestFormulaQueryPrefersConcreteFormulaChunk(t *testing.T) {
+	candidates := []ChunkCandidate{
+		{ChunkID: "explanation", DocumentID: "rule", FusedScore: 0.040, Text: "평가항목 점수는 다음 계산식에 따라 산출한다."},
+		{ChunkID: "formula", DocumentID: "rule", FusedScore: 0.036, Text: "```math\n점수 = min(10, 10 × 거래실적 / 평가기준)\n```"},
+	}
+	selected := selectExpandedEvidenceCandidates(candidates, 2, nil, nil, nil, nil, "평가점수 min 10 계산식")
+	if len(selected) != 2 || selected[0].ChunkID != "formula" {
+		t.Fatalf("formula chunk was not preferred: %#v", selected)
 	}
 }
 
@@ -895,6 +933,59 @@ func TestLoadDomainLexiconFromYAML(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("missing realtime price limit entry: %#v", entries)
+	}
+}
+
+func TestCompositionalLexiconMatchRequiresEveryConceptGroup(t *testing.T) {
+	entry := DomainLexiconEntry{
+		ID: "listing-consultation", Canonical: "사전협의 의무",
+		Confidence: "high", ReviewStatus: "curated-corpus",
+		MatchGroups: [][]string{
+			{"상장", "신규상장", "listing"},
+			{"협의", "조율", "조정", "consultation"},
+		},
+		Expansions: []string{"사전협의"},
+	}
+	matched := ExpandDomainQueryWithLexicon("신규상장 진행 순서를 거래소와 조정해야 하나", []DomainLexiconEntry{entry})
+	if !matched.Applied() || matched.MatchedTermCount() != 2 || matched.ReviewedMatchedGroupCount() != 2 || !strings.Contains(matched.ExpandedQuery, "사전협의") {
+		t.Fatalf("compositional match = %#v", matched)
+	}
+	for _, query := range []string{"신규상장 신청 서류", "거래소와 진행 방법 조율"} {
+		if got := ExpandDomainQueryWithLexicon(query, []DomainLexiconEntry{entry}); got.Applied() {
+			t.Errorf("partial concept groups matched %q: %#v", query, got)
+		}
+	}
+}
+
+func TestRepositoryCompositionalLexiconSeparatesNearbyLegalConcepts(t *testing.T) {
+	entries := loadTestDomainLexicon(t)
+	tests := []struct {
+		query    string
+		wantID   string
+		rejectID string
+	}{
+		{query: "KRX futures real-time 상하한가 폭", wantID: "derivatives_realtime_price_limit"},
+		{query: "보고대상 거래별 고유번호를 포함하는 조문", wantID: "trade_reporting_uti"},
+		{query: "거래 상대방 법인 식별번호", rejectID: "trade_reporting_uti"},
+		{query: "시장조성을 나흘만 한 경우", wantID: "market_maker_short_evaluation_period"},
+		{query: "의무충족일수와 시장조성일수의 비율", rejectID: "market_maker_short_evaluation_period"},
+		{query: "when is intraday clearing margin due", wantID: "intraday_member_margin_deadline", rejectID: "intraday_client_margin_deadline"},
+		{query: "intraday customer clearing margin deadline", wantID: "intraday_client_margin_deadline", rejectID: "intraday_member_margin_deadline"},
+	}
+	for _, test := range tests {
+		t.Run(test.query, func(t *testing.T) {
+			expansion := ExpandDomainQueryWithLexicon(test.query, entries)
+			seen := map[string]bool{}
+			for _, match := range expansion.AppliedTerms {
+				seen[match.ID] = true
+			}
+			if test.wantID != "" && !seen[test.wantID] {
+				t.Fatalf("expansion missing %q: %#v", test.wantID, expansion.AppliedTerms)
+			}
+			if test.rejectID != "" && seen[test.rejectID] {
+				t.Fatalf("expansion incorrectly included %q: %#v", test.rejectID, expansion.AppliedTerms)
+			}
+		})
 	}
 }
 

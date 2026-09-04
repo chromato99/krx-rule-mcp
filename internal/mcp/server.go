@@ -516,30 +516,49 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	var evidenceTokenWeights map[string]float64
 	var evidenceTerms []string
 	var evidenceConcepts [][]string
+	var documentIntentWeights map[string]float64
+	var documentIntentTerms []string
+	var documentIntentConcepts [][]string
 	domainExpansionMatchedTerms := 0
 	reviewedExpansionApplied := false
 	reviewedExpansionMatchedTerms := 0
+	reviewedExpansionMatchedGroups := 0
 	reviewedExpansionExactMatch := false
+	var reviewedExpansionEvidenceTerms []string
 	evidenceExpansion := searchindex.DomainQueryExpansion{OriginalQuery: query}
+	documentIntentExpansion := searchindex.DomainQueryExpansion{OriginalQuery: query}
 	if expansion.Applied() {
 		searchQuery = expansion.ExpandedQuery
 		tokenWeights = expansion.TokenWeights(0.4)
 		for _, match := range expansion.ReviewedAppliedTerms() {
-			evidenceExpansion.AppliedTerms = append(evidenceExpansion.AppliedTerms, match)
-			evidenceTerms = append(evidenceTerms, match.AddedTerms...)
+			documentIntentExpansion.AppliedTerms = append(documentIntentExpansion.AppliedTerms, match)
+			documentIntentTerms = append(documentIntentTerms, match.AddedTerms...)
+			documentIntentConcepts = append(documentIntentConcepts, []string{match.Canonical})
+			terms := append([]string{match.Canonical}, match.EvidenceTerms...)
+			evidenceMatch := match
+			evidenceMatch.AddedTerms = terms
+			evidenceExpansion.AppliedTerms = append(evidenceExpansion.AppliedTerms, evidenceMatch)
+			evidenceTerms = append(evidenceTerms, terms...)
+			reviewedExpansionEvidenceTerms = append(reviewedExpansionEvidenceTerms, terms...)
 		}
 		if len(evidenceExpansion.AppliedTerms) > 0 {
 			evidenceTokenWeights = evidenceExpansion.TokenWeights(0.4)
 			evidenceConcepts = evidenceExpansion.ReviewedEvidenceConcepts()
+			documentIntentWeights = documentIntentExpansion.TokenWeights(0.4)
 		}
 		queryExpansion = &expansion
 		domainExpansionMatchedTerms = expansion.MatchedTermCount()
 		reviewedExpansionApplied = expansion.Reviewed()
 		reviewedExpansionMatchedTerms = expansion.ReviewedMatchCount()
+		reviewedExpansionMatchedGroups = expansion.ReviewedMatchedGroupCount()
 		reviewedExpansionExactMatch = expansion.ReviewedExactMatch()
 	}
-	evidenceTerms = append(evidenceTerms, searchindex.ExplicitIdentifierEvidenceTerms(query)...)
-	evidenceConcepts = append(evidenceConcepts, searchindex.ExplicitIdentifierEvidenceConcepts(query)...)
+	explicitIdentifierTerms := searchindex.ExplicitIdentifierEvidenceTerms(query)
+	explicitIdentifierConcepts := searchindex.ExplicitIdentifierEvidenceConcepts(query)
+	evidenceTerms = append(evidenceTerms, explicitIdentifierTerms...)
+	evidenceConcepts = append(evidenceConcepts, explicitIdentifierConcepts...)
+	documentIntentTerms = append(documentIntentTerms, explicitIdentifierTerms...)
+	documentIntentConcepts = append(documentIntentConcepts, explicitIdentifierConcepts...)
 	filter := searchindex.Filter{
 		DocumentType:  documentType,
 		Language:      language,
@@ -597,18 +616,22 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 		}
 	}
 	searchOptions := searchindex.SearchOptions{
-		Query:                searchQuery,
-		OriginalQuery:        query,
-		Limit:                in.Limit,
-		Filter:               filter,
-		QueryVector:          queryVector,
-		TokenWeights:         tokenWeights,
-		EvidenceTokenWeights: evidenceTokenWeights,
-		EvidenceTerms:        evidenceTerms,
-		EvidenceClaims:       searchindex.QuantitativeEvidenceTerms(query),
-		EvidenceConcepts:     evidenceConcepts,
-		EvidenceLimit:        3,
-		CandidateLimit:       s.RetrievalCandidates,
+		Query:                      searchQuery,
+		OriginalQuery:              query,
+		Limit:                      in.Limit,
+		Filter:                     filter,
+		QueryVector:                queryVector,
+		TokenWeights:               tokenWeights,
+		EvidenceTokenWeights:       evidenceTokenWeights,
+		EvidenceTerms:              evidenceTerms,
+		EvidenceClaims:             searchindex.QuantitativeEvidenceTerms(query),
+		EvidenceConcepts:           evidenceConcepts,
+		DocumentIntentWeights:      documentIntentWeights,
+		DocumentIntentTerms:        documentIntentTerms,
+		DocumentIntentConcepts:     documentIntentConcepts,
+		ExplicitIdentifierConcepts: explicitIdentifierConcepts,
+		EvidenceLimit:              3,
+		CandidateLimit:             s.RetrievalCandidates,
 	}
 	candidates := s.Repo.Engine.RetrieveCandidates(searchOptions)
 	baselineResults := s.Repo.Engine.GroupCandidates(searchOptions, candidates)
@@ -619,16 +642,18 @@ func (s *Service) searchRules(ctx context.Context, _ *mcpsdk.CallToolRequest, in
 	}
 	decideAnswerability := func(results []searchindex.SearchResult) searchindex.AnswerabilityDecision {
 		return searchindex.EvaluateAnswerability(searchindex.AnswerabilityInput{
-			Query:                         query,
-			Filter:                        filter,
-			DomainExpansionApplied:        queryExpansion != nil,
-			DomainExpansionMatchedTerms:   domainExpansionMatchedTerms,
-			ReviewedExpansionApplied:      reviewedExpansionApplied,
-			ReviewedExpansionMatchedTerms: reviewedExpansionMatchedTerms,
-			ReviewedExpansionExactMatch:   reviewedExpansionExactMatch,
-			ContractValid:                 contractValid,
-			UnknownSpecificTermCount:      unknownSpecificTerms,
-			Results:                       results,
+			Query:                          query,
+			Filter:                         filter,
+			DomainExpansionApplied:         queryExpansion != nil,
+			DomainExpansionMatchedTerms:    domainExpansionMatchedTerms,
+			ReviewedExpansionApplied:       reviewedExpansionApplied,
+			ReviewedExpansionMatchedTerms:  reviewedExpansionMatchedTerms,
+			ReviewedExpansionMatchedGroups: reviewedExpansionMatchedGroups,
+			ReviewedExpansionEvidenceTerms: reviewedExpansionEvidenceTerms,
+			ReviewedExpansionExactMatch:    reviewedExpansionExactMatch,
+			ContractValid:                  contractValid,
+			UnknownSpecificTermCount:       unknownSpecificTerms,
+			Results:                        results,
 		})
 	}
 	results := baselineResults

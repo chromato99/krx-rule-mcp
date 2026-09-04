@@ -204,10 +204,8 @@ func TestGenerationPublishesValidatedVectorCompanion(t *testing.T) {
 		VectorModel:      "test-model",
 		VectorDimensions: 2,
 		VectorOptions: VectorWriteOptions{
-			Scope:          VectorScopeFull,
-			ModelRevision:  "test-revision",
-			QueryPrefix:    DefaultEmbeddingQueryPrefix,
-			DocumentPrefix: DefaultEmbeddingDocumentPrefix,
+			Scope:         VectorScopeFull,
+			ModelRevision: "test-revision",
 		},
 	})
 	if err != nil {
@@ -272,10 +270,8 @@ func TestLoadRepositoryGenerationUsesManifestAndFixedArtifactDigests(t *testing.
 		VectorModel:      "test-model",
 		VectorDimensions: 2,
 		VectorOptions: VectorWriteOptions{
-			Scope:          VectorScopeFull,
-			ModelRevision:  "test-revision",
-			QueryPrefix:    DefaultEmbeddingQueryPrefix,
-			DocumentPrefix: DefaultEmbeddingDocumentPrefix,
+			Scope:         VectorScopeFull,
+			ModelRevision: "test-revision",
 		},
 	})
 	if err != nil {

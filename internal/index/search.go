@@ -13,16 +13,19 @@ import (
 )
 
 const (
-	evidenceOriginalCoverageWeight  = 0.016
-	evidenceExpansionCoverageWeight = 0.012
-	evidencePhraseCoverageWeight    = 0.020
-	evidenceAttachmentPhraseWeight  = 0.016
-	evidenceHeadingPhraseWeight     = 0.032
-	evidenceChannelAgreementWeight  = 0.002
-	evidenceClaimCoverageWeight     = 0.048
-	documentIntentTermWeight        = 0.008
-	documentIntentPhraseWeight      = 0.008
-	documentIntentClaimWeight       = 0.032
+	evidenceOriginalCoverageWeight   = 0.016
+	evidenceExpansionCoverageWeight  = 0.012
+	evidencePhraseCoverageWeight     = 0.020
+	evidenceAttachmentPhraseWeight   = 0.016
+	evidenceHeadingPhraseWeight      = 0.032
+	evidenceChannelAgreementWeight   = 0.002
+	evidenceClaimCoverageWeight      = 0.048
+	evidenceConceptCoverageWeight    = 0.024
+	evidenceFormulaStructureWeight   = 0.006
+	documentIntentTermWeight         = 0.008
+	documentIntentPhraseWeight       = 0.008
+	documentIntentClaimWeight        = 0.032
+	documentIdentifierCoverageWeight = 0.004
 )
 
 type Filter struct {
@@ -39,16 +42,20 @@ type SearchOptions struct {
 	Query         string
 	OriginalQuery string
 
-	Limit                int
-	Filter               Filter
-	QueryVector          []float64
-	TokenWeights         map[string]float64
-	EvidenceTokenWeights map[string]float64
-	EvidenceTerms        []string
-	EvidenceClaims       []string
-	EvidenceConcepts     [][]string
-	EvidenceLimit        int
-	CandidateLimit       int
+	Limit                      int
+	Filter                     Filter
+	QueryVector                []float64
+	TokenWeights               map[string]float64
+	EvidenceTokenWeights       map[string]float64
+	EvidenceTerms              []string
+	EvidenceClaims             []string
+	EvidenceConcepts           [][]string
+	DocumentIntentWeights      map[string]float64
+	DocumentIntentTerms        []string
+	DocumentIntentConcepts     [][]string
+	ExplicitIdentifierConcepts [][]string
+	EvidenceLimit              int
+	CandidateLimit             int
 }
 
 type SearchResult struct {
@@ -822,22 +829,26 @@ func (e *Engine) groupChunkCandidates(opts SearchOptions, fused []ChunkCandidate
 			}
 		}
 		selected := selectExpandedEvidenceCandidates(
-			aggregate.candidates, evidenceLimit, opts.EvidenceTokenWeights, opts.EvidenceTerms, opts.EvidenceClaims, opts.EvidenceConcepts,
+			aggregate.candidates, evidenceLimit, opts.EvidenceTokenWeights, opts.EvidenceTerms, opts.EvidenceClaims, opts.EvidenceConcepts, query,
 		)
 		matches := make([]EvidenceMatch, 0, len(selected))
 		for _, candidate := range selected {
 			matches = append(matches, evidenceMatch(candidate, query))
 		}
 		SetSearchResultEvidence(&result, matches)
-		if len(selected) > 0 {
-			documentCandidate := selected[0]
+		documentSelected := selectExpandedEvidenceCandidates(
+			aggregate.candidates, evidenceLimit, opts.DocumentIntentWeights, opts.DocumentIntentTerms, opts.EvidenceClaims, opts.DocumentIntentConcepts, query,
+		)
+		if len(documentSelected) > 0 {
+			documentCandidate := documentSelected[0]
 			if candidatesContainReranked(aggregate.candidates) && len(retrievalSelected) > 0 {
 				documentCandidate = retrievalSelected[0]
 			}
-			result.Score += documentIntentTermWeight*expandedTermCoverage(documentCandidate, opts.EvidenceTokenWeights) +
-				documentIntentPhraseWeight*expandedPhraseCoverage(documentCandidate, opts.EvidenceTerms) +
+			result.Score += documentIntentTermWeight*expandedTermCoverage(documentCandidate, opts.DocumentIntentWeights) +
+				documentIntentPhraseWeight*expandedPhraseCoverage(documentCandidate, opts.DocumentIntentTerms) +
 				documentIntentClaimWeight*evidenceClaimCoverage(documentCandidate, opts.EvidenceClaims)
 		}
+		result.Score += documentIdentifierCoverageWeight * evidenceSetConceptCoverage(documentSelected, opts.ExplicitIdentifierConcepts)
 		result.Score += aggregate.metadataScore
 		results = append(results, result)
 	}
@@ -874,6 +885,7 @@ func selectExpandedEvidenceCandidates(
 	evidenceTerms []string,
 	evidenceClaims []string,
 	evidenceConcepts [][]string,
+	query string,
 ) []ChunkCandidate {
 	ranked := append([]ChunkCandidate(nil), candidates...)
 	for index := range ranked {
@@ -882,13 +894,17 @@ func selectExpandedEvidenceCandidates(
 			evidenceOriginalCoverageWeight*candidate.LexicalCoverage +
 			evidenceExpansionCoverageWeight*expandedTermCoverage(*candidate, tokenWeights) +
 			evidencePhraseCoverageWeight*expandedPhraseCoverage(*candidate, evidenceTerms) +
-			evidenceClaimCoverageWeight*evidenceClaimCoverage(*candidate, evidenceClaims)
+			evidenceClaimCoverageWeight*evidenceClaimCoverage(*candidate, evidenceClaims) +
+			evidenceConceptCoverageWeight*evidenceConceptCoverage(*candidate, evidenceConcepts)
 		if candidate.BM25Score > 0 && candidate.VectorScore > 0 {
 			candidate.Score += evidenceChannelAgreementWeight
 		}
 		candidate.Score += evidenceHeadingPhraseWeight * expandedHeadingPhraseCoverage(*candidate, evidenceTerms)
 		if candidate.AttachmentID != "" {
 			candidate.Score += evidenceAttachmentPhraseWeight * expandedPhraseCoverage(*candidate, evidenceTerms)
+		}
+		if formulaQueryIntent(query) && candidateContainsFormula(*candidate) {
+			candidate.Score += evidenceFormulaStructureWeight
 		}
 	}
 	better := func(left, right ChunkCandidate) bool {
@@ -901,6 +917,49 @@ func selectExpandedEvidenceCandidates(
 		return selectConceptCoveredEvidenceCandidates(ranked, limit, evidenceConcepts, better)
 	}
 	return selectRankedEvidenceCandidates(ranked, limit, better)
+}
+
+func evidenceConceptCoverage(candidate ChunkCandidate, concepts [][]string) float64 {
+	if len(concepts) == 0 {
+		return 0
+	}
+	return float64(protectedConceptCoverage(candidate, concepts)) / float64(len(concepts))
+}
+
+func evidenceSetConceptCoverage(candidates []ChunkCandidate, concepts [][]string) float64 {
+	if len(concepts) == 0 {
+		return 0
+	}
+	covered := 0
+	for _, concept := range concepts {
+		for _, candidate := range candidates {
+			if protectedConceptCoverage(candidate, [][]string{concept}) > 0 {
+				covered++
+				break
+			}
+		}
+	}
+	return float64(covered) / float64(len(concepts))
+}
+
+func formulaQueryIntent(query string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(query), " "))
+	for _, marker := range []string{"수식", "산식", "계산식", "계산 공식", "formula", "equation", "\\frac", "min ", "min(", "max ", "max(", "최솟값", "최댓값"} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return strings.ContainsAny(normalized, "×÷") || (strings.Contains(normalized, "/") && strings.Contains(normalized, "="))
+}
+
+func candidateContainsFormula(candidate ChunkCandidate) bool {
+	normalized := strings.ToLower(candidate.Text + " " + strings.Join(candidate.HeadingPath, " "))
+	for _, marker := range []string{"```hwp-equation", "```math", "\\frac", "\\min", "\\max", " times ", " over "} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return strings.Contains(normalized, "=") && strings.ContainsAny(normalized, "×÷/")
 }
 
 func selectConceptCoveredEvidenceCandidates(candidates []ChunkCandidate, limit int, concepts [][]string, better func(ChunkCandidate, ChunkCandidate) bool) []ChunkCandidate {

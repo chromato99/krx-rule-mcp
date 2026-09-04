@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -52,6 +53,57 @@ func TestDefaultEmbeddingInputMatchesMaintainedGeneration(t *testing.T) {
 	}
 	if format != EmbeddingInputTextV1 {
 		t.Fatalf("default format = %q, want %q", format, EmbeddingInputTextV1)
+	}
+}
+
+func TestDefaultEmbeddingProfileUsesE5Defaults(t *testing.T) {
+	t.Setenv("KRX_EMBEDDING_MODEL", DefaultEmbeddingModel)
+	unsetEnvForTest(t, "KRX_EMBEDDING_MODEL_REVISION")
+	unsetEnvForTest(t, "KRX_EMBEDDING_DIMENSIONS")
+	unsetEnvForTest(t, "KRX_EMBEDDING_QUERY_PREFIX")
+	unsetEnvForTest(t, "KRX_EMBEDDING_DOCUMENT_PREFIX")
+
+	query, err := NewQueryEmbedderFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := NewDocumentEmbedderFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query.ModelRevision != DefaultEmbeddingModelRevision || query.Dimensions != DefaultEmbeddingDimensions || query.InputPrefix != DefaultEmbeddingQueryPrefix {
+		t.Fatalf("query defaults = %#v", query)
+	}
+	if document.InputPrefix != DefaultEmbeddingDocumentPrefix {
+		t.Fatalf("document prefix = %q", document.InputPrefix)
+	}
+}
+
+func TestNonDefaultEmbeddingProfileDoesNotInheritE5Defaults(t *testing.T) {
+	t.Setenv("KRX_EMBEDDING_MODEL", "vendor/multilingual-embedding")
+	t.Setenv("KRX_EMBEDDING_DIMENSIONS", "768")
+	unsetEnvForTest(t, "KRX_EMBEDDING_MODEL_REVISION")
+	unsetEnvForTest(t, "KRX_EMBEDDING_QUERY_PREFIX")
+	unsetEnvForTest(t, "KRX_EMBEDDING_DOCUMENT_PREFIX")
+
+	query, err := NewQueryEmbedderFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := NewDocumentEmbedderFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query.ModelRevision != "" || query.InputPrefix != "" || document.InputPrefix != "" {
+		t.Fatalf("non-default profile inherited E5 settings: query=%#v document=%#v", query, document)
+	}
+}
+
+func TestNonDefaultEmbeddingProfileRequiresDimensions(t *testing.T) {
+	t.Setenv("KRX_EMBEDDING_MODEL", "vendor/multilingual-embedding")
+	t.Setenv("KRX_EMBEDDING_DIMENSIONS", "")
+	if _, err := NewQueryEmbedderFromEnv(); err == nil || !strings.Contains(err.Error(), "required for non-default") {
+		t.Fatalf("NewQueryEmbedderFromEnv() error = %v", err)
 	}
 }
 
@@ -214,4 +266,19 @@ func (e staticEmbedder) Embed(context.Context, []string) ([][]float64, error) {
 
 func (e staticEmbedder) EmbeddingInfo() (string, int) {
 	return "test", e.dimensions
+}
+
+func unsetEnvForTest(t *testing.T, key string) {
+	t.Helper()
+	value, exists := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if exists {
+			_ = os.Setenv(key, value)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
 }

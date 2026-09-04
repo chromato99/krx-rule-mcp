@@ -127,8 +127,8 @@ func TestVectorFreshIncludesPrefixMetadata(t *testing.T) {
 	vectors := map[string][]float64{"rule-1#0": {1, 0}}
 	options := searchindex.VectorWriteOptions{
 		Scope:          searchindex.VectorScopeFull,
-		QueryPrefix:    searchindex.DefaultEmbeddingQueryPrefix,
-		DocumentPrefix: searchindex.DefaultEmbeddingDocumentPrefix,
+		QueryPrefix:    "",
+		DocumentPrefix: "",
 	}
 	if err := searchindex.WriteVectorSnapshot(path, snap, vectors, "test-model", 2, options); err != nil {
 		t.Fatalf("write vector snapshot: %v", err)
@@ -143,16 +143,6 @@ func TestVectorFreshIncludesPrefixMetadata(t *testing.T) {
 	t.Setenv("KRX_EMBEDDING_DOCUMENT_PREFIX", "doc: ")
 	if vectorFresh(path, snap, embedder) {
 		t.Fatal("expected vector index to be stale after prefix change")
-	}
-}
-
-func TestEnvDefaultPreserveSpaceAllowsExplicitEmpty(t *testing.T) {
-	t.Setenv("KRX_TEST_PREFIX", "")
-	if got := envDefaultPreserveSpace("KRX_TEST_PREFIX", "passage: "); got != "" {
-		t.Fatalf("prefix = %q, want empty", got)
-	}
-	if got := envDefaultPreserveSpace("KRX_TEST_PREFIX_UNSET", "passage: "); got != "passage: " {
-		t.Fatalf("fallback prefix = %q", got)
 	}
 }
 

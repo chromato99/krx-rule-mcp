@@ -15,25 +15,29 @@ import (
 const DefaultDomainLexiconPath = "config/domain-lexicon.yaml"
 
 type DomainLexiconEntry struct {
-	ID           string   `json:"id" yaml:"id"`
-	Canonical    string   `json:"canonical" yaml:"canonical"`
-	Aliases      []string `json:"aliases,omitempty" yaml:"aliases,omitempty"`
-	Expansions   []string `json:"expansions,omitempty" yaml:"expansions,omitempty"`
-	SourceURLs   []string `json:"source_urls,omitempty" yaml:"source_urls,omitempty"`
-	Confidence   string   `json:"confidence,omitempty" yaml:"confidence,omitempty"`
-	ReviewStatus string   `json:"review_status,omitempty" yaml:"review_status,omitempty"`
-	Note         string   `json:"note,omitempty" yaml:"note,omitempty"`
+	ID            string     `json:"id" yaml:"id"`
+	Canonical     string     `json:"canonical" yaml:"canonical"`
+	Aliases       []string   `json:"aliases,omitempty" yaml:"aliases,omitempty"`
+	MatchGroups   [][]string `json:"match_groups,omitempty" yaml:"match_groups,omitempty"`
+	Expansions    []string   `json:"expansions,omitempty" yaml:"expansions,omitempty"`
+	EvidenceTerms []string   `json:"evidence_terms,omitempty" yaml:"evidence_terms,omitempty"`
+	SourceURLs    []string   `json:"source_urls,omitempty" yaml:"source_urls,omitempty"`
+	Confidence    string     `json:"confidence,omitempty" yaml:"confidence,omitempty"`
+	ReviewStatus  string     `json:"review_status,omitempty" yaml:"review_status,omitempty"`
+	Note          string     `json:"note,omitempty" yaml:"note,omitempty"`
 }
 
 type DomainLexiconMatch struct {
-	ID           string   `json:"id"`
-	Canonical    string   `json:"canonical"`
-	MatchedTerms []string `json:"matched_terms,omitempty"`
-	AddedTerms   []string `json:"added_terms,omitempty"`
-	SourceURLs   []string `json:"source_urls,omitempty"`
-	Confidence   string   `json:"confidence,omitempty"`
-	ReviewStatus string   `json:"review_status,omitempty"`
-	Note         string   `json:"note,omitempty"`
+	ID            string   `json:"id"`
+	Canonical     string   `json:"canonical"`
+	MatchedTerms  []string `json:"matched_terms,omitempty"`
+	MatchedGroups int      `json:"matched_groups,omitempty"`
+	AddedTerms    []string `json:"added_terms,omitempty"`
+	EvidenceTerms []string `json:"evidence_terms,omitempty"`
+	SourceURLs    []string `json:"source_urls,omitempty"`
+	Confidence    string   `json:"confidence,omitempty"`
+	ReviewStatus  string   `json:"review_status,omitempty"`
+	Note          string   `json:"note,omitempty"`
 }
 
 type DomainQueryExpansion struct {
@@ -61,6 +65,16 @@ func (e DomainQueryExpansion) ReviewedMatchCount() int {
 	return e.matchedTermCount(true)
 }
 
+func (e DomainQueryExpansion) ReviewedMatchedGroupCount() int {
+	maxGroups := 0
+	for _, match := range e.AppliedTerms {
+		if reviewedLexiconMatch(match) && match.MatchedGroups > maxGroups {
+			maxGroups = match.MatchedGroups
+		}
+	}
+	return maxGroups
+}
+
 func (e DomainQueryExpansion) ReviewedAppliedTerms() []DomainLexiconMatch {
 	var reviewed []DomainLexiconMatch
 	for _, match := range e.AppliedTerms {
@@ -74,9 +88,9 @@ func (e DomainQueryExpansion) ReviewedAppliedTerms() []DomainLexiconMatch {
 func (e DomainQueryExpansion) ReviewedEvidenceConcepts() [][]string {
 	var concepts [][]string
 	for _, match := range e.ReviewedAppliedTerms() {
-		// AddedTerms can contain broad recall expansions such as a document type.
-		// Evidence coverage must retain the reviewed canonical concept itself.
-		concept := uniqueTerms([]string{match.Canonical})
+		// AddedTerms may contain broad recall expansions. EvidenceTerms are a
+		// separate, reviewed set used for final evidence selection.
+		concept := uniqueTerms(append([]string{match.Canonical}, match.EvidenceTerms...))
 		if len(concept) > 0 {
 			concepts = append(concepts, concept)
 		}
@@ -201,7 +215,7 @@ func ExpandDomainQueryWithLexicon(query string, entries []DomainLexiconEntry) Do
 	var added []string
 	seenAdded := map[string]struct{}{}
 	for _, entry := range entries {
-		matched := matchedLexiconTerms(query, entry)
+		matched, matchedGroups := matchedLexiconTerms(query, entry)
 		if len(matched) == 0 {
 			continue
 		}
@@ -212,14 +226,16 @@ func ExpandDomainQueryWithLexicon(query string, entries []DomainLexiconEntry) Do
 		}
 		added = append(added, entryAdded...)
 		expansion.AppliedTerms = append(expansion.AppliedTerms, DomainLexiconMatch{
-			ID:           entry.ID,
-			Canonical:    entry.Canonical,
-			MatchedTerms: matched,
-			AddedTerms:   entryAdded,
-			SourceURLs:   append([]string(nil), entry.SourceURLs...),
-			Confidence:   entry.Confidence,
-			ReviewStatus: entry.ReviewStatus,
-			Note:         entry.Note,
+			ID:            entry.ID,
+			Canonical:     entry.Canonical,
+			MatchedTerms:  matched,
+			MatchedGroups: matchedGroups,
+			AddedTerms:    entryAdded,
+			EvidenceTerms: append([]string(nil), entry.EvidenceTerms...),
+			SourceURLs:    append([]string(nil), entry.SourceURLs...),
+			Confidence:    entry.Confidence,
+			ReviewStatus:  entry.ReviewStatus,
+			Note:          entry.Note,
 		})
 	}
 	if len(added) > 0 {
@@ -228,7 +244,7 @@ func ExpandDomainQueryWithLexicon(query string, entries []DomainLexiconEntry) Do
 	return expansion
 }
 
-func matchedLexiconTerms(query string, entry DomainLexiconEntry) []string {
+func matchedLexiconTerms(query string, entry DomainLexiconEntry) ([]string, int) {
 	candidates := uniqueTerms(append([]string{entry.Canonical}, entry.Aliases...))
 	var matched []string
 	seen := map[string]struct{}{}
@@ -243,7 +259,43 @@ func matchedLexiconTerms(query string, entry DomainLexiconEntry) []string {
 		seen[key] = struct{}{}
 		matched = append(matched, candidate)
 	}
+	matchedGroups := 0
+	if grouped := matchedLexiconGroups(query, entry.MatchGroups); len(grouped) > 0 {
+		matchedGroups = len(grouped)
+		for _, candidate := range grouped {
+			key := normalizeLexiconTerm(candidate)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			matched = append(matched, candidate)
+		}
+	}
 	sort.Strings(matched)
+	return matched, matchedGroups
+}
+
+// matchedLexiconGroups implements compositional intent matching. Every group
+// must contribute at least one term, while terms within a group are
+// alternatives. This avoids enumerating whole evaluation-query phrases.
+func matchedLexiconGroups(query string, groups [][]string) []string {
+	if len(groups) == 0 {
+		return nil
+	}
+	var matched []string
+	for _, group := range groups {
+		var groupMatch string
+		for _, term := range group {
+			if lexiconTermMatches(query, term) {
+				groupMatch = term
+				break
+			}
+		}
+		if groupMatch == "" {
+			return nil
+		}
+		matched = append(matched, groupMatch)
+	}
 	return matched
 }
 
@@ -351,7 +403,14 @@ func normalizeDomainLexicon(entries []DomainLexiconEntry) ([]DomainLexiconEntry,
 		entry.ReviewStatus = strings.TrimSpace(entry.ReviewStatus)
 		entry.Note = strings.TrimSpace(entry.Note)
 		entry.Aliases = uniqueTerms(entry.Aliases)
+		for groupIndex := range entry.MatchGroups {
+			entry.MatchGroups[groupIndex] = uniqueTerms(entry.MatchGroups[groupIndex])
+			if len(entry.MatchGroups[groupIndex]) == 0 {
+				return nil, fmt.Errorf("entry %q has empty match group %d", entry.ID, groupIndex)
+			}
+		}
 		entry.Expansions = uniqueTerms(entry.Expansions)
+		entry.EvidenceTerms = uniqueTerms(entry.EvidenceTerms)
 		entry.SourceURLs = trimUniqueStrings(entry.SourceURLs)
 		if entry.ID == "" {
 			return nil, fmt.Errorf("entry %d has empty id", i)

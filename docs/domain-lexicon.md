@@ -36,10 +36,18 @@ entries:
     aliases:
       - 동적상하한가
       - dynamic price limit
+    match_groups:
+      - [파생상품, 선물, futures, derivatives]
+      - [실시간, realtime, real-time]
+      - [상하한가, 가격제한, price limit]
     expansions:
       - 실시간 가격제한의 가격변동폭
       - 가격변동폭
       - 별표25
+    evidence_terms:
+      - 실시간 가격제한
+      - 가격변동폭
+      - real-time price limit
     source_urls:
       - https://regulation.krx.co.kr/contents/RGL/03/03050600/RGL03050600.jsp
     confidence: high
@@ -47,7 +55,29 @@ entries:
     note: Optional reviewer note.
 ```
 
-Required fields are `id` and `canonical`. The loader trims duplicate aliases, expansions, and source URLs, and rejects duplicate `id` values.
+Required fields are `id` and `canonical`. The loader trims duplicate aliases,
+match-group alternatives, expansions, evidence terms, and source URLs, and
+rejects duplicate `id` values or empty match groups.
+
+The fields have deliberately different jobs:
+
+- `aliases` is an OR-list. A direct alias match may activate the entry.
+- `match_groups` is compositional: every group must match, while alternatives
+  inside one group are OR-ed. This represents an intent such as
+  `(derivatives) AND (real-time) AND (price limit)` without copying complete
+  evaluation questions into the lexicon.
+- `expansions` improves candidate and document recall. It may contain broader
+  official names, document names, or related terms.
+- `evidence_terms` contains reviewed phrases that must occur in the returned
+  rule evidence. Together with `canonical`, these terms are used for final
+  evidence selection and answerability; broad recall expansions are not
+  trusted as proof.
+
+Do not add full evaluation sentences or expected numeric answers as aliases or
+expansions. Prefer reusable concept groups, and keep answer values in the
+corpus. When one colloquial term can mean different legal concepts, define
+separate entries. For example, intraday member margin (Article 82) and
+intraday client margin (Article 88) are not interchangeable.
 
 ## Example
 
@@ -75,4 +105,6 @@ A user query such as `동적상하한가` is not a term found in the collected r
 }
 ```
 
-RAG clients should still cite the returned rule/attachment context, not the lexicon entry itself. The lexicon improves recall; it is not legal authority.
+RAG clients should still cite the returned rule/attachment context, not the
+lexicon entry itself. The lexicon improves recall and helps select evidence; it
+is not legal authority and never supplies an answer value by itself.

@@ -40,7 +40,7 @@ type VectorGenerationDescriptor struct {
 	Scope       VectorScope          `json:"scope"`
 	Model       string               `json:"model"`
 	Revision    string               `json:"revision,omitempty"`
-	InputFormat EmbeddingInputFormat `json:"input_format,omitempty"`
+	InputFormat EmbeddingInputFormat `json:"input_format"`
 	Vectors     int                  `json:"vectors"`
 }
 
@@ -284,11 +284,6 @@ func validateGenerationDirectory(dir, expectedID string) (GenerationDescriptor, 
 	}
 	if err := validateArtifactDescriptor(dir, descriptor.BM25, BM25SnapshotFile); err != nil {
 		return GenerationDescriptor{}, fmt.Errorf("BM25 artifact: %w", err)
-	}
-	if descriptor.Vector != nil && descriptor.Vector.InputFormat == "" {
-		// Generation descriptors predating structured-v1 only embedded raw
-		// chunk text. Preserve their hashed JSON while making that provenance explicit.
-		descriptor.Vector.InputFormat = EmbeddingInputTextV1
 	}
 	if descriptor.Vector != nil {
 		if descriptor.Vector.Vectors < 0 {

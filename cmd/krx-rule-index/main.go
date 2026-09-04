@@ -131,8 +131,8 @@ func main() {
 		build.VectorOptions = searchindex.VectorWriteOptions{
 			Scope:          scope,
 			ModelRevision:  embedder.ModelRevision,
-			QueryPrefix:    envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", searchindex.DefaultEmbeddingQueryPrefix),
-			DocumentPrefix: envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", searchindex.DefaultEmbeddingDocumentPrefix),
+			QueryPrefix:    searchindex.EmbeddingQueryPrefixFromEnv(embedder.Model),
+			DocumentPrefix: searchindex.EmbeddingDocumentPrefixFromEnv(embedder.Model),
 			InputFormat:    inputFormat,
 		}
 	}
@@ -170,8 +170,8 @@ func vectorFreshWithPolicy(path string, snap searchindex.Snapshot, embedder *sea
 	}
 	if vector.Version != searchindex.VectorSnapshotFormatVersion || vector.IndexSourceHash != snap.IndexSourceHash || vector.IndexBuildHash != snap.IndexBuildHash || vector.CorpusReleaseHash != snap.CorpusReleaseHash ||
 		vector.Model != embedder.Model || vector.ModelRevision != embedder.ModelRevision || vector.Dimensions != embedder.Dimensions ||
-		vector.QueryPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", searchindex.DefaultEmbeddingQueryPrefix) ||
-		vector.DocumentPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", searchindex.DefaultEmbeddingDocumentPrefix) {
+		vector.QueryPrefix != searchindex.EmbeddingQueryPrefixFromEnv(embedder.Model) ||
+		vector.DocumentPrefix != searchindex.EmbeddingDocumentPrefixFromEnv(embedder.Model) {
 		return false
 	}
 	expectedIDs := make([]string, 0, len(snap.Chunks))
@@ -214,8 +214,8 @@ func vectorFreshWithPolicy(path string, snap searchindex.Snapshot, embedder *sea
 		metadata.StoredVectorCount == len(vector.Vectors) &&
 		metadata.ChunkIDSetHash == vector.ChunkIDSetHash &&
 		metadata.StoredChunkIDSetHash == expectedMetadata.StoredChunkIDSetHash &&
-		metadata.DocumentPrefix == envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", searchindex.DefaultEmbeddingDocumentPrefix) &&
-		metadata.QueryPrefix == envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", searchindex.DefaultEmbeddingQueryPrefix)
+		metadata.DocumentPrefix == searchindex.EmbeddingDocumentPrefixFromEnv(embedder.Model) &&
+		metadata.QueryPrefix == searchindex.EmbeddingQueryPrefixFromEnv(embedder.Model)
 }
 
 func selectVectorChunks(chunks []searchindex.SnapshotChunk, queries []string, perQuery, limit int) []searchindex.SnapshotChunk {
@@ -297,14 +297,6 @@ func envIndexDir() string {
 func envDefault(key, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func envDefaultPreserveSpace(key, fallback string) string {
-	value, ok := os.LookupEnv(key)
-	if !ok {
 		return fallback
 	}
 	return value

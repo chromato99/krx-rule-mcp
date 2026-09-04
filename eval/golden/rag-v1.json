@@ -793,6 +793,16 @@
                 "상대적 규모비율"
               ]
             }
+          },
+          {
+            "document_id": "210210269",
+            "article_id": "제20조",
+            "evidence": {
+              "must_contain_all": [
+                "가격상관율",
+                "상대적규모비율"
+              ]
+            }
           }
         ]
       }
@@ -1582,7 +1592,7 @@
         "targets": [
           {
             "document_id": "210124485",
-            "article_id": "제88조"
+            "article_id": "제82조"
           }
         ]
       }
@@ -1919,7 +1929,7 @@
         "targets": [
           {
             "document_id": "210124485-en",
-            "article_id": "§88"
+            "article_id": "§82"
           }
         ]
       }
@@ -2055,6 +2065,16 @@
               "must_contain_all": [
                 "가격상관율",
                 "상대적 규모비율"
+              ]
+            }
+          },
+          {
+            "document_id": "210210269",
+            "article_id": "제20조",
+            "evidence": {
+              "must_contain_all": [
+                "가격상관율",
+                "상대적규모비율"
               ]
             }
           }
@@ -3224,11 +3244,10 @@
         "targets": [
           {
             "document_id": "210124485",
-            "article_id": "제88조",
+            "article_id": "제82조",
             "evidence": {
               "must_contain_all": [
-                "14시 이내",
-                "일반청산회원이 정하는 시간"
+                "14시까지"
               ]
             }
           }
@@ -3709,21 +3728,12 @@
         "limit": 5
       },
       "expectation": {
-        "evidence_status": "supported",
-        "claim_relation": "supports",
+        "evidence_status": "ambiguous",
+        "claim_relation": "not_applicable",
         "target_policy": "any",
-        "targets": [
-          {
-            "document_id": "210124485",
-            "article_id": "제88조",
-            "evidence": {
-              "must_contain_all": [
-                "14시 이내",
-                "일반청산회원이 정하는 시간"
-              ]
-            }
-          }
-        ]
+        "targets": [],
+        "clarification_required": true,
+        "allow_results": true
       }
     },
     {
@@ -3950,24 +3960,11 @@
         "limit": 5
       },
       "expectation": {
-        "evidence_status": "supported",
-        "claim_relation": "contradicts",
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
         "target_policy": "any",
-        "targets": [
-          {
-            "document_id": "204847960-en",
-            "article_id": "§18",
-            "evidence": {
-              "must_contain_all": [
-                "UTI",
-                "include"
-              ],
-              "relation_must_contain_any": [
-                "shall include a UTI"
-              ]
-            }
-          }
-        ]
+        "targets": [],
+        "allow_results": false
       }
     },
     {
@@ -4115,11 +4112,10 @@
         "targets": [
           {
             "document_id": "210124485",
-            "article_id": "제88조",
+            "article_id": "제82조",
             "evidence": {
               "must_contain_all": [
-                "14시 이내",
-                "일반청산회원이 정하는 시간"
+                "14시까지"
               ]
             }
           }
@@ -4375,21 +4371,12 @@
         "limit": 5
       },
       "expectation": {
-        "evidence_status": "supported",
-        "claim_relation": "supports",
+        "evidence_status": "ambiguous",
+        "claim_relation": "not_applicable",
         "target_policy": "any",
-        "targets": [
-          {
-            "document_id": "210124485",
-            "article_id": "제88조",
-            "evidence": {
-              "must_contain_all": [
-                "14시 이내",
-                "일반청산회원이 정하는 시간"
-              ]
-            }
-          }
-        ]
+        "targets": [],
+        "clarification_required": true,
+        "allow_results": true
       }
     },
     {

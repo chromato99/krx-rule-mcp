@@ -82,6 +82,29 @@ func TestEvaluateAnswerabilityContracts(t *testing.T) {
 			status: AnswerabilityInsufficient, reason: "low_query_evidence_coverage",
 		},
 		{
+			name: "English calculation target must occur in evidence",
+			input: AnswerabilityInput{
+				Query: "Can NAV determine a home's property tax assessment?", ContractValid: true,
+				ReviewedExpansionApplied: true, ReviewedExpansionMatchedTerms: 2,
+				Results: []SearchResult{{EvidenceMatches: []EvidenceMatch{{
+					ChunkID: "nav#1", ArticleID: "Article 1", LexicalCoverage: 0.5, BM25Score: 1,
+					Text: "NAV is the net asset value used to measure a fund premium.",
+				}}}},
+			},
+			status: AnswerabilityInsufficient, reason: "instrumental_claim_mismatch",
+		},
+		{
+			name: "English calculation target grounded in evidence remains supported",
+			input: AnswerabilityInput{
+				Query: "How is the property tax assessment calculated?", ContractValid: true,
+				Results: []SearchResult{{EvidenceMatches: []EvidenceMatch{{
+					ChunkID: "tax#1", ArticleID: "Article 1", LexicalCoverage: 0.8, BM25Score: 1,
+					Text: "The property tax assessment is calculated from the assessed value.",
+				}}}},
+			},
+			status: AnswerabilitySupported, reason: "direct_evidence",
+		},
+		{
 			name:   "channel agreement supports paraphrase",
 			input:  AnswerabilityInput{Query: "결제 물량 계산 방식", ContractValid: true, Results: []SearchResult{{EvidenceMatches: []EvidenceMatch{{ChunkID: "rule#1", ArticleID: "제818조", LexicalCoverage: 0.40, BM25Score: 1, VectorScore: 0.8}}}}},
 			status: AnswerabilitySupported, reason: "bm25_vector_agreement",
@@ -97,24 +120,34 @@ func TestEvaluateAnswerabilityContracts(t *testing.T) {
 			status: AnswerabilitySupported, reason: "bm25_vector_agreement",
 		},
 		{
-			name: "unverified conditional term is insufficient",
+			name: "exhaustive prohibition overrides an invented condition",
 			input: AnswerabilityInput{Query: "고객이 동의하면 위탁증거금을 운영비로 사용할 수 있나", ContractValid: true, Results: []SearchResult{{
 				EvidenceMatches: []EvidenceMatch{{
 					ChunkID: "rule#margin", ArticleID: "제139조", LexicalCoverage: 0.40, BM25Score: 1, VectorScore: 0.8,
 					Text: "회원은 위탁증거금을 거래증거금 이외에는 사용하지 못한다.",
 				}},
 			}}},
-			status: AnswerabilityInsufficient, reason: "unverified_exception_condition",
+			status: AnswerabilitySupported, reason: "normative_counter_evidence",
 		},
 		{
-			name: "unverified contrastive alternative is insufficient",
+			name: "mandatory source refutes a proposed replacement",
 			input: AnswerabilityInput{Query: "UTI 대신 여권번호를 보고해도 되는가", ContractValid: true, Results: []SearchResult{{
 				EvidenceMatches: []EvidenceMatch{{
 					ChunkID: "rule#uti", ArticleID: "제18조", LexicalCoverage: 0.40, BM25Score: 1, VectorScore: 0.8,
 					Text: "거래고유식별기호를 반드시 포함하여 보고하여야 한다.",
 				}},
 			}}},
-			status: AnswerabilityInsufficient, reason: "unverified_contrastive_relation",
+			status: AnswerabilitySupported, reason: "normative_counter_evidence",
+		},
+		{
+			name: "non-exhaustive prohibition does not override an invented condition",
+			input: AnswerabilityInput{Query: "고객이 동의하면 위탁증거금을 운영비로 사용할 수 있나", ContractValid: true, Results: []SearchResult{{
+				EvidenceMatches: []EvidenceMatch{{
+					ChunkID: "rule#margin", ArticleID: "제139조", LexicalCoverage: 0.40, BM25Score: 1, VectorScore: 0.8,
+					Text: "회원은 위탁증거금을 거래증거금으로 사용하지 못한다.",
+				}},
+			}}},
+			status: AnswerabilityInsufficient, reason: "unverified_exception_condition",
 		},
 		{
 			name: "normative counter evidence supports a denied duty question",
@@ -418,7 +451,7 @@ func TestExplicitIdentifierEvidenceTermsHandleKoreanParticles(t *testing.T) {
 		}
 	}
 	entries := []DomainLexiconEntry{{
-		ID: "nav", Canonical: "순자산가치", Aliases: []string{"NAV"}, Expansions: []string{"괴리율"},
+		ID: "nav", Canonical: "순자산가치", Aliases: []string{"NAV"}, Expansions: []string{"괴리율"}, EvidenceTerms: []string{"net asset value"},
 		Confidence: "high", ReviewStatus: "official-glossary",
 	}}
 	expansion := ExpandDomainQueryWithLexicon("NAV에서 벌어지는가", entries)
@@ -426,7 +459,7 @@ func TestExplicitIdentifierEvidenceTermsHandleKoreanParticles(t *testing.T) {
 		t.Fatalf("particle-suffixed acronym expansion = %#v", expansion)
 	}
 	concepts := expansion.ReviewedEvidenceConcepts()
-	if len(concepts) != 1 || !containsString(concepts[0], "순자산가치") || containsString(concepts[0], "괴리율") {
+	if len(concepts) != 1 || !containsString(concepts[0], "순자산가치") || !containsString(concepts[0], "net asset value") || containsString(concepts[0], "괴리율") {
 		t.Fatalf("reviewed evidence concepts = %#v", concepts)
 	}
 }
@@ -439,7 +472,7 @@ func TestMeaningfulQueryTermsNormalizeKoreanParticles(t *testing.T) {
 	}
 }
 
-func TestContrastiveAlternativeMarkersDoNotTrustAliasOnlyEvidence(t *testing.T) {
+func TestContrastiveAlternativeAcceptsMandatorySourceEvidence(t *testing.T) {
 	evidence := []SearchResult{{EvidenceMatches: []EvidenceMatch{{Text: "UTI를 반드시 포함하여 보고하여야 한다."}}}}
 	for _, query := range []string{
 		"UTI 대신 여권번호", "UTI 말고 여권번호", "UTI가 아니라 여권번호",
@@ -448,12 +481,92 @@ func TestContrastiveAlternativeMarkersDoNotTrustAliasOnlyEvidence(t *testing.T) 
 		if !queryContainsContrastiveAlternative(query) {
 			t.Errorf("contrastive marker not detected: %q", query)
 		}
-		if contrastiveAlternativeVerified(query, evidence) {
-			t.Errorf("alias-only evidence verified contrastive relation: %q", query)
+		if !contrastiveAlternativeVerified(query, evidence) {
+			t.Errorf("mandatory source evidence did not verify contrastive relation: %q", query)
 		}
+	}
+	nonNormative := []SearchResult{{EvidenceMatches: []EvidenceMatch{{Text: "UTI는 거래고유식별기호를 의미한다."}}}}
+	if contrastiveAlternativeVerified("UTI 대신 여권번호", nonNormative) {
+		t.Fatal("definition-only evidence verified a contrastive relation")
+	}
+	wrongSource := []SearchResult{{EvidenceMatches: []EvidenceMatch{{Text: "ETN을 반드시 포함하여야 한다."}}}}
+	if contrastiveAlternativeVerified("ETF 대신 ETN", wrongSource) {
+		t.Fatal("mandatory alternative was mistaken for the required source")
+	}
+	prohibitedSource := []SearchResult{{EvidenceMatches: []EvidenceMatch{{Text: "UTI를 사용해서는 아니 된다."}}}}
+	if contrastiveAlternativeVerified("UTI 대신 여권번호", prohibitedSource) {
+		t.Fatal("prohibited source was mistaken for a mandatory source")
+	}
+	genericDuty := []SearchResult{{EvidenceMatches: []EvidenceMatch{{Text: "상장신청인은 거래소와 사전협의해야 한다."}}}}
+	if contrastiveAlternativeVerified("상장 사전협의 대신 외부기관 허가를 받아도 되나", genericDuty) {
+		t.Fatal("generic duty bypassed verification of an unrelated replacement")
+	}
+	englishMandatory := []SearchResult{{EvidenceMatches: []EvidenceMatch{{Text: "The reporting entity shall include a UTI for each reportable transaction."}}}}
+	if !contrastiveAlternativeVerified("Does KRX require a passport number instead of UTI for trade reports?", englishMandatory) {
+		t.Fatal("English post-marker mandatory source was not verified")
 	}
 	if queryContainsContrastiveAlternative("대신증권 관련 규정") {
 		t.Fatal("organization name was mistaken for a contrastive marker")
+	}
+}
+
+func TestInstrumentalClaimIgnoresNumericKoreanParticle(t *testing.T) {
+	results := []SearchResult{{EvidenceMatches: []EvidenceMatch{{
+		Text: "상품별 평가항목 점수 = min(10, 10 × 상품별 거래실적 / 거래실적 평가기준)",
+	}}}}
+	if !instrumentalClaimVerified("상품별 거래실적 평가점수는 min 10으로 잘리나?", results) {
+		t.Fatal("numeric particle was mistaken for an instrumental claim")
+	}
+}
+
+func TestInstrumentalClaimDistinguishesComplementsFromTools(t *testing.T) {
+	results := []SearchResult{{EvidenceMatches: []EvidenceMatch{{
+		Text: "회원은 위탁자로부터 예탁받은 외화증권을 정해진 목적 이외에는 사용하지 못한다.",
+	}}}}
+	for _, query := range []string{
+		"공매도 가격을 아래로 찍는 예외",
+		"10 중 작은 값을 점수로 삼는 식",
+		"고객 외화증권을 직원 급여로 전용할 수 있나",
+	} {
+		if !instrumentalClaimVerified(query, results) {
+			t.Errorf("complement was mistaken for an instrumental claim: %q", query)
+		}
+	}
+	if instrumentalClaimVerified("가격제한폭으로 건강보험료 상한을 계산하는가", []SearchResult{{EvidenceMatches: []EvidenceMatch{{
+		Text: "파생상품 가격제한폭과 상한을 계산한다.",
+	}}}}) {
+		t.Fatal("unrelated calculation object passed instrumental verification")
+	}
+	if terms := englishCalculationObjectTerms("Which set of rules applies to this trade?"); len(terms) != 0 {
+		t.Fatalf("noun use of set was treated as a calculation verb: %#v", terms)
+	}
+}
+
+func TestCompositionalExpansionRequiresGroundedExpansionEvidence(t *testing.T) {
+	input := AnswerabilityInput{
+		Query: "KRX futures real-time 상하한가 폭", ContractValid: true,
+		DomainExpansionApplied: true, DomainExpansionMatchedTerms: 3,
+		ReviewedExpansionApplied: true, ReviewedExpansionMatchedTerms: 3,
+		ReviewedExpansionMatchedGroups: 3,
+		ReviewedExpansionEvidenceTerms: []string{"실시간 가격제한", "가격변동폭", "별표25"},
+		UnknownSpecificTermCount:       1,
+		Results: []SearchResult{{EvidenceMatches: []EvidenceMatch{{
+			ChunkID: "rule#limit", ArticleID: "제70조의2", BM25Score: 1,
+			Text: "호가의 실시간 가격제한과 가격변동폭을 정한다.",
+		}}}},
+	}
+	decision := EvaluateAnswerability(input)
+	if decision.Status != AnswerabilitySupported || decision.Features.ReviewedExpansionEvidenceCoverage < 0.5 {
+		t.Fatalf("grounded compositional expansion = %#v", decision)
+	}
+	input.ReviewedExpansionMatchedGroups = 2
+	if decision := EvaluateAnswerability(input); decision.Status != AnswerabilityInsufficient {
+		t.Fatalf("partial compositional expansion was trusted: %#v", decision)
+	}
+	input.ReviewedExpansionMatchedGroups = 3
+	input.ReviewedExpansionEvidenceTerms = []string{"unrelated official term"}
+	if decision := EvaluateAnswerability(input); decision.Status != AnswerabilityInsufficient {
+		t.Fatalf("ungrounded compositional expansion was trusted: %#v", decision)
 	}
 }
 

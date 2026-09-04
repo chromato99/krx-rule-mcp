@@ -120,7 +120,7 @@ func NewQueryEmbedderFromEnv() (*OpenAIEmbedder, error) {
 	if err != nil {
 		return nil, err
 	}
-	embedder.InputPrefix = envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", DefaultEmbeddingQueryPrefix)
+	embedder.InputPrefix = EmbeddingQueryPrefixFromEnv(embedder.Model)
 	return embedder, nil
 }
 
@@ -129,27 +129,63 @@ func NewDocumentEmbedderFromEnv() (*OpenAIEmbedder, error) {
 	if err != nil {
 		return nil, err
 	}
-	embedder.InputPrefix = envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", DefaultEmbeddingDocumentPrefix)
+	embedder.InputPrefix = EmbeddingDocumentPrefixFromEnv(embedder.Model)
 	return embedder, nil
 }
 
 func newOpenAIEmbedderFromEnv() (*OpenAIEmbedder, error) {
-	dims := DefaultEmbeddingDimensions
-	if raw := os.Getenv("KRX_EMBEDDING_DIMENSIONS"); raw != "" {
+	modelName := envDefault("KRX_EMBEDDING_MODEL", DefaultEmbeddingModel)
+	dims := 0
+	if modelName == DefaultEmbeddingModel {
+		dims = DefaultEmbeddingDimensions
+	}
+	if raw := strings.TrimSpace(os.Getenv("KRX_EMBEDDING_DIMENSIONS")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 {
 			return nil, fmt.Errorf("KRX_EMBEDDING_DIMENSIONS must be a positive integer")
 		}
 		dims = parsed
 	}
+	if dims == 0 {
+		return nil, fmt.Errorf("KRX_EMBEDDING_DIMENSIONS is required for non-default embedding model %q", modelName)
+	}
+	modelRevision := ""
+	if modelName == DefaultEmbeddingModel {
+		modelRevision = DefaultEmbeddingModelRevision
+	}
+	if configured, ok := os.LookupEnv("KRX_EMBEDDING_MODEL_REVISION"); ok {
+		modelRevision = strings.TrimSpace(configured)
+	}
 	return &OpenAIEmbedder{
 		BaseURL:       strings.TrimRight(envDefault("KRX_EMBEDDING_BASE_URL", "http://127.0.0.1:18081/v1"), "/"),
 		APIKey:        envDefault("OPENAI_API_KEY", "local"),
-		Model:         envDefault("KRX_EMBEDDING_MODEL", DefaultEmbeddingModel),
-		ModelRevision: envDefault("KRX_EMBEDDING_MODEL_REVISION", DefaultEmbeddingModelRevision),
+		Model:         modelName,
+		ModelRevision: modelRevision,
 		Dimensions:    dims,
 		Client:        &http.Client{Timeout: 10 * time.Minute},
 	}, nil
+}
+
+// EmbeddingQueryPrefixFromEnv returns the configured query transformation for
+// the selected model. E5 prefixes are defaults for the maintained E5 profile,
+// not global defaults for every OpenAI-compatible embedding model.
+func EmbeddingQueryPrefixFromEnv(modelName string) string {
+	fallback := ""
+	if modelName == DefaultEmbeddingModel {
+		fallback = DefaultEmbeddingQueryPrefix
+	}
+	return envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", fallback)
+}
+
+// EmbeddingDocumentPrefixFromEnv returns the configured document
+// transformation for the selected model without leaking E5 conventions into
+// another embedding profile.
+func EmbeddingDocumentPrefixFromEnv(modelName string) string {
+	fallback := ""
+	if modelName == DefaultEmbeddingModel {
+		fallback = DefaultEmbeddingDocumentPrefix
+	}
+	return envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", fallback)
 }
 
 func (e *OpenAIEmbedder) Embed(ctx context.Context, input []string) ([][]float64, error) {

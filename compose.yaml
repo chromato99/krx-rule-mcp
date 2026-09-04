@@ -41,7 +41,7 @@ services:
       OPENAI_API_KEY: "${OPENAI_API_KEY:-local}"
       KRX_EMBEDDING_BASE_URL: "${KRX_EMBEDDING_BASE_URL:-http://krx-rule-embeddings:80/v1}"
       KRX_EMBEDDING_MODEL: "${KRX_EMBEDDING_MODEL:-intfloat/multilingual-e5-small}"
-      KRX_EMBEDDING_MODEL_REVISION: "${KRX_EMBEDDING_MODEL_REVISION:-614241f622f53c4eeff9890bdc4f31cfecc418b3}"
+      KRX_EMBEDDING_MODEL_REVISION: "${KRX_EMBEDDING_MODEL_REVISION-614241f622f53c4eeff9890bdc4f31cfecc418b3}"
       KRX_EMBEDDING_DIMENSIONS: "${KRX_EMBEDDING_DIMENSIONS:-384}"
       KRX_EMBEDDING_QUERY_PREFIX: "${KRX_EMBEDDING_QUERY_PREFIX-query: }"
       KRX_EMBEDDING_DOCUMENT_PREFIX: "${KRX_EMBEDDING_DOCUMENT_PREFIX-passage: }"
@@ -77,7 +77,7 @@ services:
       - --model-id
       - "${RULE_MCP_TEI_MODEL_ID:-intfloat/multilingual-e5-small}"
       - --revision
-      - "${KRX_EMBEDDING_MODEL_REVISION:-614241f622f53c4eeff9890bdc4f31cfecc418b3}"
+      - "${KRX_EMBEDDING_MODEL_REVISION-614241f622f53c4eeff9890bdc4f31cfecc418b3}"
       - --tokenization-workers
       - "${RULE_MCP_TEI_TOKENIZATION_WORKERS:-2}"
       - --max-concurrent-requests

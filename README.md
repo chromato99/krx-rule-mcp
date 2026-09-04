@@ -115,9 +115,9 @@ go run ./cmd/krx-rule-index \
   --vector
 ```
 
-`KRX_EMBEDDING_QUERY_PREFIX` 기본값은 `query: `, `KRX_EMBEDDING_DOCUMENT_PREFIX` 기본값은 `passage: `, `KRX_EMBEDDING_INPUT_FORMAT` 기본값은 `text-v1`입니다. `structured-v1`은 청크 본문 앞에 문서 제목·카테고리·조문·heading path·source를 고정 순서의 field로 넣고, `text-v1`은 본문만 넣습니다. Vector freshness는 corpus hash, model과 revision, dimensions, query/document prefix, input format이 모두 같을 때만 최신으로 봅니다.
+기본 E5 profile에서 `KRX_EMBEDDING_QUERY_PREFIX`는 `query: `, `KRX_EMBEDDING_DOCUMENT_PREFIX`는 `passage: `이며 `KRX_EMBEDDING_INPUT_FORMAT`은 `text-v1`입니다. 바이너리를 직접 실행할 때 다른 모델을 선택하면 E5 revision과 prefix를 상속하지 않으며 `KRX_EMBEDDING_DIMENSIONS`를 반드시 지정해야 합니다. Compose는 완전한 E5 profile을 기본 환경으로 주입하므로 다른 모델을 사용할 때는 model, revision, dimensions, query/document prefix와 input format을 한 묶음으로 모두 설정하세요. Prefix가 필요 없는 모델은 해당 환경변수를 명시적으로 빈 값으로 설정합니다. 외부 API를 직접 사용할 때 revision은 비울 수 있지만, Compose의 TEI sidecar에는 모델이 지원하는 revision을 지정해야 합니다. `structured-v1`은 청크 본문 앞에 문서 제목·카테고리·조문·heading path·source를 고정 순서의 field로 넣고, `text-v1`은 본문만 넣습니다.
 
-Release generation과 TEI sidecar는 위 E5 계약만 사용합니다. `RULE_MCP_TEI_MODEL_ID`, `KRX_EMBEDDING_MODEL`, revision, dimensions, prefix 또는 input format을 바꾼 generation은 연구 비교용이며 release evaluator가 거부합니다. E5 `structured-v1` 같은 비교도 별도 index에서 실행하고 저장소 기본 `index/current`나 영어 비회귀 baseline을 덮어쓰지 마세요.
+각 generation은 한 embedding profile만 사용합니다. 모델 종류를 제한하지 않지만 corpus hash, model, revision, dimensions, query/document prefix, input format과 chunk coverage가 index 생성 시점과 runtime에서 모두 일치해야 합니다. Release evaluator는 특정 모델명을 승인 조건으로 사용하지 않고 full-vector 무결성과 동일한 한국어 중심 품질 gate를 검사합니다. 저장소의 `index/current`는 현재 검증된 기본 E5 profile의 reference artifact입니다.
 
 ## 언어별 검색
 
@@ -298,7 +298,7 @@ curl http://localhost:8080/healthz
 - `KRX_EMBEDDING_DOCUMENT_PREFIX=passage: `
 - `KRX_EMBEDDING_INPUT_FORMAT=text-v1`
 
-Release 배포는 위 E5 model/revision/input 계약만 사용합니다. 외부 OpenAI 호환 API는 동일한 E5 계약을 제공할 때만 사용할 수 있습니다. 다른 모델이나 입력 형식으로 만든 generation은 연구 비교용이며 release gate가 거부합니다. Vector metadata에는 corpus/index hash, model/revision, dimensions, query/document prefix, embedding input format, scope와 chunk-id coverage가 기록되며 하나라도 다르면 vector 검색은 비활성화되거나 required 정책에서 기동을 실패합니다.
+위 값은 저장소 제공 reference artifact의 기본 profile이며 프로젝트의 유일한 허용 모델이 아닙니다. 다른 TEI 모델이나 외부 OpenAI 호환 embeddings API도 사용할 수 있지만 해당 모델의 dimensions, revision, prefix와 input format으로 vector generation을 다시 만들어야 합니다. 비기본 모델은 E5 revision/prefix를 자동 상속하지 않습니다. Vector metadata에는 corpus/index hash, model/revision, dimensions, query/document prefix, embedding input format, scope와 chunk-id coverage가 기록되며 하나라도 runtime 설정과 다르면 vector 검색은 비활성화되거나 required 정책에서 기동을 실패합니다.
 
 TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 아키텍처에서 동작하고 이 Compose의 CLI·HTTP 계약과 호환되는 이미지를
@@ -315,15 +315,17 @@ TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 
 ## RAG 품질 평가
 
-`eval/golden/rag-v1.json`은 checksum으로 고정한 원본 50건을 포함한 210건 fixture입니다. 현재 split은 regression 50건, development 114건, holdout 46건입니다. Evaluator는 실제 `search_rules`와 `get_context`를 호출해 문서 순위, 문서 내부 근거 순위, BM25/vector/RRF candidate rank, reranker pool·채택 여부, 복수-target `any|all|at_least`, answerability, 필터 누출, 영문 canonical source, HWP 첨부를 판정하고 corpus/index/vector/reranker/lexicon provenance를 report에 기록합니다. `split_summaries`, `language_summaries`, `language_split_summaries`에서 전체·언어·언어별 split 지표를 각각 냅니다.
+`eval/golden/rag-v1.json`은 checksum으로 고정한 원본 50건을 포함한 210건 fixture입니다. 현재 split은 regression 50건, development 114건, holdout 46건입니다. Evaluator는 실제 `search_rules`와 `get_context`를 호출해 문서 순위, 문서 내부 근거 순위, BM25/vector/RRF candidate rank, reranker pool·채택 여부, 복수-target `any|all|at_least`, answerability, 필터 누출, 영문 canonical source, HWP 첨부를 판정하고 corpus/index/vector/reranker/lexicon provenance를 report에 기록합니다. 각 case의 `candidate_trace`에는 상위 8개 fused chunk와 그 밖에 존재하는 가장 높은 정답 chunk, channel별 순위·target 일치 여부가 기록됩니다. `failure_stages`에는 `candidate-generation`, `evidence-selection`, `top1-ranking`, `answerability` 같은 병목이 기록되고, `failure_stage_counts`, `split_summaries`, `language_summaries`, `language_split_summaries`에서 전체 병목과 언어·split별 지표를 확인할 수 있습니다.
 
-과적합 점검에서 검색·lexicon·reranker 구조 선택에 사용한 audit A/B/C/D 사례는 모두 development로 이동했습니다. Reranker model, K, batch, 선택 정책을 고정한 뒤 기존 target 문서와 겹치지 않는 규정으로 `audit-e-*` 12건을 새 holdout에 추가했습니다. 기존 영문 target과 겹치지 않는 10개 규정에서 `english-holdout-*`도 고정해 영문 holdout을 1건에서 11건으로 늘렸습니다. Holdout 결과를 본 뒤 검색 로직이나 별칭을 다시 맞추지 않습니다.
+과적합 점검에서 검색·lexicon·reranker 구조 선택에 사용한 audit A/B/C/D 사례는 모두 development로 이동했습니다. Reranker model, K, batch, 선택 정책을 고정한 뒤 기존 target 문서와 겹치지 않는 규정으로 `audit-e-*` 12건을 holdout에 추가했고, 기존 영문 target과 겹치지 않는 10개 규정에서 `english-holdout-*`도 고정해 영문 holdout을 1건에서 11건으로 늘렸습니다. 이 46건은 설계 고정 뒤 실행되어 과도한 기한 모호성 규칙을 기각했고, 동일한 margin-variable fixture 교정을 변형 사례에도 적용하는 데 사용됐으므로 이제 소비된 validation set입니다. 이 결과에 별칭이나 점수를 다시 맞추지 않으며, 다음 설계의 최종 평가는 새 문서-분리 holdout으로 수행합니다.
 
-fixture target을 현재 corpus와 다시 대조해 ETF 국내·해외 3%/6% 구분, 시장조성 점수식의 `10 ×`, UTI 대체식별자와 위탁증거금 예외 질의의 contradiction label을 바로잡았습니다. HWP와 notice 사례는 문서·첨부 ID뿐 아니라 실제 수식·본문 구문까지 맞아야 성공합니다. Evaluator는 실행 전에 모든 target 문서·조문·첨부·필수 구문과 입력 filter를 현재 immutable corpus/index에 대조하며 불일치가 있으면 검색 평가를 시작하지 않습니다. 감사 후 fixture SHA-256은 `5026836077883452ba19c64882fd8908e7463ed383ba318d7c877bf8afd07764`입니다.
+fixture target을 현재 corpus와 다시 대조해 ETF 국내·해외 3%/6% 구분, 시장조성 점수식의 `10 ×`, UTI 대체식별자와 위탁증거금 예외 질의의 contradiction label을 바로잡았습니다. 추가 감사에서 UTI 의무만으로 별도 운전면허번호 요구의 부재를 증명할 수 없음을 반영했고, 장외파생상품 청산업무규정 제82조의 일중청산증거금과 제88조의 일중청산위탁증거금을 분리했습니다. 시장을 특정하지 않은 두 장중 추가증거금 기한 질의는 서로 다른 규정의 답이 가능하므로 `ambiguous`입니다. HWP와 notice 사례는 문서·첨부 ID뿐 아니라 실제 수식·본문 구문까지 맞아야 성공합니다. `attachment-margin-vars`와 그 변형은 상세 첨부뿐 아니라 같은 규정 제20조의 직접 정의도 유효 근거로 인정합니다. Evaluator는 실행 전에 모든 target 문서·조문·첨부·필수 구문과 입력 filter를 현재 immutable corpus/index에 대조하며 불일치가 있으면 검색 평가를 시작하지 않습니다. 감사 후 fixture SHA-256은 `00fd17323cb91e8f11a143fcccf7f13bc6db32daf2dd060d9f6d3ce3af4d9cb6`입니다.
 
-감사된 fixture에서 고정 `multilingual-e5-small`의 한국어 결과는 Document Hit@5 89.52%, MRR@5 0.810, evidence Hit@1 77.59%, evidence Recall@3 85.34%, candidate Recall@64 93.97%입니다. 한국어 holdout은 각각 85.71%, 0.746, 60.00%, 75.00%, 90.00%입니다. 한국어 insufficient refusal 100%, false-supported 0, ambiguous clarification 100%, context consistency 100%를 유지합니다. 이전 수치보다 낮은 주된 이유는 검색 코드 회귀가 아니라 잘못된 label을 수정하고 첨부 머리말 대신 실제 수식·근거 구문을 요구하도록 판정을 강화했기 때문입니다.
+현재 reference E5 profile의 210건 전체 결과에서 한국어는 Document Hit@5 98.36%, MRR@5 0.894, evidence Hit@1 94.74%, evidence Recall@3 97.37%, candidate Recall@64 99.12%, status accuracy 98.33%입니다. 한국어 holdout은 각각 90.48%, 0.794, 75.00%, 85.00%, 95.00%, 97.14%입니다. 이전 감사 결과와 fixture가 일부 달라 완전한 동조건 비교는 아니지만, 라벨과 target이 변하지 않은 173개 한국어 사례에서도 문서 Hit@5가 108건에서 115건, evidence Hit@1이 93건에서 103건, Recall@3가 98건에서 106건, 올바른 status가 165건에서 172건으로 증가했습니다. insufficient refusal 100%, false-supported 0, context consistency 100%, HWP 21/21과 영어 품질 floor는 유지했습니다. 전체 검색 p95는 237.13ms로 이전 222.92ms보다 약 14.21ms 증가했지만 속도는 품질 gate가 아닙니다.
 
-임베딩은 `intfloat/multilingual-e5-small` 한 모델만 유지합니다. 이전 Qwen 비교는 영어 일부 지표만 개선하고 한국어·거절 안전성을 회귀시킨 기각 실험으로만 보존하며, 두 모델 rank fusion이나 Qwen 운영 경로는 추가하지 않습니다. 고정 한국어 BGE reranker도 새 holdout aggregate를 개선하지 못해 기본 및 release CI에서는 비활성화합니다. 다음 실험은 holdout을 제외한 한국어 development에서 직접적인 의무·금지 근거와 HWP 수식을 일반적으로 판정하는 방법부터 바로잡고, E5 candidate miss와 순위 miss를 분리한 뒤 BM25/E5 hard negative 기반 E5 domain adaptation 또는 동일 E5의 다중 표현 candidate 생성을 비교합니다.
+질의 확장어는 후보·문서 회수에만 사용하고, 최종 근거는 별도의 검토된 `evidence_terms`와 규정 본문 일치로 선택합니다. 완전한 문장 별칭과 정답 숫자를 사전에서 제거하고 `(상품) AND (행위) AND (법률 개념)` 형태의 `match_groups`를 사용합니다. 명시된 ETF·NAV·LP처럼 한 문서의 여러 청크에 분산될 수 있는 식별자는 근거 묶음 전체에서 확인하며, 영어 계산·결정 질의도 계산 대상이 실제 근거에 있어야 `supported`가 됩니다.
+
+`intfloat/multilingual-e5-small`은 현재 reference artifact와 Compose의 기본 profile이지만 release gate에 하드코딩된 유일한 모델은 아닙니다. 이전 Qwen 비교는 현재 기본 profile을 교체할 근거가 부족했던 기각 실험으로 보존하되 다른 호환 모델의 사용 자체를 막지 않습니다. 서로 다른 모델의 raw score를 혼합하는 cross-model fusion은 사용하지 않으며 generation마다 하나의 profile을 선택합니다. 고정 한국어 BGE reranker는 새 holdout aggregate를 개선하지 못해 기본 경로에서 비활성화합니다. 다음 개선은 특정 모델의 미세조정보다 구조적 chunking, rank 기반 fusion, evidence selection, contradiction·수식 의미를 우선하며 `text-v1`/`structured-v1` 같은 입력 표현은 복수 profile에서 검증된 경우에만 공통 기본값으로 채택합니다.
 
 평가셋 원문 대조와 수정 내역은 [evaluation fixture audit](docs/evaluation-fixture-audit.md)에, 모델 결정·언어별 수치와 다음 단계는 [embedding model evaluation](docs/embedding-model-evaluation.md)에 정리되어 있습니다.
 
@@ -357,13 +359,15 @@ go run ./cmd/krx-rule-eval \
   --output eval/results/rag-v1-vector-reranker.json
 ```
 
-Golden expectation은 실행 결과와 분리되어 있습니다. `eval/source/`의 원본 case 수나 SHA-256이 fixture provenance와 다르면 evaluator는 실행을 거부합니다. 또한 모든 target을 현재 corpus/index에 대조해 문서·조문·첨부·필수/금지 구문·contradiction polarity·입력 filter가 실제 규정과 일치하는지 먼저 검사합니다. `claim_relation: contradicts`는 group 이름과 무관하게 모든 한국어 contradiction 사례를 release metric에 포함합니다. Release gate에는 full-coverage E5 generation과 동일한 embedding 환경변수가 필요합니다.
+Golden expectation은 실행 결과와 분리되어 있습니다. `eval/source/`의 원본 case 수나 SHA-256이 fixture provenance와 다르면 evaluator는 실행을 거부합니다. 또한 모든 target을 현재 corpus/index에 대조해 문서·조문·첨부·필수/금지 구문·contradiction polarity·입력 filter가 실제 규정과 일치하는지 먼저 검사합니다. `claim_relation: contradicts`는 group 이름과 무관하게 모든 한국어 contradiction 사례에 포함합니다. Release gate에는 선택한 profile의 model/revision/dimensions/prefix/input format과 정확히 일치하는 full-coverage generation이 필요하지만 특정 모델명은 요구하지 않습니다.
 Release CI에서 Go build metadata가 제공되지 않는 실행 방식이면 `KRX_RULE_SERVER_COMMIT`에 검증할 source revision을 명시해 report의 `server_commit`을 고정합니다.
 병합 품질 기준은 한국어 전체와 한국어 holdout에 적용합니다. 두 범위 모두 `Document Hit@5 >= 95%`, `MRR@5 >= 0.90`, `evidence Hit@1 >= 90%`, `evidence Recall@3 >= 95%`, `candidate evidence Recall@64 >= 95%`, `insufficient refusal >= 95%`, `ambiguous clarification >= 90%`, `filter_leaks = 0`, `context consistency = 100%`를 충족해야 합니다. 한국어 `semantic`·`semantic-variant`와 contradiction target-evidence Hit@1도 각각 90% 이상이어야 합니다. Reranker provenance가 있으면 한국어 실제 rerank pool target inclusion도 95% 이상이어야 합니다.
 
-영어는 절대 합격선을 병합 기준으로 사용하지 않습니다. 감사된 현행 E5의 영어 전체·holdout 문서/근거/candidate/status/refusal/context/canonical-source 수치를 [고정 비회귀 baseline](eval/baselines/rag-v1-e5-english.json)으로 두고 하나라도 낮아지면 실패합니다. baseline은 fixture SHA와 E5 model/revision/input contract가 다르면 비교 자체를 거부합니다. 속도는 품질 gate에서 제외하되 `p95_search_latency_ms`, `p95_reranker_latency_ms`, 모든 `get_context` 검증을 포함한 `p95_latency_ms`를 계속 기록·비교합니다. `eval/baselines/`의 그 밖의 report는 생성 당시 provenance를 보존하는 역사 자료이며 현재 head의 release 기준선으로 간주하지 않습니다.
+현재 결과는 이 기준을 통과하지 않습니다. 한국어 전체 MRR 0.894와 ambiguity clarification 89.47%가 소폭 미달하고, 한국어 holdout의 Document Hit@5 90.48%, MRR 0.794, evidence Hit@1 75.00%, Recall@3 85.00%가 부족합니다. 반면 holdout candidate Recall@64는 95%, status accuracy는 97.14%, HWP는 5/5이므로 기준을 낮추기보다 문서·근거 순위와 범위 모호성 판별을 다음 단계에서 개선해야 합니다. 이 holdout은 기각 후보 검증과 fixture 교정에 사용되어 소비됐으므로 다음 튜닝 뒤에는 새 문서-분리 holdout으로 최종 판단합니다.
 
-`.github/workflows/rag-release-eval.yml`은 `workflow_dispatch`로 명시적으로 요청할 때만 고정 corpus와 full-vector generation을 검증한 뒤 위 gate를 실행합니다. PR과 schedule에서는 자동 실행하지 않습니다. 보호된 `rag-release` environment와 `[self-hosted, linux, x64, krx-rag-eval]` runner가 필요하며, embedding endpoint는 repository variable로 지정합니다. Reranker는 보호된 audit에서 release gate를 충족하지 못했으므로 기본 CI 경로에서 활성화하지 않고 수동 비교만 지원합니다. `--split`과 `--case-prefix` 실행은 표본 수가 작은 진단용이므로 `--fail-on-gate`와 함께 사용할 수 없습니다. Baseline과 현재 report의 evaluator/corpus/index/vector/reranker/lexicon/gate/fixture provenance가 다르면 workflow는 수치 delta를 만들지 않고 비교 불가 필드를 기록합니다.
+영어는 한국어와 같은 절대 합격선을 적용하지 않습니다. 감사된 reference 결과의 영어 전체·holdout 문서/근거/candidate/status/refusal/context/canonical-source 수치를 [모델 비종속 품질 floor](eval/baselines/rag-v1-english-floor.json)로 두고 어떤 embedding profile이든 하나라도 낮아지면 실패합니다. Floor는 동일 fixture인지 확인하지만 모델명을 비교하지 않습니다. 같은 profile의 전후 비교에서는 report에 기록된 전체 embedding 계약이 같은 경우에만 회귀 delta를 해석합니다. 속도는 품질 gate에서 제외하되 `p95_search_latency_ms`, `p95_reranker_latency_ms`, 모든 `get_context` 검증을 포함한 `p95_latency_ms`를 계속 기록합니다. `eval/baselines/`의 그 밖의 report는 생성 당시 provenance를 보존하는 역사 자료이며 현재 head의 release 기준선으로 간주하지 않습니다.
+
+`.github/workflows/rag-release-eval.yml`은 `workflow_dispatch`로 명시적으로 요청할 때만 저장소의 기본 E5 artifact를 검증한 뒤 모델 비종속 gate를 실행합니다. PR과 schedule에서는 자동 실행하지 않습니다. 다른 embedding profile은 동일 evaluator를 로컬 또는 별도 수동 환경에서 실행할 수 있습니다. 보호된 `rag-release` environment와 `[self-hosted, linux, x64, krx-rag-eval]` runner가 필요하며 embedding endpoint는 repository variable로 지정합니다. Reranker는 기본 경로에서 활성화하지 않고 수동 비교만 지원합니다. `--split`과 `--case-prefix` 실행은 표본 수가 작은 진단용이므로 `--fail-on-gate`와 함께 사용할 수 없습니다.
 
 
 ## 테스트
