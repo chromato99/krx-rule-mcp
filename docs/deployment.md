@@ -266,3 +266,11 @@ This is a corpus-specific baseline, not a permanent sizing guarantee. Re-run sta
 ## GitHub Actions
 
 CI covers Go tests, Docker build, and smoke checks for `krx-rule-index`/server against a sample corpus. `.github/workflows/publish-image.yml` publishes a single GHCR manifest for `linux/amd64` and `linux/arm64` on `v*` tags or manual dispatch; record its reported manifest digest in the deployment release manifest and deploy by digest. Scheduled sync workflows belong in the separate `krx-rule-markdown` repository.
+
+## Index publication permissions
+
+The indexer keeps incomplete staging directories private, then publishes a
+complete generation with directory mode 0755 and artifact mode 0644. This lets
+the default non-root container read a host-generated index through its read-only
+mount. Parent directories and the mounted corpus must also be readable by the
+configured runtime user.

@@ -112,3 +112,21 @@ func TestMarketComparisonKeepsBothCandidateScopes(t *testing.T) {
 		t.Fatalf("comparison candidates lost scope: %#v", got)
 	}
 }
+
+func TestIndexProductNamesDoNotImposeCashMarketScope(t *testing.T) {
+	for _, query := range []string{
+		"daily price limit KOSPI 200 futures",
+		"KOSDAQ 150 options margin",
+		"KOSPI (200) index constituents",
+		"Compare KOSPI 200 futures and KOSDAQ 150 options",
+	} {
+		if scopes := explicitMarketScopes(query); len(scopes) != 0 {
+			t.Fatalf("index name became a cash-market filter: %q %+v", query, scopes)
+		}
+	}
+	for _, query := range []string{"KOSPI market trading hours", "KOSDAQ listing review"} {
+		if len(explicitMarketScopes(query)) != 1 {
+			t.Fatalf("cash-market scope was lost: %q", query)
+		}
+	}
+}

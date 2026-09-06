@@ -146,6 +146,14 @@ func explicitMarketScopes(query string) [][]string {
 		}
 		for _, name := range []string{"kospi", "kosdaq", "konex"} {
 			if field == name || field == name+"의" {
+				// KOSPI 200 / KOSDAQ 150 name indexes and their products, not
+				// an explicit cash-market scope. Keep those candidates available.
+				if i+1 < len(fields) {
+					next := strings.Trim(fields[i+1], ".,?!:;()[]{}\"'")
+					if next != "" && next[0] >= '0' && next[0] <= '9' {
+						continue
+					}
+				}
 				names = append(names, name)
 			}
 		}

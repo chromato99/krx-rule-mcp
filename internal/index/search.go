@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	RetrievalPolicyVersion           = "chunk-rrf-source-parent-scope-v4"
+	RetrievalPolicyVersion           = "chunk-rrf-source-parent-scope-v5"
 	DefaultRetrievalCandidateLimit   = 120
 	evidenceOriginalCoverageWeight   = 0.016
 	evidenceExpansionCoverageWeight  = 0.012

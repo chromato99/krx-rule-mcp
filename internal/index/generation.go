@@ -200,6 +200,11 @@ func (lock *GenerationBuildLock) Publish(build GenerationBuild) (GenerationDescr
 	if err := writeGenerationDescriptor(descriptorPath, descriptor); err != nil {
 		return GenerationDescriptor{}, err
 	}
+	// MkdirTemp keeps the build private (0700). Published public rule indexes
+	// must also be traversable by the non-root reader used in the server image.
+	if err := os.Chmod(staging, 0o755); err != nil {
+		return GenerationDescriptor{}, fmt.Errorf("set published generation permissions: %w", err)
+	}
 	if err := syncDirectory(staging); err != nil {
 		return GenerationDescriptor{}, err
 	}

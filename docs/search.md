@@ -333,7 +333,7 @@ When both BM25 and vector scores are available, bounded chunk candidates are mer
 
 ## Current bounded retrieval policy
 
-`chunk-rrf-source-parent-scope-v4` keeps 120 candidates per channel independent
+`chunk-rrf-source-parent-scope-v5` keeps 120 candidates per channel independent
 of the requested result count. BM25 uses derived in-memory postings with the
 same scoring formula. Query-independent metadata is cached; weighted expansion
 coverage skips inactive weights and reuses tokenization within each request.
@@ -344,7 +344,8 @@ different named sources are not collapsed into the longest title. Printed
 English legal titles supplement abbreviated/Korean portal titles. Within a
 named source, its name is removed from lexical topic matching; the embedding
 still receives the original query. Explicit market filtering precedes softer
-generic rule-title hints.
+generic rule-title hints. Numbered index names such as KOSPI 200 and KOSDAQ 150
+do not impose a cash-market filter on derivatives/product queries.
 
 Within the first five document candidates, complete owning-article or paragraph
 context can supplement retrieved evidence, bounded by 12 chunks and 8,000 runes

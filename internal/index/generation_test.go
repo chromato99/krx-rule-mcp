@@ -61,6 +61,13 @@ func TestGenerationPublishAndReadCurrent(t *testing.T) {
 	if current != first || filepath.Base(dir) != first.GenerationID {
 		t.Fatalf("current = %#v, %q; want %#v", current, dir, first)
 	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("published directory mode = %o, want 755 for non-root readers", info.Mode().Perm())
+	}
 	loaded, digest, err := LoadSnapshotWithDigest(filepath.Join(dir, BM25SnapshotFile))
 	if err != nil {
 		t.Fatal(err)
