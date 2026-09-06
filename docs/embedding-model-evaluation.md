@@ -1,5 +1,7 @@
 # Embedding profiles and retrieval evaluation
 
+The numerical tables below describe PR commit `7dcedaa` before the selected-evidence review. They are historical diagnostics, not the current merge/release contract. Current criteria and results are in [rag-quality-contract.md](rag-quality-contract.md) and [rag-quality-results.md](rag-quality-results.md).
+
 ## Decision
 
 The project accepts any OpenAI-compatible embedding model that can produce a
@@ -111,8 +113,7 @@ Korean absolute merge thresholds:
 | Status accuracy | 100.00% | 100.00% |
 
 The exact counts are pinned in
-`eval/baselines/rag-v1-english-floor.json`. A release using any embedding
-profile fails if an English count or MRR falls below this floor. The fixture SHA
+`eval/baselines/rag-v1-english-floor.json`. This historical floor records the previous English metrics. Current release checks use selected-answer safety rather than the old per-count floor. The fixture SHA
 must match, but the floor does not require the E5 model identity. Same-profile
 before/after deltas are meaningful only when the complete embedding profile and
 the remaining evaluation provenance match.
@@ -149,77 +150,6 @@ previous E5 report had a 222.92 ms search p95 and the current report has
 These Qwen values are historical rejection evidence only. Qwen is not rerun on
 the corrected fixture and must not be used as a current baseline.
 
-## Korean-primary release gate
+## Current evaluation lifecycle
 
-Korean overall and Korean holdout independently require:
-
-- Document Hit@5 at least 95%
-- MRR@5 at least 0.90
-- Evidence Hit@1 at least 90%
-- Evidence Recall@3 at least 95%
-- Candidate Recall@64 at least 95%
-- insufficient refusal at least 95%
-- ambiguous clarification at least 90%
-- filter leaks zero and context consistency 100%
-
-Korean `semantic`, `semantic-variant`, and supported contradiction cases
-additionally require Evidence Hit@1 of at least 90%. Global protocol invariants
-and all HWP checks must pass. English must equal or exceed the model-independent
-quality floor established by the audited reference result.
-
-The current result does not pass this gate. Korean overall misses MRR by 0.006
-(0.894) and has 17/19 ambiguous clarifications (89.47%). Korean holdout misses
-Document Hit@5 (90.48%), MRR (0.794), Evidence Hit@1 (75%), and Evidence
-Recall@3 (85%). Holdout candidate Recall@64 is exactly 95%, status accuracy is
-97.14%, HWP is 5/5, semantic groups are 100%, and contradiction Hit@1 is above
-90%. Thus the threshold set is somewhat coarse on the small holdout, but the
-ranking and evidence gaps are too large to justify lowering it for this PR.
-
-## Next stage: model-independent retrieval
-
-The existing 46-case holdout has been consumed: it rejected an over-broad
-deadline ambiguity rule, and the margin-variable alternative target was then
-made consistent with the regression case. Do not tune against it again.
-
-1. Promote the consumed cases to development/audit status and reserve a new
-   document-disjoint holdout only after the next design is frozen. Keep source
-   and fixture checksums so later reports cannot silently reinterpret either
-   set.
-2. Add hierarchical retrieval rather than merely increasing a fixed candidate
-   depth. First retrieve document/section candidates from title, category, and
-   article-heading fields; then retrieve chunks inside those candidates. Fuse
-   independent BM25 and vector ranks by chunk ID. The earlier 120-to-256 depth
-   experiment increased raw recall but reduced Evidence Recall@3 and introduced
-   a false-supported result, demonstrating why pool depth and final evidence
-   selection must remain separate.
-3. Repair structural ownership before ranking. The known English JCF failure is
-   caused by a PDF `CHAPTER 3` marker clearing the Article 10 owner. Preserve
-   article/section ancestry in `krx-rule-markdown`, rebuild the immutable index,
-   and validate chunk-to-source provenance before measuring retrieval.
-4. Introduce parent-child evidence assembly. Retrieve compact paragraphs, then
-   assemble the selected article and narrowly bounded neighbors so a heading,
-   condition, exception, and answer value can be judged together. Candidate
-   recall, document rank, and returned evidence order must remain separately
-   observable.
-5. Rank evidence with general legal structure: query-to-heading alignment,
-   normative predicates, requested answer facets, and body-versus-attachment
-   intent. Forms should not displace a directly responsive rule article merely
-   because they repeat more query nouns; explicit annex/formula queries must
-   still prefer their attachments.
-6. Replace category-count ambiguity heuristics with competing-interpretation
-   detection. Generate the best answer-bearing evidence per document scope,
-   compare market/product metadata and extracted deadline/value spans, and ask
-   for clarification only when credible scopes conflict. A product or rule name
-   already grounded in the top document should suppress that clarification.
-7. Mine reusable hard negatives from same-title articles, neighboring
-   provisions, forms, and parallel market rules. Keep them phrase-independent
-   and run BM25-only plus every candidate embedding profile. Compare `text-v1`
-   with `structured-v1` across representative profiles; a view that helps only
-   one model remains opt-in.
-8. Retry an optional cross-encoder only after the new candidate stage is stable.
-   It may improve Evidence Hit@1 but cannot repair a missing positive and must
-   not become a baseline requirement.
-
-After these steps, freeze all retrieval and answerability choices, create the
-new holdout, and run it once. Do not lower the gate or add query-specific
-exceptions to favor E5 or any other model.
+The old document-depth/MRR/English-floor gate has been replaced by separate merge and release profiles. The former 46-case holdout is consumed validation data. New questions are reserved by canonical source before further development; the corpus itself remains complete. See [the quality contract](rag-quality-contract.md) for definitions and commands.

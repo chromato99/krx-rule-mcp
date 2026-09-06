@@ -24,23 +24,31 @@ func main() {
 	fixturePath := flag.String("fixture", "eval/golden/rag-v1.json", "versioned golden fixture")
 	sourceFixturePath := flag.String("source-fixture", "eval/source/rag-queries-2026-07-28.json", "checksummed original 50-case fixture")
 	lexiconPath := flag.String("domain-lexicon", env("KRX_DOMAIN_LEXICON_PATH", searchindex.DefaultDomainLexiconPath), "domain lexicon YAML")
+	lexiconMode := flag.String("lexicon-mode", "full", "diagnostic lexicon ablation: full, terms, none")
 	outputPath := flag.String("output", "eval/results/rag-v1-latest.json", "evaluation report output")
-	englishQualityFloorPath := flag.String("english-quality-floor", "eval/baselines/rag-v1-english-floor.json", "model-independent English minimum quality floor")
+	baselinePath := flag.String("baseline", "eval/baselines/rag-retrieval-before.json", "question-matched retrieval baseline")
+	reservationPath := flag.String("holdout-reservation", "eval/experiments/20260906-scope/reservation.json", "reserved canonical sources for a sealed fixture")
 	split := flag.String("split", "", "optional fixture split for diagnostic runs")
 	casePrefix := flag.String("case-prefix", "", "optional case-id prefix for diagnostic runs")
 	vectorEnabled := flag.Bool("vector", envBool("KRX_VECTOR_SEARCH_ENABLED"), "load full vector generation and query embedder")
 	requireVector := flag.Bool("require-vector", false, "fail unless full vector generation and query embedder are available")
 	rerankerEnabled := flag.Bool("reranker", envBool("KRX_RERANKER_ENABLED"), "rerank bounded Korean chunk candidates through TEI")
 	requireReranker := flag.Bool("require-reranker", false, "fail unless the configured reranker is available for Korean queries")
-	rerankerAll := flag.Bool("reranker-all", false, "diagnostic: rerank every eligible Korean query instead of weak supported evidence only")
 	rerankerTimeout := flag.Duration("reranker-timeout", 30*time.Minute, "per-query reranker deadline")
-	retrievalCandidates := flag.Int("candidate-limit", 0, "optional first-stage candidate limit per channel, max 512")
-	failOnGate := flag.Bool("fail-on-gate", false, "exit non-zero when release quality gates fail")
+	retrievalCandidates := flag.Int("candidate-limit", searchindex.DefaultRetrievalCandidateLimit, "first-stage candidate limit per channel, max 512; independent of result limit")
+	failOnGate := flag.Bool("fail-on-gate", false, "exit non-zero when full-vector retrieval regression checks fail; does not evaluate LLM answers")
 	flag.Parse()
+	if *lexiconMode != "full" && *lexiconMode != "terms" && *lexiconMode != "none" {
+		fatalIf(fmt.Errorf("invalid --lexicon-mode"))
+	}
+	if *failOnGate && *lexiconMode != "full" {
+		fatalIf(fmt.Errorf("lexicon ablations are diagnostic and cannot use --fail-on-gate"))
+	}
 	fatalIf(validateEvalOptions(*split, *casePrefix, *failOnGate))
 	if *retrievalCandidates < 0 || *retrievalCandidates > 512 {
 		fatalIf(fmt.Errorf("--candidate-limit must be between 1 and 512, or 0 for the default"))
 	}
+	*retrievalCandidates = searchindex.EffectiveCandidateLimit(*retrievalCandidates)
 
 	fixture, fixtureHash, err := evaluation.LoadFixture(*fixturePath)
 	fatalIf(err)
@@ -53,8 +61,26 @@ func main() {
 	repo, err := searchindex.LoadRepositoryGeneration(*dataDir, *indexDir, loadOptions)
 	fatalIf(err)
 	fatalIf(evaluation.ValidateFixtureGrounding(fixture, repo))
+	if fixture.Policies.EvaluationUse == "sealed-holdout" {
+		fatalIf(validateHoldoutReservation(fixture, repo, *reservationPath))
+	}
 	lexicon, lexiconDigest, err := searchindex.LoadDomainLexiconWithDigest(*lexiconPath)
 	fatalIf(err)
+	if *lexiconMode != "full" {
+		var selected []searchindex.DomainLexiconEntry
+		if *lexiconMode == "terms" {
+			for _, entry := range lexicon {
+				if strings.HasPrefix(entry.ReviewStatus, "official-") {
+					entry.MatchGroups = nil
+					selected = append(selected, entry)
+				}
+			}
+		}
+		lexicon = selected
+		encoded, _ := json.Marshal(lexicon)
+		digest := sha256.Sum256(encoded)
+		lexiconDigest = hex.EncodeToString(digest[:])
+	}
 
 	var embedder searchindex.Embedder
 	if *vectorEnabled || *requireVector {
@@ -82,8 +108,9 @@ func main() {
 	if embedder != nil {
 		runtimeVectorMode = "bm25+vector"
 	}
-	provenance, releaseGeneration, err := buildProvenance(repo, lexiconDigest, runtimeVectorMode, *retrievalCandidates, reranker, rerankerCandidates, *rerankerAll, *rerankerTimeout, fixture, fixtureHash)
+	provenance, releaseGeneration, err := buildProvenance(repo, lexiconDigest, runtimeVectorMode, *retrievalCandidates, reranker, rerankerCandidates, *rerankerTimeout, fixture, fixtureHash)
 	fatalIf(err)
+	provenance.Extra = map[string]string{"lexicon_mode": *lexiconMode}
 	service := &mcpserver.Service{
 		Repo:                repo,
 		Embedder:            embedder,
@@ -91,7 +118,6 @@ func main() {
 		Reranker:            reranker,
 		RerankerRequired:    *requireReranker,
 		RerankerCandidates:  rerankerCandidates,
-		RerankerAll:         *rerankerAll,
 		RetrievalCandidates: *retrievalCandidates,
 		RerankerTimeout:     *rerankerTimeout,
 		DomainLexicon:       lexicon,
@@ -108,7 +134,7 @@ func main() {
 	fatalIf(err)
 	fatalIf(writeReport(*outputPath, report))
 
-	fmt.Printf("rag-eval cases=%d document_hit@5=%.3f mrr@5=%.3f evidence_hit@1=%.3f evidence_recall@3=%.3f candidate_recall@64=%.3f reranker_pool_hit=%.3f refusal=%.3f ambiguous=%.3f context=%.3f filter_leaks=%d search_p95_ms=%.2f reranker_p95_ms=%.2f eval_p95_ms=%.2f report=%s\n",
+	fmt.Printf("rag-eval cases=%d document_hit@5=%.3f mrr@5=%.3f evidence_hit@1=%.3f evidence_recall@3=%.3f candidate_recall@64=%.3f reranker_pool_hit=%.3f evidence_bundle@5=%.3f context=%.3f filter_leaks=%d search_p95_ms=%.2f reranker_p95_ms=%.2f eval_p95_ms=%.2f report=%s\n",
 		report.Summary.Cases,
 		report.Summary.DocumentHitAt5Rate,
 		report.Summary.MRRAt5,
@@ -116,8 +142,7 @@ func main() {
 		report.Summary.EvidenceRecallAt3Rate,
 		report.Summary.CandidateEvidenceRecall64Rate,
 		report.Summary.RerankerPoolHitRate,
-		report.Summary.InsufficientRefusalRate,
-		report.Summary.AmbiguousClarificationRate,
+		report.Summary.EvidenceBundleHitAt5Rate,
 		report.Summary.ContextConsistencyRate,
 		report.Summary.FilterLeaks,
 		report.Summary.P95SearchLatencyMillis,
@@ -126,9 +151,9 @@ func main() {
 		*outputPath,
 	)
 	if *failOnGate {
-		englishFloor, err := loadEnglishQualityFloor(*englishQualityFloorPath)
+		baseline, err := loadCodeBaseline(*baselinePath)
 		fatalIf(err)
-		failures := qualityGateFailures(report, &englishFloor)
+		failures := qualityGateFailures(report, baseline)
 		if len(failures) > 0 {
 			for _, failure := range failures {
 				fmt.Fprintln(os.Stderr, "gate:", failure)
@@ -178,12 +203,14 @@ type releaseDescriptor struct {
 	DomainLexiconDigest     string                       `json:"domain_lexicon_digest"`
 	RuntimeVectorMode       string                       `json:"runtime_vector_mode"`
 	RetrievalCandidateLimit int                          `json:"retrieval_candidate_limit"`
+	RetrievalPolicy         string                       `json:"retrieval_policy"`
+	SearchContract          string                       `json:"search_contract"`
 	ServerImageDigest       string                       `json:"server_image_digest"`
 	TEIImageDigest          string                       `json:"tei_image_digest"`
 	RerankerImageDigest     string                       `json:"reranker_image_digest,omitempty"`
 }
 
-func buildProvenance(repo *searchindex.Repository, lexiconDigest, runtimeVectorMode string, retrievalCandidateLimit int, reranker searchindex.Reranker, rerankerCandidates int, rerankerAll bool, rerankerTimeout time.Duration, fixture evaluation.Fixture, fixtureHash string) (evaluation.Provenance, string, error) {
+func buildProvenance(repo *searchindex.Repository, lexiconDigest, runtimeVectorMode string, retrievalCandidateLimit int, reranker searchindex.Reranker, rerankerCandidates int, rerankerTimeout time.Duration, fixture evaluation.Fixture, fixtureHash string) (evaluation.Provenance, string, error) {
 	if repo == nil {
 		return evaluation.Provenance{}, "", fmt.Errorf("repository is nil")
 	}
@@ -220,16 +247,18 @@ func buildProvenance(repo *searchindex.Repository, lexiconDigest, runtimeVectorM
 			batchSize = configured.BatchSize
 		}
 		rerankerIdentity = &evaluation.RerankerIdentity{
-			Model: model, Revision: revision, CandidateLimit: rerankerCandidates, BatchSize: batchSize, Mode: rerankerMode(rerankerAll), Timeout: rerankerTimeout.String(), InputFormat: "structured-korean-v1",
+			Model: model, Revision: revision, CandidateLimit: rerankerCandidates, BatchSize: batchSize, Mode: "bounded-korean", Timeout: rerankerTimeout.String(), InputFormat: "structured-korean-v1",
 		}
 	}
 	descriptor := releaseDescriptor{
-		Schema: "krx-rule-mcp-release-v4", CorpusReleaseHash: repo.CorpusReleaseHash,
+		Schema: "krx-rule-mcp-release-v6", CorpusReleaseHash: repo.CorpusReleaseHash,
 		IndexSourceHash: repo.IndexSourceHash, IndexBuildHash: repo.IndexBuildHash,
 		BM25ArtifactDigest: repo.BM25ArtifactDigest, BM25SnapshotVersion: repo.BM25SnapshotVersion,
 		IndexerVersion: repo.IndexerVersion, Vector: vectorDescriptor, Reranker: rerankerIdentity, DomainLexiconDigest: lexiconDigest,
 		RuntimeVectorMode: runtimeVectorMode, ServerImageDigest: strings.TrimSpace(os.Getenv("RULE_MCP_SERVER_IMAGE_DIGEST")),
 		RetrievalCandidateLimit: retrievalCandidateLimit,
+		RetrievalPolicy:         searchindex.RetrievalPolicyVersion,
+		SearchContract:          mcpserver.SearchContractVersion,
 		TEIImageDigest:          strings.TrimSpace(os.Getenv("RULE_MCP_TEI_IMAGE_DIGEST")),
 		RerankerImageDigest:     strings.TrimSpace(os.Getenv("RULE_MCP_RERANKER_IMAGE_DIGEST")),
 	}
@@ -244,24 +273,17 @@ func buildProvenance(repo *searchindex.Repository, lexiconDigest, runtimeVectorM
 		IndexGeneration: repo.GenerationID, IndexSourceHash: repo.IndexSourceHash, IndexBuildHash: repo.IndexBuildHash,
 		IndexerVersion: repo.IndexerVersion, BM25ArtifactDigest: repo.BM25ArtifactDigest,
 		BM25SnapshotVersion: repo.BM25SnapshotVersion, Embedding: embedding, Reranker: rerankerIdentity, LexiconDigest: lexiconDigest,
-		RuntimeVectorMode: runtimeVectorMode, RetrievalContract: retrievalContract(reranker != nil), AnswerabilityGate: searchindex.AnswerabilityGateVersion,
+		RuntimeVectorMode: runtimeVectorMode, RetrievalContract: retrievalContract(reranker != nil), SearchContract: mcpserver.SearchContractVersion,
 		RetrievalCandidateLimit: retrievalCandidateLimit,
 		FixtureVersion:          fixture.FixtureVersion, FixtureSHA256: fixtureHash, SourceFixtureSHA256: fixture.Source.SHA256,
 	}, releaseGeneration, nil
 }
 
-func rerankerMode(all bool) string {
-	if all {
-		return "all-korean"
-	}
-	return "weak-supported-korean"
-}
-
 func retrievalContract(rerankerEnabled bool) string {
 	if rerankerEnabled {
-		return "chunk-rrf-selective-rerank-v1"
+		return searchindex.RetrievalPolicyVersion + "+bounded-rerank-v2"
 	}
-	return "chunk-rrf-v1"
+	return searchindex.RetrievalPolicyVersion
 }
 
 func writeReport(path string, report evaluation.Report) error {
@@ -300,67 +322,6 @@ func writeReport(path string, report evaluation.Report) error {
 	return nil
 }
 
-func qualityGateFailures(report evaluation.Report, englishFloor *englishQualityFloor) []string {
-	var failures []string
-	if report.Summary.Cases < 120 {
-		failures = append(failures, "evaluation cases < 120")
-	}
-	failures = append(failures, embeddingIntegrityFailures(report.Provenance.Embedding)...)
-
-	korean, ok := report.LanguageSummaries["ko"]
-	if !ok || korean.Cases < 150 || korean.DocumentEligible < 100 || korean.EvidenceEligible < 90 || korean.InsufficientCases < 20 || korean.AmbiguousCases < 10 {
-		failures = append(failures, "Korean evaluation coverage is incomplete")
-	} else {
-		failures = append(failures, koreanQualityFailures("Korean", korean, report.Provenance.Reranker != nil)...)
-	}
-	for _, name := range []string{"semantic", "semantic-variant"} {
-		cases, eligible, hitAt1 := koreanGroupEvidenceHitAt1(report.Cases, name)
-		if cases == 0 || eligible == 0 {
-			failures = append(failures, name+" evidence cases missing")
-		} else if float64(hitAt1)/float64(eligible) < 0.90 {
-			failures = append(failures, name+" evidence Hit@1 < 90%")
-		}
-	}
-	if korean.ManualEvidenceEligible > 0 && korean.ManualEvidenceHitAt1Rate < 0.90 {
-		failures = append(failures, "Korean manual evidence target Hit@1 < 90%")
-	}
-	contradictionCases := 0
-	contradictionHitAt1 := 0
-	for _, result := range report.Cases {
-		if result.Language != "ko" || result.ExpectedStatus != "supported" || result.ClaimRelation != "contradicts" {
-			continue
-		}
-		contradictionCases++
-		if result.EvidenceRank == 1 {
-			contradictionHitAt1++
-		}
-	}
-	if contradictionCases == 0 {
-		failures = append(failures, "Korean contradiction evidence cases missing")
-	} else if float64(contradictionHitAt1)/float64(contradictionCases) < 0.90 {
-		failures = append(failures, "Korean contradiction target-evidence Hit@1 < 90%")
-	}
-	if report.Summary.FilterLeaks != 0 {
-		failures = append(failures, "filter leaks are non-zero")
-	}
-	if report.Summary.ContextConsistencyRate < 1 {
-		failures = append(failures, "context consistency < 100%")
-	}
-	if report.Summary.HWPAttachmentChecks == 0 {
-		failures = append(failures, "HWP attachment cases missing")
-	} else if report.Summary.HWPAttachmentPassed != report.Summary.HWPAttachmentChecks {
-		failures = append(failures, "HWP attachment regression")
-	}
-	koreanHoldout, ok := report.LanguageSplitSummaries["ko"]["holdout"]
-	if !ok || koreanHoldout.Cases < 30 || koreanHoldout.DocumentEligible < 15 || koreanHoldout.EvidenceEligible < 15 || koreanHoldout.InsufficientCases < 5 || koreanHoldout.AmbiguousCases < 3 {
-		failures = append(failures, "Korean holdout coverage is incomplete")
-	} else {
-		failures = append(failures, koreanQualityFailures("Korean holdout", koreanHoldout, report.Provenance.Reranker != nil)...)
-	}
-	failures = append(failures, englishQualityFloorFailures(report, englishFloor)...)
-	return failures
-}
-
 func embeddingIntegrityFailures(embedding *evaluation.EmbeddingIdentity) []string {
 	if embedding == nil {
 		return []string{"full-vector embedding provenance is missing"}
@@ -396,113 +357,6 @@ func isSHA256Hex(value string) bool {
 	}
 	decoded, err := hex.DecodeString(value)
 	return err == nil && len(decoded) == sha256.Size
-}
-
-func koreanGroupEvidenceHitAt1(cases []evaluation.CaseResult, group string) (count, eligible, hitAt1 int) {
-	for _, result := range cases {
-		if result.Language != "ko" || result.Group != group {
-			continue
-		}
-		count++
-		if !result.EvidenceEligible || result.EvidenceManualReview {
-			continue
-		}
-		eligible++
-		if result.EvidenceRank == 1 {
-			hitAt1++
-		}
-	}
-	return count, eligible, hitAt1
-}
-
-func koreanQualityFailures(label string, summary evaluation.Summary, rerankerEnabled bool) []string {
-	var failures []string
-	if summary.DocumentHitAt5Rate < 0.95 {
-		failures = append(failures, label+" Document Hit@5 < 95%")
-	}
-	if summary.MRRAt5 < 0.90 {
-		failures = append(failures, label+" MRR@5 < 0.90")
-	}
-	if summary.EvidenceHitAt1Rate < 0.90 {
-		failures = append(failures, label+" evidence Hit@1 < 90%")
-	}
-	if summary.EvidenceRecallAt3Rate < 0.95 {
-		failures = append(failures, label+" evidence Recall@3 < 95%")
-	}
-	if summary.CandidateEvidenceRecall64Rate < 0.95 {
-		failures = append(failures, label+" candidate evidence Recall@64 < 95%")
-	}
-	if rerankerEnabled && summary.RerankerPoolHitRate < 0.95 {
-		failures = append(failures, label+" reranker pool target inclusion < 95%")
-	}
-	if summary.StatusAccuracy < 0.95 || summary.InsufficientRefusalRate < 0.95 || summary.FalseSupportedRate > 0.05 || summary.AmbiguousClarificationRate < 0.90 {
-		failures = append(failures, label+" answerability gate regression")
-	}
-	if summary.FilterLeaks != 0 || summary.ContextConsistencyRate < 1 {
-		failures = append(failures, label+" evidence contract regression")
-	}
-	return failures
-}
-
-func englishQualityFloorFailures(report evaluation.Report, floor *englishQualityFloor) []string {
-	if floor == nil {
-		return []string{"English quality floor is missing"}
-	}
-	var failures []string
-	if report.Provenance.FixtureSHA256 != floor.FixtureSHA256 {
-		return []string{fmt.Sprintf("English quality floor fixture mismatch: report=%s floor=%s", report.Provenance.FixtureSHA256, floor.FixtureSHA256)}
-	}
-	overall, ok := report.LanguageSummaries["en"]
-	if !ok {
-		failures = append(failures, "English summary is missing")
-	} else {
-		failures = append(failures, compareEnglishQualityFloor("English", englishQualityMetricsFromSummary(overall), floor.Overall)...)
-	}
-	holdout, ok := report.LanguageSplitSummaries["en"]["holdout"]
-	if !ok {
-		failures = append(failures, "English holdout summary is missing")
-	} else {
-		failures = append(failures, compareEnglishQualityFloor("English holdout", englishQualityMetricsFromSummary(holdout), floor.Holdout)...)
-	}
-	return failures
-}
-
-func compareEnglishQualityFloor(label string, current, floor englishQualityMetrics) []string {
-	var failures []string
-	if current.Cases != floor.Cases || current.DocumentEligible != floor.DocumentEligible ||
-		current.EvidenceEligible != floor.EvidenceEligible || current.InsufficientCases != floor.InsufficientCases ||
-		current.EnglishCanonicalChecks != floor.EnglishCanonicalChecks {
-		failures = append(failures, label+" quality-floor coverage mismatch")
-		return failures
-	}
-	checks := []struct {
-		name       string
-		current    int
-		baseline   int
-		lowerIsBad bool
-	}{
-		{name: "Document Hit@5", current: current.DocumentHitAt5, baseline: floor.DocumentHitAt5, lowerIsBad: true},
-		{name: "evidence Hit@1", current: current.EvidenceHitAt1, baseline: floor.EvidenceHitAt1, lowerIsBad: true},
-		{name: "evidence Recall@3", current: current.EvidenceRecallAt3, baseline: floor.EvidenceRecallAt3, lowerIsBad: true},
-		{name: "candidate Recall@64", current: current.CandidateRecallAt64, baseline: floor.CandidateRecallAt64, lowerIsBad: true},
-		{name: "status accuracy", current: current.StatusCorrect, baseline: floor.StatusCorrect, lowerIsBad: true},
-		{name: "insufficient refusal", current: current.InsufficientRefused, baseline: floor.InsufficientRefused, lowerIsBad: true},
-		{name: "false-supported", current: current.FalseSupported, baseline: floor.FalseSupported},
-		{name: "canonical Korean source", current: current.EnglishCanonicalPassed, baseline: floor.EnglishCanonicalPassed, lowerIsBad: true},
-	}
-	for _, check := range checks {
-		regressed := check.current > check.baseline
-		if check.lowerIsBad {
-			regressed = check.current < check.baseline
-		}
-		if regressed {
-			failures = append(failures, fmt.Sprintf("%s %s fell below quality floor: current=%d floor=%d", label, check.name, check.current, check.baseline))
-		}
-	}
-	if current.MRRAt5+1e-12 < floor.MRRAt5 {
-		failures = append(failures, fmt.Sprintf("%s MRR@5 fell below quality floor: current=%.6f floor=%.6f", label, current.MRRAt5, floor.MRRAt5))
-	}
-	return failures
 }
 
 func vcsRevision() string {

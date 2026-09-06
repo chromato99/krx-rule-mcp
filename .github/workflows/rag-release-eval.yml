@@ -1,7 +1,12 @@
-name: RAG release evaluation
+name: MCP retrieval evaluation
 
 on:
   workflow_dispatch:
+    inputs:
+      corpus_ref:
+        description: Exact Markdown corpus commit SHA matching the index
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -16,6 +21,10 @@ jobs:
     timeout-minutes: 30
     environment: rag-release
     steps:
+      - name: Require immutable corpus revision
+        env:
+          CORPUS_REF: ${{ inputs.corpus_ref }}
+        run: '[[ "$CORPUS_REF" =~ ^[0-9a-f]{40}$ ]]'
       - name: Check out MCP server
         uses: actions/checkout@v4
         with:
@@ -25,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: chromato99/krx-rule-markdown
-          ref: 2261bdb088e649ef15932527e7b2ebe8f56dd3e8
+          ref: ${{ inputs.corpus_ref }}
           path: krx-rule-markdown
 
       - uses: actions/setup-go@v5
@@ -51,7 +60,7 @@ jobs:
             --vector \
             --check --require-full-vector
 
-      - name: Run protected full-vector quality gate
+      - name: Run protected full-vector retrieval regression gate
         working-directory: krx-rule-mcp
         env:
           KRX_RULE_DATA_DIR: ${{ github.workspace }}/krx-rule-markdown/data
@@ -67,10 +76,13 @@ jobs:
           KRX_EMBEDDING_INPUT_FORMAT: text-v1
         run: |
           mkdir -p eval/results
+          fixture=eval/golden/rag-v1.json
+          source_fixture=eval/source/rag-queries-2026-07-28.json
           go run ./cmd/krx-rule-eval \
             --data-dir "$KRX_RULE_DATA_DIR" \
             --index-dir "$KRX_RULE_INDEX_DIR" \
-            --english-quality-floor eval/baselines/rag-v1-english-floor.json \
+            --fixture "$fixture" --source-fixture "$source_fixture" \
+            --baseline eval/baselines/rag-retrieval-before.json \
             --vector --require-vector --fail-on-gate \
             --output eval/results/rag-v1-vector.json
 
@@ -81,7 +93,7 @@ jobs:
           if [ ! -f eval/results/rag-v1-vector.json ]; then
             exit 0
           fi
-          jq '{provenance, failure_stage_counts, summary, korean: .language_summaries.ko, korean_holdout: .language_split_summaries.ko.holdout, english: .language_summaries.en, english_holdout: .language_split_summaries.en.holdout}' eval/results/rag-v1-vector.json >> "$GITHUB_STEP_SUMMARY"
+          jq '{provenance, failure_stage_counts, summary, language_summaries, split_summaries, language_split_summaries}' eval/results/rag-v1-vector.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload evaluation reports
         if: always()

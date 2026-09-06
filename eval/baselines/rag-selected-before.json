@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "reference": "3d6fe64 retrieval with selected-evidence evaluator only",
+  "case_set_sha256": "a1fdb06ef2156de14e376bf2fe88bff96e45a8e0982a6dc33f290ac6c0744e3c",
+  "fixture_sha256": "00fd17323cb91e8f11a143fcccf7f13bc6db32daf2dd060d9f6d3ce3af4d9cb6",
+  "corpus_release_hash": "cb9c80f4717b63afd9cde0eecea8064a1dab789d622f8158a110513bf9d4b7af",
+  "index_generation": "dea7521bc7a29ebd6703282a9971a0127df60b54339116070816a90761ece12b",
+  "languages": {
+    "en": {
+      "evidence_eligible": 26,
+      "selected_evidence_correct": 21,
+      "selected_evidence_precision": 0.8076923076923077,
+      "correct_answer_coverage": 0.8076923076923077
+    },
+    "ko": {
+      "evidence_eligible": 114,
+      "selected_evidence_correct": 101,
+      "selected_evidence_precision": 0.8782608695652174,
+      "correct_answer_coverage": 0.8859649122807017
+    },
+    "unspecified": {
+      "evidence_eligible": 2,
+      "selected_evidence_correct": 2,
+      "selected_evidence_precision": 1,
+      "correct_answer_coverage": 1
+    }
+  }
+}

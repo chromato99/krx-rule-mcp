@@ -39,7 +39,7 @@ var (
 	articleIDPattern         = regexp.MustCompile(`^제\s*([0-9]+)\s*조(?:\s*의\s*([0-9]+))?`)
 	plainArticleTitlePattern = regexp.MustCompile(`^(제\s*[0-9]+\s*조(?:\s*의\s*[0-9]+)?\s*\([^\n)]*\))`)
 	englishArticlePattern    = regexp.MustCompile(`(?i)^§\s*([0-9]+(?:\s*-\s*[0-9]+)?)\s*[.]\s*(.*)$`)
-	englishSectionPattern    = regexp.MustCompile(`(?i)^(PART|CHAPTER|SECTION)\s*[A-Z0-9IVXLC.-]*\s*(?:[.:])?\s*.*$`)
+	englishSectionPattern    = regexp.MustCompile(`(?i)^(PART|CHAPTER|SECTION)\s+(?:[0-9]+|[IVXLCDM]+|[A-Z])(?:[.:]\s*|\s+|$).*$`)
 	englishTOCHeadingPattern = regexp.MustCompile(`(?i)^TABLE\s+OF\s+CONTENTS$`)
 	englishTOCLeaderPattern  = regexp.MustCompile(`[.·]{2,}\s*[0-9ivxlc]*\s*$`)
 	englishPageMarkerPattern = regexp.MustCompile(`(?i)^(?:[0-9]{1,4}|[ivxlc]{1,8})$`)

@@ -752,6 +752,7 @@ func engineFromSnapshot(docs []model.Document, snap Snapshot, vectors map[string
 		}
 		e.avgDocLength = float64(total) / float64(len(e.chunks))
 	}
+	e.prepareSearchCaches()
 	return e
 }
 

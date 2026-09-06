@@ -68,10 +68,9 @@ The fields have deliberately different jobs:
   evaluation questions into the lexicon.
 - `expansions` improves candidate and document recall. It may contain broader
   official names, document names, or related terms.
-- `evidence_terms` contains reviewed phrases that must occur in the returned
-  rule evidence. Together with `canonical`, these terms are used for final
-  evidence selection and answerability; broad recall expansions are not
-  trusted as proof.
+- `evidence_terms` contains reviewed phrases used with `canonical` to rank
+  candidate passages. These terms and broader recall expansions do not prove
+  that a question is answerable; the caller must inspect the source text.
 
 Do not add full evaluation sentences or expected numeric answers as aliases or
 expansions. Prefer reusable concept groups, and keep answer values in the

@@ -182,7 +182,7 @@ func TestReleaseGenerationBindsCanonicalDescriptor(t *testing.T) {
 	if reranked.ReleaseGeneration == first.ReleaseGeneration || reranked.ReleaseGeneration == rerankerChanged.ReleaseGeneration || rerankedDescriptor.Reranker == nil || rerankedDescriptor.RetrievalCandidateLimit != 128 {
 		t.Fatalf("reranker identity is not release-bound: baseline=%s reranked=%#v changed=%s", first.ReleaseGeneration, rerankedDescriptor, rerankerChanged.ReleaseGeneration)
 	}
-	if descriptor.Schema != "krx-rule-mcp-release-v4" || descriptor.CorpusReleaseHash == "" || descriptor.CorpusReleaseHash != repo.CorpusReleaseHash || descriptor.IndexSourceHash == "" || descriptor.IndexBuildHash == "" || descriptor.DomainLexiconDigest == "" || descriptor.RuntimeVectorMode != "bm25" || descriptor.ServerImageDigest != "sha256:image-a" || descriptor.TEIImageDigest != "sha256:tei-a" {
+	if descriptor.Schema != "krx-rule-mcp-release-v6" || descriptor.RetrievalPolicy != searchindex.RetrievalPolicyVersion || descriptor.SearchContract != mcpserver.SearchContractVersion || descriptor.CorpusReleaseHash == "" || descriptor.CorpusReleaseHash != repo.CorpusReleaseHash || descriptor.IndexSourceHash == "" || descriptor.IndexBuildHash == "" || descriptor.DomainLexiconDigest == "" || descriptor.RuntimeVectorMode != "bm25" || descriptor.ServerImageDigest != "sha256:image-a" || descriptor.TEIImageDigest != "sha256:tei-a" {
 		t.Fatalf("canonical descriptor is incomplete: %#v", descriptor)
 	}
 }
@@ -359,11 +359,18 @@ func TestStatelessHTTPAcceptsIndependentInitializeAndToolRequests(t *testing.T) 
 	if err := json.Unmarshal(called.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode JSON MCP response: %v; body=%s", err, called.Body.String())
 	}
-	if len(response.Result.Content) != 0 || len(response.Result.StructuredContent) == 0 {
-		t.Fatalf("typed output must be carried once as structuredContent: %s", called.Body.String())
+	if len(response.Result.Content) != 1 || len(response.Result.StructuredContent) == 0 {
+		t.Fatalf("missing text/structured representation: %s", called.Body.String())
 	}
-	if strings.Count(called.Body.String(), `"categories"`) != 1 {
-		t.Fatalf("structured output was duplicated on the wire: %s", called.Body.String())
+	var block struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(response.Result.Content[0], &block); err != nil {
+		t.Fatal(err)
+	}
+	if block.Type != "text" || block.Text != string(response.Result.StructuredContent) {
+		t.Fatalf("text-only hosts receive different evidence: %s", called.Body.String())
 	}
 }
 

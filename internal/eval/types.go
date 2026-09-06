@@ -6,7 +6,7 @@ import (
 	mcpserver "github.com/chromato99/krx-rule-mcp/internal/mcp"
 )
 
-const EvaluatorVersion = "rag-evaluator-v1"
+const EvaluatorVersion = "rag-retrieval-evaluator-v3"
 
 type Fixture struct {
 	SchemaVersion  int             `json:"schema_version"`
@@ -25,9 +25,10 @@ type FixtureSource struct {
 }
 
 type FixturePolicies struct {
-	ChunkIDsInExpectations              bool `json:"chunk_ids_in_expectations"`
-	ScoresAreConfidence                 bool `json:"scores_are_confidence"`
-	ManualReviewExcludedFromAutoMetrics bool `json:"manual_review_excluded_from_automatic_evidence_metrics"`
+	EvaluationUse                       string `json:"evaluation_use,omitempty"`
+	ChunkIDsInExpectations              bool   `json:"chunk_ids_in_expectations"`
+	ScoresAreConfidence                 bool   `json:"scores_are_confidence"`
+	ManualReviewExcludedFromAutoMetrics bool   `json:"manual_review_excluded_from_automatic_evidence_metrics"`
 }
 
 type Case struct {
@@ -109,9 +110,11 @@ type Provenance struct {
 	RuntimeVectorMode       string             `json:"runtime_vector_mode"`
 	RetrievalCandidateLimit int                `json:"retrieval_candidate_limit"`
 	RetrievalContract       string             `json:"retrieval_contract"`
-	AnswerabilityGate       string             `json:"answerability_gate"`
+	SearchContract          string             `json:"search_contract"`
 	FixtureVersion          string             `json:"fixture_version"`
 	FixtureSHA256           string             `json:"fixture_sha256"`
+	CaseSetSHA256           string             `json:"case_set_sha256"`
+	EvaluationUse           string             `json:"evaluation_use"`
 	SourceFixtureSHA256     string             `json:"source_fixture_sha256"`
 	Extra                   map[string]string  `json:"extra,omitempty"`
 }
@@ -155,6 +158,12 @@ type Report struct {
 }
 
 type Summary struct {
+	RetrievalContractFailures     int     `json:"retrieval_contract_failures"`
+	ReturnedEvidenceValidCases    int     `json:"returned_evidence_valid_cases"`
+	EvidenceBundleHitAt5          int     `json:"evidence_bundle_hit_at_5"`
+	EvidenceBundleHitAt5Rate      float64 `json:"evidence_bundle_hit_at_5_rate"`
+	NegativeCasesWithCandidates   int     `json:"negative_cases_with_candidates"`
+	AmbiguousCasesWithCandidates  int     `json:"ambiguous_cases_with_candidates"`
 	Cases                         int     `json:"cases"`
 	SupportedCases                int     `json:"supported_cases"`
 	InsufficientCases             int     `json:"insufficient_cases"`
@@ -180,14 +189,6 @@ type Summary struct {
 	ManualEvidenceEligible        int     `json:"manual_evidence_eligible"`
 	ManualEvidenceHitAt1          int     `json:"manual_evidence_hit_at_1"`
 	ManualEvidenceHitAt1Rate      float64 `json:"manual_evidence_hit_at_1_rate"`
-	StatusCorrect                 int     `json:"status_correct"`
-	StatusAccuracy                float64 `json:"status_accuracy"`
-	InsufficientRefused           int     `json:"insufficient_refused"`
-	InsufficientRefusalRate       float64 `json:"insufficient_refusal_rate"`
-	FalseSupported                int     `json:"false_supported"`
-	FalseSupportedRate            float64 `json:"false_supported_rate"`
-	AmbiguousClarified            int     `json:"ambiguous_clarified"`
-	AmbiguousClarificationRate    float64 `json:"ambiguous_clarification_rate"`
 	ContextChecks                 int     `json:"context_checks"`
 	ContextConsistent             int     `json:"context_consistent"`
 	ContextConsistencyRate        float64 `json:"context_consistency_rate"`
@@ -213,44 +214,44 @@ type SliceMetrics struct {
 	EvidenceHitAt1     int     `json:"evidence_hit_at_1"`
 	EvidenceHitAt1Rate float64 `json:"evidence_hit_at_1_rate"`
 	EvidenceRecallAt3  int     `json:"evidence_recall_at_3"`
-	StatusCorrect      int     `json:"status_correct"`
 }
 
 type CaseResult struct {
-	ID                     string           `json:"id"`
-	Group                  string           `json:"group"`
-	Split                  string           `json:"split"`
-	Language               string           `json:"language,omitempty"`
-	ClaimRelation          string           `json:"claim_relation"`
-	ExpectedStatus         string           `json:"expected_status"`
-	ObservedStatus         string           `json:"observed_status"`
-	Answerable             bool             `json:"answerable"`
-	StatusCorrect          bool             `json:"status_correct"`
-	ClarificationProvided  bool             `json:"clarification_provided"`
-	DocumentRank           int              `json:"document_rank,omitempty"`
-	EvidenceRank           int              `json:"evidence_rank,omitempty"`
-	CandidateBM25Rank      int              `json:"candidate_bm25_rank,omitempty"`
-	CandidateVectorRank    int              `json:"candidate_vector_rank,omitempty"`
-	CandidateFusedRank     int              `json:"candidate_fused_rank,omitempty"`
-	CandidateFinalRank     int              `json:"candidate_final_rank,omitempty"`
-	CandidateTrace         []CandidateTrace `json:"candidate_trace,omitempty"`
-	FailureStages          []string         `json:"failure_stages,omitempty"`
-	RerankerPoolIncluded   bool             `json:"reranker_pool_included"`
-	RerankerCandidateCount int              `json:"reranker_candidate_count,omitempty"`
-	RerankerAdopted        bool             `json:"reranker_adopted"`
-	EvidenceEligible       bool             `json:"evidence_eligible"`
-	EvidenceManualReview   bool             `json:"evidence_manual_review"`
-	FilterLeaks            int              `json:"filter_leaks"`
-	ExpansionPassed        *bool            `json:"expansion_passed,omitempty"`
-	ContextChecks          []ContextCheck   `json:"context_checks,omitempty"`
-	Results                []ObservedResult `json:"results"`
-	Answerability          any              `json:"answerability"`
-	Mode                   string           `json:"mode"`
-	SearchElapsedMillis    float64          `json:"search_elapsed_ms"`
-	RerankerElapsedMillis  float64          `json:"reranker_elapsed_ms,omitempty"`
-	ElapsedMillis          float64          `json:"elapsed_ms"`
-	AutomaticPassed        bool             `json:"automatic_passed"`
-	Failures               []string         `json:"failures,omitempty"`
+	Retrieval                mcpserver.RetrievalInfo `json:"retrieval"`
+	RetrievalContractValid   bool                    `json:"retrieval_contract_valid"`
+	ReturnedEvidenceValid    bool                    `json:"returned_evidence_valid"`
+	EvidenceBundleAt5Matched bool                    `json:"evidence_bundle_at_5_matched"`
+	ID                       string                  `json:"id"`
+	Group                    string                  `json:"group"`
+	Split                    string                  `json:"split"`
+	Language                 string                  `json:"language,omitempty"`
+	ClaimRelation            string                  `json:"claim_relation"`
+	ExpectedStatus           string                  `json:"expected_status"`
+	DocumentRank             int                     `json:"document_rank,omitempty"`
+	EvidenceRank             int                     `json:"evidence_rank,omitempty"`
+	CandidateBM25Rank        int                     `json:"candidate_bm25_rank,omitempty"`
+	CandidateVectorRank      int                     `json:"candidate_vector_rank,omitempty"`
+	CandidateFusedRank       int                     `json:"candidate_fused_rank,omitempty"`
+	CandidateFinalRank       int                     `json:"candidate_final_rank,omitempty"`
+	CandidateOwnerRank       int                     `json:"candidate_owner_rank,omitempty"`
+	CandidateBundleMatched   bool                    `json:"candidate_bundle_matched"`
+	CandidateTrace           []CandidateTrace        `json:"candidate_trace,omitempty"`
+	FailureStages            []string                `json:"failure_stages,omitempty"`
+	RerankerPoolIncluded     bool                    `json:"reranker_pool_included"`
+	RerankerCandidateCount   int                     `json:"reranker_candidate_count,omitempty"`
+	RerankerAdopted          bool                    `json:"reranker_adopted"`
+	EvidenceEligible         bool                    `json:"evidence_eligible"`
+	EvidenceManualReview     bool                    `json:"evidence_manual_review"`
+	FilterLeaks              int                     `json:"filter_leaks"`
+	ExpansionPassed          *bool                   `json:"expansion_passed,omitempty"`
+	ContextChecks            []ContextCheck          `json:"context_checks,omitempty"`
+	Results                  []ObservedResult        `json:"results"`
+	Mode                     string                  `json:"mode"`
+	SearchElapsedMillis      float64                 `json:"search_elapsed_ms"`
+	RerankerElapsedMillis    float64                 `json:"reranker_elapsed_ms,omitempty"`
+	ElapsedMillis            float64                 `json:"elapsed_ms"`
+	AutomaticPassed          bool                    `json:"automatic_passed"`
+	Failures                 []string                `json:"failures,omitempty"`
 }
 
 // CandidateTrace is a bounded evaluator-only view of the first-stage retrieval
@@ -297,6 +298,8 @@ type ObservedEvidence struct {
 }
 
 type ContextCheck struct {
+	OwnerMatches     bool   `json:"owner_matches"`
+	Truncated        bool   `json:"truncated"`
 	ChunkID          string `json:"chunk_id"`
 	ExpectedDocument string `json:"expected_document"`
 	ObservedDocument string `json:"observed_document,omitempty"`

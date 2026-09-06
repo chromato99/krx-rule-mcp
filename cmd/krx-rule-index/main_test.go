@@ -14,6 +14,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestVectorReuseKeysExactTextRatherThanChunkID(t *testing.T) {
+	previous := searchindex.Snapshot{Chunks: []searchindex.SnapshotChunk{{ID: "old", Text: "same passage"}, {ID: "changed", Text: "old passage"}}}
+	vectors := searchindex.VectorSnapshot{Vectors: []searchindex.SnapshotVector{{ChunkID: "old", Vector: []float64{1, 0}}, {ChunkID: "changed", Vector: []float64{0, 1}}}}
+	chunks := []searchindex.SnapshotChunk{{ID: "moved", Text: "same passage"}, {ID: "changed", Text: "new passage"}, {ID: "whitespace", Text: "same  passage"}}
+	reused, missing := reuseExactTextVectors(previous, vectors, chunks)
+	if len(reused) != 1 || reused["moved"][0] != 1 || len(missing) != 2 || missing[0].ID != "changed" || missing[1].ID != "whitespace" {
+		t.Fatalf("reused=%v missing=%v", reused, missing)
+	}
+}
+
 func TestSelectVectorChunksSamplesByQuery(t *testing.T) {
 	chunks := []searchindex.SnapshotChunk{
 		{ID: "a", Tokens: []string{"상장", "심사"}},

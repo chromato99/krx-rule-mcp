@@ -62,8 +62,13 @@ func RunCasePrefix(ctx context.Context, fixture Fixture, prefix string, client C
 func runFixture(ctx context.Context, fixture Fixture, client Client, provenance Provenance) (Report, error) {
 	provenance.EvaluatorVersion = EvaluatorVersion
 	provenance.FixtureVersion = fixture.FixtureVersion
+	provenance.CaseSetSHA256 = FixtureContractHash(fixture)
+	provenance.EvaluationUse = fixture.Policies.EvaluationUse
+	if provenance.EvaluationUse == "" {
+		provenance.EvaluationUse = "development"
+	}
 	report := Report{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		GeneratedAt:   time.Now().UTC(),
 		Provenance:    provenance,
 		Slices:        map[string]SliceMetrics{},
@@ -100,6 +105,9 @@ func summarizeFailureStages(cases []CaseResult) map[string]int {
 
 func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
 	evidenceEligible, evidenceManualReview := evidenceEligibility(item.Expectation)
+	if item.Expectation.EvidenceStatus != "supported" {
+		evidenceEligible, evidenceManualReview = false, false
+	}
 	result := CaseResult{
 		ID:                   item.ID,
 		Group:                item.Group,
@@ -118,9 +126,20 @@ func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
 		result.FailureStages = []string{"search"}
 		return result
 	}
-	result.ObservedStatus = string(search.Answerability.Status)
-	result.Answerable = search.Answerable
-	result.Answerability = search.Answerability
+	result.Retrieval = search.Retrieval
+	displayLimit := item.Input.Limit
+	if displayLimit == 0 {
+		displayLimit = 10
+	}
+	expectedRetrievalStatus := mcpserver.RetrievalNoCandidates
+	if len(search.Results) > 0 {
+		expectedRetrievalStatus = mcpserver.RetrievalCandidatesFound
+	}
+	result.RetrievalContractValid = search.ContractVersion == mcpserver.SearchContractVersion &&
+		search.Retrieval.Status == expectedRetrievalStatus && search.Retrieval.ReturnedResults == len(search.Results) && len(search.Results) <= displayLimit
+	result.ReturnedEvidenceValid = true
+	returnedIDs := map[string]bool{}
+	var bundleContexts []returnedEvidenceContext
 	result.Mode = search.Mode
 	result.RerankerElapsedMillis = search.RerankerElapsedMillis
 	result.RerankerCandidateCount = search.RerankerCandidateCount
@@ -129,10 +148,15 @@ func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
 	result.CandidateVectorRank = candidatePolicyRank(item.Expectation, search.Candidates, func(candidate searchindex.ChunkCandidate) int { return candidate.VectorRank })
 	result.CandidateFusedRank = candidatePolicyRank(item.Expectation, search.Candidates, func(candidate searchindex.ChunkCandidate) int { return candidate.BaselineRank })
 	result.CandidateFinalRank = candidatePolicyRank(item.Expectation, search.Candidates, func(candidate searchindex.ChunkCandidate) int { return candidate.FinalRank })
+	ownerExpectation := item.Expectation
+	ownerExpectation.Targets = append([]Target(nil), item.Expectation.Targets...)
+	for i := range ownerExpectation.Targets {
+		ownerExpectation.Targets[i].Evidence = nil
+	}
+	result.CandidateOwnerRank = candidatePolicyRank(ownerExpectation, search.Candidates, func(candidate searchindex.ChunkCandidate) int { return candidate.BaselineRank })
+	result.CandidateBundleMatched = candidateBundleMatches(item.Expectation, search.Candidates)
 	result.CandidateTrace = buildCandidateTrace(item.Expectation, search.Candidates, 8)
 	result.RerankerPoolIncluded = candidatePolicyRank(item.Expectation, search.Candidates, func(candidate searchindex.ChunkCandidate) int { return candidate.RerankerRank }) > 0
-	result.StatusCorrect = result.ObservedStatus == result.ExpectedStatus && search.Answerable == (result.ExpectedStatus == "supported")
-	result.ClarificationProvided = strings.TrimSpace(search.Answerability.Clarification) != ""
 	result.FilterLeaks = countFilterLeaks(item.Input, search.Results)
 	result.DocumentRank = firstDocumentRank(item.Expectation, search.Results)
 	if item.Expectation.QueryExpansion != nil {
@@ -156,6 +180,10 @@ func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
 			observedResult.AttachmentIDs = appendUnique(observedResult.AttachmentIDs, attachment.ID)
 		}
 		for _, match := range observed.EvidenceMatches {
+			if strings.TrimSpace(match.ChunkID) == "" || returnedIDs[match.ChunkID] {
+				result.ReturnedEvidenceValid = false
+			}
+			returnedIDs[match.ChunkID] = true
 			observedResult.Evidence = append(observedResult.Evidence, ObservedEvidence{
 				ChunkID: match.ChunkID, Source: match.Source, AttachmentID: match.AttachmentID,
 				ArticleID: match.ArticleID, HeadingPath: append([]string(nil), match.HeadingPath...),
@@ -163,10 +191,11 @@ func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
 				RerankerScore: match.RerankerScore, RerankerRank: match.RerankerRank,
 			})
 			contextOutput, contextErr := client.GetContext(ctx, mcpserver.GetContextInput{
-				ChunkID: match.ChunkID, BeforeChunks: &zero, AfterChunks: &zero, MaxChars: 10000,
+				ChunkID: match.ChunkID, BeforeChunks: &zero, AfterChunks: &zero, MaxChars: 50000,
 			})
 			check := ContextCheck{ChunkID: match.ChunkID, ExpectedDocument: observed.ID}
 			if contextErr != nil {
+				result.ReturnedEvidenceValid = false
 				check.Error = contextErr.Error()
 				result.ContextChecks = append(result.ContextChecks, check)
 				continue
@@ -176,8 +205,15 @@ func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
 			for _, chunk := range contextOutput.Chunks {
 				if chunk.ID == match.ChunkID {
 					check.ChunkPresent = true
+					check.OwnerMatches = chunk.DocumentID == observed.ID && chunk.ArticleID == match.ArticleID && chunk.AttachmentID == match.AttachmentID && chunk.Source == match.Source
 					break
 				}
+			}
+			check.Truncated = contextOutput.Truncated
+			if !check.ChunkPresent || !check.DocumentMatches || !check.OwnerMatches || check.Truncated {
+				result.ReturnedEvidenceValid = false
+			} else if rank < 5 {
+				bundleContexts = append(bundleContexts, returnedEvidenceContext{match, contextOutput})
 			}
 			matchedTargets := matchingTargetIndexes(item.Expectation, match, contextOutput)
 			check.TargetMatches = len(matchedTargets) > 0
@@ -195,9 +231,17 @@ func evaluateCase(ctx context.Context, item Case, client Client) CaseResult {
 		}
 		result.Results = append(result.Results, observedResult)
 	}
+	result.EvidenceBundleAt5Matched = result.EvidenceEligible && !result.EvidenceManualReview &&
+		result.ReturnedEvidenceValid && returnedEvidenceMatches(item.Expectation, bundleContexts)
 	result.AutomaticPassed = automaticCasePass(item, result)
-	if !result.StatusCorrect {
-		result.Failures = append(result.Failures, fmt.Sprintf("status=%s want=%s", result.ObservedStatus, result.ExpectedStatus))
+	if !result.RetrievalContractValid {
+		result.Failures = append(result.Failures, "retrieval status, count, version or result limit is inconsistent")
+	}
+	if !result.ReturnedEvidenceValid {
+		result.Failures = append(result.Failures, "returned evidence IDs are missing, duplicated, truncated, or inconsistent with their source contexts")
+	}
+	if result.EvidenceEligible && !result.EvidenceManualReview && !result.EvidenceBundleAt5Matched {
+		result.Failures = append(result.Failures, "top-5 returned evidence bundle does not satisfy expected targets")
 	}
 	if item.Expectation.EvidenceStatus == "supported" && result.DocumentRank == 0 {
 		result.Failures = append(result.Failures, "expected document absent from results")
@@ -302,13 +346,15 @@ func classifyFailureStages(item Case, result CaseResult) []string {
 		}
 	}
 	if item.Expectation.EvidenceStatus == "supported" {
-		if result.ObservedStatus == "supported" && (result.DocumentRank == 0 || result.DocumentRank > 5) {
+		if result.DocumentRank == 0 || result.DocumentRank > 5 {
 			add("document-ranking")
 		}
 		if result.EvidenceEligible && !result.EvidenceManualReview {
 			switch {
-			case result.CandidateFusedRank == 0 || result.CandidateFusedRank > 64:
+			case result.CandidateOwnerRank == 0:
 				add("candidate-generation")
+			case !result.CandidateBundleMatched:
+				add("candidate-evidence-gap")
 			case result.EvidenceRank == 0 || result.EvidenceRank > 3:
 				add("evidence-selection")
 			case result.EvidenceRank > 1:
@@ -316,8 +362,14 @@ func classifyFailureStages(item Case, result CaseResult) []string {
 			}
 		}
 	}
-	if !result.StatusCorrect {
-		add("answerability")
+	if !result.RetrievalContractValid {
+		add("retrieval-contract")
+	}
+	if !result.ReturnedEvidenceValid {
+		add("context-contract")
+	}
+	if result.EvidenceEligible && !result.EvidenceManualReview && !result.EvidenceBundleAt5Matched {
+		add("returned-evidence")
 	}
 	if result.ExpansionPassed != nil && !*result.ExpansionPassed {
 		add("query-expansion")
@@ -374,6 +426,31 @@ func matchingCandidateTargetIndexes(expectation Expectation, candidate searchind
 	return matched
 }
 
+// Diagnostics distinguish a missing source owner from evidence split across
+// several candidate chunks. Neither diagnostic counts as an answered case.
+func candidateBundleMatches(expectation Expectation, candidates []searchindex.ChunkCandidate) bool {
+	matched := map[int]struct{}{}
+	for index, target := range expectation.Targets {
+		var parts []string
+		for _, candidate := range candidates {
+			if candidate.DocumentID != target.DocumentID || (target.ArticleID != "" && target.ArticleID != candidate.ArticleID) ||
+				(target.AttachmentID != "" && target.AttachmentID != candidate.AttachmentID) {
+				continue
+			}
+			parts = append(parts, strings.Join(candidate.HeadingPath, " ")+" "+candidate.Text)
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		text := strings.Join(parts, "\n\n")
+		if target.Evidence != nil && (!evidenceTextMatches(*target.Evidence, text) || !claimRelationEvidenceMatches(expectation.ClaimRelation, *target.Evidence, text)) {
+			continue
+		}
+		matched[index] = struct{}{}
+	}
+	return targetPolicySatisfied(expectation, matched)
+}
+
 func firstDocumentRank(expectation Expectation, results []mcpserver.SearchResultDTO) int {
 	matchedTargets := map[int]struct{}{}
 	for rank, result := range results {
@@ -427,6 +504,41 @@ func matchingTargetIndexes(expectation Expectation, observed mcpserver.EvidenceM
 func contextMatchesExpectation(expectation Expectation, observed mcpserver.EvidenceMatchDTO, contextOutput mcpserver.ContextOutput) bool {
 	matched := map[int]struct{}{}
 	for _, targetIndex := range matchingTargetIndexes(expectation, observed, contextOutput) {
+		matched[targetIndex] = struct{}{}
+	}
+	return targetPolicySatisfied(expectation, matched)
+}
+
+type returnedEvidenceContext struct {
+	match   mcpserver.EvidenceMatchDTO
+	context mcpserver.ContextOutput
+}
+
+// Combine returned chunks only within the same labelled target. The caller
+// can inspect fragments together, but another article or attachment must not
+// supply a missing condition. The input is bounded to the first five results.
+func returnedEvidenceMatches(expectation Expectation, contexts []returnedEvidenceContext) bool {
+	matched := map[int]struct{}{}
+	for targetIndex, target := range expectation.Targets {
+		var parts []string
+		seen := map[string]bool{}
+		for _, item := range contexts {
+			if item.context.Document.ID != target.DocumentID ||
+				(target.ArticleID != "" && item.match.ArticleID != target.ArticleID) ||
+				(target.AttachmentID != "" && item.match.AttachmentID != target.AttachmentID) || seen[item.match.ChunkID] {
+				continue
+			}
+			seen[item.match.ChunkID] = true
+			parts = append(parts, item.context.Content)
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		text := strings.Join(parts, "\n\n")
+		if target.Evidence != nil && (!evidenceTextMatches(*target.Evidence, text) ||
+			!claimRelationEvidenceMatches(expectation.ClaimRelation, *target.Evidence, text)) {
+			continue
+		}
 		matched[targetIndex] = struct{}{}
 	}
 	return targetPolicySatisfied(expectation, matched)
@@ -588,34 +700,18 @@ func normalizeExpansionExpectation(value string) string {
 	return strings.ToLower(strings.Join(strings.Fields(value), ""))
 }
 
+// This pass describes the retrieval contract only. Negative/ambiguous fixtures
+// may return candidates; their answer/refusal/clarification needs a caller LLM.
 func automaticCasePass(item Case, result CaseResult) bool {
-	if !result.StatusCorrect || result.FilterLeaks != 0 {
+	if !result.RetrievalContractValid || !result.ReturnedEvidenceValid || result.FilterLeaks != 0 {
 		return false
 	}
 	if result.ExpansionPassed != nil && !*result.ExpansionPassed {
 		return false
 	}
-	switch item.Expectation.EvidenceStatus {
-	case "supported":
-		if result.DocumentRank == 0 || result.DocumentRank > 5 {
-			return false
-		}
-		if result.EvidenceEligible && !result.EvidenceManualReview && (result.EvidenceRank == 0 || result.EvidenceRank > 3) {
-			return false
-		}
-	case "insufficient":
-		if len(result.Results) != 0 {
-			return false
-		}
-	case "ambiguous":
-		if !result.ClarificationProvided {
-			return false
-		}
-	}
-	for _, check := range result.ContextChecks {
-		if check.Error != "" || !check.ChunkPresent || !check.DocumentMatches {
-			return false
-		}
+	if item.Expectation.EvidenceStatus == "supported" {
+		return result.DocumentRank > 0 && result.DocumentRank <= 5 &&
+			(!result.EvidenceEligible || result.EvidenceManualReview || result.EvidenceBundleAt5Matched)
 	}
 	return true
 }
@@ -661,9 +757,14 @@ func summarize(fixture Fixture, cases []CaseResult, latencies []float64) (Summar
 		item := caseByID[result.ID]
 		slice := slices[result.Group]
 		slice.Cases++
-		if result.StatusCorrect {
-			summary.StatusCorrect++
-			slice.StatusCorrect++
+		if !result.RetrievalContractValid {
+			summary.RetrievalContractFailures++
+		}
+		if result.ReturnedEvidenceValid {
+			summary.ReturnedEvidenceValidCases++
+		}
+		if result.EvidenceBundleAt5Matched {
+			summary.EvidenceBundleHitAt5++
 		}
 		if result.AutomaticPassed {
 			summary.AutomaticPassed++
@@ -711,20 +812,15 @@ func summarize(fixture Fixture, cases []CaseResult, latencies []float64) (Summar
 				summary.ManualEvidenceHitAt1++
 			}
 		}
-		if item.Expectation.EvidenceStatus == "insufficient" {
-			if result.ObservedStatus == "insufficient" && len(result.Results) == 0 {
-				summary.InsufficientRefused++
-			}
-			if result.ObservedStatus == "supported" {
-				summary.FalseSupported++
-			}
+		if item.Expectation.EvidenceStatus == "insufficient" && len(result.Results) > 0 {
+			summary.NegativeCasesWithCandidates++
 		}
-		if item.Expectation.EvidenceStatus == "ambiguous" && result.ObservedStatus == "ambiguous" && result.ClarificationProvided {
-			summary.AmbiguousClarified++
+		if item.Expectation.EvidenceStatus == "ambiguous" && len(result.Results) > 0 {
+			summary.AmbiguousCasesWithCandidates++
 		}
 		for _, check := range result.ContextChecks {
 			summary.ContextChecks++
-			if check.Error == "" && check.ChunkPresent && check.DocumentMatches {
+			if check.Error == "" && check.ChunkPresent && check.DocumentMatches && check.OwnerMatches && !check.Truncated {
 				summary.ContextConsistent++
 			}
 		}
@@ -761,10 +857,7 @@ func summarize(fixture Fixture, cases []CaseResult, latencies []float64) (Summar
 	summary.CandidateEvidenceRecall64Rate = ratio(summary.CandidateEvidenceRecall64, summary.CandidateEvidenceEligible)
 	summary.RerankerPoolHitRate = ratio(summary.RerankerPoolHit, summary.RerankerPoolEligible)
 	summary.ManualEvidenceHitAt1Rate = ratio(summary.ManualEvidenceHitAt1, summary.ManualEvidenceEligible)
-	summary.StatusAccuracy = ratio(summary.StatusCorrect, summary.Cases)
-	summary.InsufficientRefusalRate = ratio(summary.InsufficientRefused, summary.InsufficientCases)
-	summary.FalseSupportedRate = ratio(summary.FalseSupported, summary.InsufficientCases)
-	summary.AmbiguousClarificationRate = ratio(summary.AmbiguousClarified, summary.AmbiguousCases)
+	summary.EvidenceBundleHitAt5Rate = ratio(summary.EvidenceBundleHitAt5, summary.EvidenceEligible)
 	summary.ContextConsistencyRate = ratio(summary.ContextConsistent, summary.ContextChecks)
 	summary.P95SearchLatencyMillis = percentile95(searchLatencies)
 	summary.P95RerankerLatencyMillis = percentile95(rerankerLatencies)
@@ -778,7 +871,7 @@ func summarizeSplits(fixture Fixture, cases []CaseResult) map[string]Summary {
 		caseByID[item.ID] = item
 	}
 	summaries := map[string]Summary{}
-	for _, split := range []string{"regression", "development", "holdout"} {
+	for _, split := range []string{"regression", "development", "validation", "holdout"} {
 		selectedFixture := fixture
 		selectedFixture.Cases = nil
 		var selectedCases []CaseResult
@@ -842,7 +935,7 @@ func summarizeLanguageSplits(fixture Fixture, cases []CaseResult) map[string]map
 	summaries := make(map[string]map[string]Summary, len(languages))
 	for language := range languages {
 		bySplit := map[string]Summary{}
-		for _, split := range []string{"regression", "development", "holdout"} {
+		for _, split := range []string{"regression", "development", "validation", "holdout"} {
 			selectedFixture := fixture
 			selectedFixture.Cases = nil
 			var selectedCases []CaseResult

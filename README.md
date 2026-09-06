@@ -1,6 +1,6 @@
 # KRX Rule MCP
 
-한국거래소 법무포털 규정 corpus를 AI 클라이언트가 빠르게 검색하고 참조할 수 있게 하는 Go 기반 MCP 서버입니다.
+한국거래소 법무포털 규정 corpus를 AI 클라이언트가 빠르게 검색하고 참조할 수 있게 하는 Go 기반 MCP 서버입니다. 서버는 검색 후보와 원문을 제공하고, MCP를 호출하는 LLM이 근거를 읽어 답변·추가 검색·재질문 여부를 판단합니다. 사용 흐름과 응답 변경 사항은 [LLM 클라이언트 안내](docs/llm-client.md)를 참고하세요.
 
 이 저장소는 수집기를 포함하지 않습니다. [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)이 만든 schema-v2 `data/` release를 검증한 뒤 BM25/vector index generation을 생성하고, stdio 또는 Streamable HTTP MCP 서버로 제공합니다. 소스 checkout의 `index/current`는 현재 관리 중인 corpus와 맞춘 immutable generation을 가리킵니다.
 
@@ -12,7 +12,7 @@
 - **BM25 기본 검색**: producer의 `release_hash`와 `index_source_hash`가 맞는 `KRXIDX2` snapshot을 로드해 한국어 2-gram/3-gram 기반 검색을 수행합니다.
 - **KRX 도메인 사전 검색 보강**: `config/domain-lexicon.yaml`을 로드해 `동적상하한가 -> 실시간가격제한제도/가격변동폭/별표25` 같은 보수적 query expansion을 적용합니다.
 - **선택형 vector 검색**: OpenAI 호환 embeddings API로 만든 `KRXVEC2` snapshot을 로드하고 BM25 + vector 결과를 RRF로 병합합니다.
-- **한국어 evidence reranker**: 선택한 한국어 cross-encoder로 lexical coverage가 낮은 `supported` 단일문서 질의의 상위 20개 chunk만 재정렬합니다. 문서 RRF 순위와 answerability 기준은 바꾸지 않습니다.
+- **선택형 한국어 evidence reranker**: 활성화한 경우 한국어 질의의 상위 20개 chunk를 재정렬합니다. 문서 RRF 순위는 유지하며, 재정렬 점수로 답변 가능 여부를 판정하지 않습니다.
 - **RAG 문맥 재조회**: 검색 결과의 `evidence_matches[].chunk_id`로 `get_context`를 호출해 해당 chunk 주변 문맥만 다시 가져올 수 있습니다.
 - **원자적 index generation**: BM25와 선택적 vector/metadata를 `generations/<content-id>/`에 완성·검증한 뒤 `current` 포인터 하나만 원자 교체합니다. 중단된 build는 활성 generation을 바꾸지 않습니다.
 - **구조 anchor**: 조문 소유 관계, 항·호·목, heading path를 chunk에 저장하고 인용된 조문을 owning article로 오인하지 않습니다. 수식 원본/LaTeX pair와 table row는 분리하지 않습니다.
@@ -21,6 +21,10 @@
 - **배포 generation 검증**: corpus/index/vector/도메인 사전/runtime mode/server image를 묶은 canonical release descriptor의 SHA-256을 응답·로그·metrics에 기록하고 `/readyz`에서 기대값과 비교합니다.
 
 ## Corpus 준비
+
+이번 검색 평가와 저장소 기본 인덱스를 그대로 재현하려면 corpus의
+[`8b8d951`](https://github.com/chromato99/krx-rule-markdown/commit/8b8d951f2d722c922fbbbd49d2ea4f532edbdbdc) 커밋을 사용하세요.
+자세한 결과와 의존 관계는 [구조 전환 기록](docs/caller-llm-retrieval.md)에 있습니다.
 
 먼저 별도 프로젝트인 [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)에서 corpus를 생성합니다.
 
@@ -67,6 +71,8 @@ index/
 `generation-id`는 corpus release, index source/build hash, BM25와 선택적 vector artifact descriptor를 묶은 content hash입니다. Build는 filesystem advisory lock으로 직렬화되고 sibling staging에서 모든 digest·coverage 검증을 마친 뒤에만 `current`를 교체합니다.
 
 Vector를 포함한 generation은 현재 관리 중인 `krx-rule-markdown/data` corpus와 다음 embedding 설정으로 생성합니다.
+
+`text-v1` 재생성에서는 검증된 기존 generation과 model/revision/dimensions/prefix가 같을 때 정확히 동일한 청크 텍스트의 벡터를 재사용합니다. 이동한 chunk ID나 바뀐 문서 metadata를 근거로 재사용하지 않으며, 변경된 텍스트는 다시 embedding합니다. Revision이 없거나 profile이 다르면 전체를 생성하고, `--force`는 재사용하지 않습니다. 새 artifact의 전체 coverage와 hash 검증이 끝난 뒤에만 `current`를 교체합니다.
 
 | 항목 | 값 |
 | --- | --- |
@@ -251,7 +257,7 @@ go run ./cmd/krx-rule-mcp \
 
 Vector 검색을 쓰려면 index 생성 때 `--vector`로 vector 포함 generation을 publish하고, 서버에 `KRX_VECTOR_SEARCH_ENABLED=true`를 지정합니다. 서버 실행에는 별도 vector 경로를 주지 않습니다. 비활성화하면 generation에 vector가 있어도 파일을 읽지 않습니다. `KRX_VECTOR_SEARCH_POLICY=optional`은 잘못된 vector/embedding 설정에서 BM25로 fallback합니다. 운영에서 vector가 필수이면 `KRX_VECTOR_SEARCH_POLICY=required` 또는 `--require-vector`를 사용합니다. 이 정책은 full coverage와 embedding 설정이 없으면 기동을 실패시키고, runtime embedding 오류·timeout·잘못된 vector 응답은 BM25 결과가 아닌 MCP tool error로 반환합니다. HTTP `/readyz`도 실제 canary embedding이 유효해야 200을 반환합니다.
 
-한국어 reranker는 기본적으로 꺼져 있습니다. 활성화하면 먼저 baseline answerability를 계산하고, `supported`이면서 구조 anchor가 있고 원 질의 lexical coverage가 0.4 미만인 한국어 단일문서·비수치·비반증 질의만 재정렬합니다. Reranker는 문서 순위를 바꾸지 않으며, 재정렬 결과가 `supported`를 유지할 때만 evidence 순서를 채택합니다. `KRX_RERANKER_POLICY=required`에서는 `/info`가 고정 model/revision과 일치해야 기동하고 `/readyz`의 실제 rerank canary도 통과해야 합니다. 모델 점수는 answerability 확률로 사용하지 않습니다.
+한국어 reranker는 기본적으로 꺼져 있습니다. 활성화하면 한국어 질의의 제한된 상위 후보를 재정렬하며, 이전의 `supported` 판정에 따른 실행·채택 조건은 사용하지 않습니다. 문서 순위는 유지하고 문서 내부 evidence 순서를 조정합니다. `KRX_RERANKER_POLICY=required`의 모델 검증·기동·readiness 조건은 유지합니다. 서버에 답변 생성용 LLM을 추가할 필요는 없습니다.
 
 ## Docker Compose
 
@@ -315,60 +321,41 @@ TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 
 ## RAG 품질 평가
 
-`eval/golden/rag-v1.json`은 checksum으로 고정한 원본 50건을 포함한 210건 fixture입니다. 현재 split은 regression 50건, development 114건, holdout 46건입니다. Evaluator는 실제 `search_rules`와 `get_context`를 호출해 문서 순위, 문서 내부 근거 순위, BM25/vector/RRF candidate rank, reranker pool·채택 여부, 복수-target `any|all|at_least`, answerability, 필터 누출, 영문 canonical source, HWP 첨부를 판정하고 corpus/index/vector/reranker/lexicon provenance를 report에 기록합니다. 각 case의 `candidate_trace`에는 상위 8개 fused chunk와 그 밖에 존재하는 가장 높은 정답 chunk, channel별 순위·target 일치 여부가 기록됩니다. `failure_stages`에는 `candidate-generation`, `evidence-selection`, `top1-ranking`, `answerability` 같은 병목이 기록되고, `failure_stage_counts`, `split_summaries`, `language_summaries`, `language_split_summaries`에서 전체 병목과 언어·split별 지표를 확인할 수 있습니다.
+평가기는 실제 `search_rules → get_context` 경로에서 **반환된 근거의 접근성과 검색 품질**을 검사합니다. `rag-retrieval-evaluator-v3`는 LLM 답변 정답률이나 거절 정확도를 보고하지 않습니다.
 
-과적합 점검에서 검색·lexicon·reranker 구조 선택에 사용한 audit A/B/C/D 사례는 모두 development로 이동했습니다. Reranker model, K, batch, 선택 정책을 고정한 뒤 기존 target 문서와 겹치지 않는 규정으로 `audit-e-*` 12건을 holdout에 추가했고, 기존 영문 target과 겹치지 않는 10개 규정에서 `english-holdout-*`도 고정해 영문 holdout을 1건에서 11건으로 늘렸습니다. 이 46건은 설계 고정 뒤 실행되어 과도한 기한 모호성 규칙을 기각했고, 동일한 margin-variable fixture 교정을 변형 사례에도 적용하는 데 사용됐으므로 이제 소비된 validation set입니다. 이 결과에 별칭이나 점수를 다시 맞추지 않으며, 다음 설계의 최종 평가는 새 문서-분리 holdout으로 수행합니다.
+- `document_hit_at_5`: 필요한 문서가 실제 반환 결과의 상위 5개에 포함되는지 검사합니다.
+- `evidence_bundle_hit_at_5`: 상위 5개 결과의 주소 지정 가능한 근거에 필수 내용이 있는지 검사합니다. 같은 문서·조문·첨부 target의 여러 청크는 합칠 수 있지만, 다른 target에서 부족한 내용을 빌려오지는 않습니다.
+- 모든 반환 근거의 ID 중복·잘림·소유 문서/조문/첨부 불일치와 명시적 필터 누출을 검사합니다. 내부 120개 후보군의 recall은 별도 진단값입니다.
+- `insufficient`/`ambiguous`는 평가 질문의 라벨입니다. 그런 질문에 후보가 반환되어도 서버가 답변을 승인한 것으로 세지 않습니다. 답변·거절·재질문 품질은 호출 LLM의 별도 평가 대상입니다.
 
-fixture target을 현재 corpus와 다시 대조해 ETF 국내·해외 3%/6% 구분, 시장조성 점수식의 `10 ×`, UTI 대체식별자와 위탁증거금 예외 질의의 contradiction label을 바로잡았습니다. 추가 감사에서 UTI 의무만으로 별도 운전면허번호 요구의 부재를 증명할 수 없음을 반영했고, 장외파생상품 청산업무규정 제82조의 일중청산증거금과 제88조의 일중청산위탁증거금을 분리했습니다. 시장을 특정하지 않은 두 장중 추가증거금 기한 질의는 서로 다른 규정의 답이 가능하므로 `ambiguous`입니다. HWP와 notice 사례는 문서·첨부 ID뿐 아니라 실제 수식·본문 구문까지 맞아야 성공합니다. `attachment-margin-vars`와 그 변형은 상세 첨부뿐 아니라 같은 규정 제20조의 직접 정의도 유효 근거로 인정합니다. Evaluator는 실행 전에 모든 target 문서·조문·첨부·필수 구문과 입력 filter를 현재 immutable corpus/index에 대조하며 불일치가 있으면 검색 평가를 시작하지 않습니다. 감사 후 fixture SHA-256은 `00fd17323cb91e8f11a143fcccf7f13bc6db32daf2dd060d9f6d3ce3af4d9cb6`입니다.
-
-현재 reference E5 profile의 210건 전체 결과에서 한국어는 Document Hit@5 98.36%, MRR@5 0.894, evidence Hit@1 94.74%, evidence Recall@3 97.37%, candidate Recall@64 99.12%, status accuracy 98.33%입니다. 한국어 holdout은 각각 90.48%, 0.794, 75.00%, 85.00%, 95.00%, 97.14%입니다. 이전 감사 결과와 fixture가 일부 달라 완전한 동조건 비교는 아니지만, 라벨과 target이 변하지 않은 173개 한국어 사례에서도 문서 Hit@5가 108건에서 115건, evidence Hit@1이 93건에서 103건, Recall@3가 98건에서 106건, 올바른 status가 165건에서 172건으로 증가했습니다. insufficient refusal 100%, false-supported 0, context consistency 100%, HWP 21/21과 영어 품질 floor는 유지했습니다. 커밋 `7dcedaa`의 전체 검색 p95는 239.53ms로 이전 222.92ms보다 약 16.61ms 증가했지만 속도는 품질 gate가 아닙니다.
-
-질의 확장어는 후보·문서 회수에만 사용하고, 최종 근거는 별도의 검토된 `evidence_terms`와 규정 본문 일치로 선택합니다. 완전한 문장 별칭과 정답 숫자를 사전에서 제거하고 `(상품) AND (행위) AND (법률 개념)` 형태의 `match_groups`를 사용합니다. 명시된 ETF·NAV·LP처럼 한 문서의 여러 청크에 분산될 수 있는 식별자는 근거 묶음 전체에서 확인하며, 영어 계산·결정 질의도 계산 대상이 실제 근거에 있어야 `supported`가 됩니다.
-
-`intfloat/multilingual-e5-small`은 현재 reference artifact와 Compose의 기본 profile이지만 release gate에 하드코딩된 유일한 모델은 아닙니다. 이전 Qwen 비교는 현재 기본 profile을 교체할 근거가 부족했던 기각 실험으로 보존하되 다른 호환 모델의 사용 자체를 막지 않습니다. 서로 다른 모델의 raw score를 혼합하는 cross-model fusion은 사용하지 않으며 generation마다 하나의 profile을 선택합니다. 고정 한국어 BGE reranker는 새 holdout aggregate를 개선하지 못해 기본 경로에서 비활성화합니다. 다음 개선은 특정 모델의 미세조정보다 구조적 chunking, rank 기반 fusion, evidence selection, contradiction·수식 의미를 우선하며 `text-v1`/`structured-v1` 같은 입력 표현은 복수 profile에서 검증된 경우에만 공통 기본값으로 채택합니다.
-
-평가셋 원문 대조와 수정 내역은 [evaluation fixture audit](docs/evaluation-fixture-audit.md)에, 모델 결정·언어별 수치와 다음 단계는 [embedding model evaluation](docs/embedding-model-evaluation.md)에 정리되어 있습니다.
+`eval/golden/rag-v1.json`의 210건은 regression 50건, development 114건, validation 46건입니다. 질문과 target을 유지하며 `case_set_sha256`으로 비교합니다. 다음 검사는 변경 전 응답을 새 검색 지표로 다시 측정한 `eval/baselines/rag-retrieval-before.json`과 언어별 문서/근거 포함 건수를 비교합니다. corpus/index/embedding/사전/후보 예산이 같아야 비교할 수 있습니다.
 
 ```bash
-# 빠른 BM25 진단
+KRX_RULE_SERVER_COMMIT=working-tree \
+KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
 go run ./cmd/krx-rule-eval \
-  --data-dir "$KRX_RULE_DATA_DIR" \
-  --index-dir "$KRX_RULE_INDEX_DIR" \
-  --output eval/results/rag-v1-bm25.json
-
-# release용 full-vector gate
-KRX_VECTOR_SEARCH_ENABLED=true \
-go run ./cmd/krx-rule-eval \
-  --data-dir "$KRX_RULE_DATA_DIR" \
-  --index-dir "$KRX_RULE_INDEX_DIR" \
+  --data-dir ../krx-rule-markdown/data --index-dir index \
   --vector --require-vector --fail-on-gate \
-  --output eval/results/rag-v1-vector.json
-
-# 고정 한국어 reranker를 포함한 release 평가
-KRX_RERANKER_ENABLED=true \
-KRX_RERANKER_BASE_URL=http://127.0.0.1:18082 \
-KRX_RERANKER_MODEL=dragonkue/bge-reranker-v2-m3-ko \
-KRX_RERANKER_MODEL_REVISION=2aca5884ecac490192af9ebd86836d9073d826cd \
-KRX_RERANKER_CANDIDATE_LIMIT=20 \
-KRX_RERANKER_BATCH_SIZE=4 \
-go run ./cmd/krx-rule-eval \
-  --data-dir "$KRX_RULE_DATA_DIR" \
-  --index-dir "$KRX_RULE_INDEX_DIR" \
-  --vector --require-vector \
-  --reranker --require-reranker --reranker-timeout 30m \
-  --output eval/results/rag-v1-vector-reranker.json
+  --output /tmp/krx-retrieval-eval.json
 ```
 
-Golden expectation은 실행 결과와 분리되어 있습니다. `eval/source/`의 원본 case 수나 SHA-256이 fixture provenance와 다르면 evaluator는 실행을 거부합니다. 또한 모든 target을 현재 corpus/index에 대조해 문서·조문·첨부·필수/금지 구문·contradiction polarity·입력 filter가 실제 규정과 일치하는지 먼저 검사합니다. `claim_relation: contradicts`는 group 이름과 무관하게 모든 한국어 contradiction 사례에 포함합니다. Release gate에는 선택한 profile의 model/revision/dimensions/prefix/input format과 정확히 일치하는 full-coverage generation이 필요하지만 특정 모델명은 요구하지 않습니다.
-Release CI에서 Go build metadata가 제공되지 않는 실행 방식이면 `KRX_RULE_SERVER_COMMIT`에 검증할 source revision을 명시해 report의 `server_commit`을 고정합니다.
-병합 품질 기준은 한국어 전체와 한국어 holdout에 적용합니다. 두 범위 모두 `Document Hit@5 >= 95%`, `MRR@5 >= 0.90`, `evidence Hit@1 >= 90%`, `evidence Recall@3 >= 95%`, `candidate evidence Recall@64 >= 95%`, `insufficient refusal >= 95%`, `ambiguous clarification >= 90%`, `filter_leaks = 0`, `context consistency = 100%`를 충족해야 합니다. 한국어 `semantic`·`semantic-variant`와 contradiction target-evidence Hit@1도 각각 90% 이상이어야 합니다. Reranker provenance가 있으면 한국어 실제 rerank pool target inclusion도 95% 이상이어야 합니다.
+`--fail-on-gate`는 full-vector 무결성, 반환 계약, 필터, 문맥 일치와 고정 기준선 대비 검색 회귀만 검사합니다. 기존 `--gate-profile merge|release`와 `--reranker-all`은 제거했습니다. 검색 지표 통과를 LLM 제품의 출시 승인으로 해석하지 않습니다. `--split`/`--case-prefix`는 진단 전용이며 gate와 함께 사용하지 않습니다.
 
-현재 결과는 이 기준을 통과하지 않습니다. 한국어 전체 MRR 0.894와 ambiguity clarification 89.47%가 소폭 미달하고, 한국어 holdout의 Document Hit@5 90.48%, MRR 0.794, evidence Hit@1 75.00%, Recall@3 85.00%가 부족합니다. 반면 holdout candidate Recall@64는 95%, status accuracy는 97.14%, HWP는 5/5이므로 기준을 낮추기보다 문서·근거 순위와 범위 모호성 판별을 다음 단계에서 개선해야 합니다. 이 holdout은 기각 후보 검증과 fixture 교정에 사용되어 소비됐으므로 다음 튜닝 뒤에는 새 문서-분리 holdout으로 최종 판단합니다.
+이전에 실행한 38건 역시 이제 소비된 검증 자료입니다. 재측정할 수 있지만 새로운 독립 holdout으로 취급하지 않습니다.
 
-영어는 한국어와 같은 절대 합격선을 적용하지 않습니다. 감사된 reference 결과의 영어 전체·holdout 문서/근거/candidate/status/refusal/context/canonical-source 수치를 [모델 비종속 품질 floor](eval/baselines/rag-v1-english-floor.json)로 두고 어떤 embedding profile이든 하나라도 낮아지면 실패합니다. Floor는 동일 fixture인지 확인하지만 모델명을 비교하지 않습니다. 같은 profile의 전후 비교에서는 report에 기록된 전체 embedding 계약이 같은 경우에만 회귀 delta를 해석합니다. 속도는 품질 gate에서 제외하되 `p95_search_latency_ms`, `p95_reranker_latency_ms`, 모든 `get_context` 검증을 포함한 `p95_latency_ms`를 계속 기록합니다. `eval/baselines/`의 그 밖의 report는 생성 당시 provenance를 보존하는 역사 자료이며 현재 head의 release 기준선으로 간주하지 않습니다.
+```bash
+go run ./cmd/krx-rule-eval \
+  --data-dir ../krx-rule-markdown/data --index-dir index \
+  --fixture eval/golden/rag-holdout-scope-20260906.json \
+  --source-fixture eval/source/rag-holdout-scope-2026-09-06.json \
+  --holdout-reservation eval/experiments/20260906-scope/reservation.json \
+  --vector --require-vector \
+  --output /tmp/krx-retrieval-validation.json
+```
 
-`.github/workflows/rag-release-eval.yml`은 `workflow_dispatch`로 명시적으로 요청할 때만 저장소의 기본 E5 artifact를 검증한 뒤 모델 비종속 gate를 실행합니다. PR과 schedule에서는 자동 실행하지 않습니다. 다른 embedding profile은 동일 evaluator를 로컬 또는 별도 수동 환경에서 실행할 수 있습니다. 보호된 `rag-release` environment와 `[self-hosted, linux, x64, krx-rag-eval]` runner가 필요하며 embedding endpoint는 repository variable로 지정합니다. Reranker는 기본 경로에서 활성화하지 않고 수동 비교만 지원합니다. `--split`과 `--case-prefix` 실행은 표본 수가 작은 진단용이므로 `--fail-on-gate`와 함께 사용할 수 없습니다.
+후보 수는 `--candidate-limit` 또는 `KRX_RETRIEVAL_CANDIDATE_LIMIT`로 설정하며 기본값은 채널당 120개입니다. MCP 반환 `limit`과 분리되어 있습니다. 질문별 별칭이나 정답 수치를 추가해 평가 수치를 맞추지 않습니다. `.github/workflows/rag-release-eval.yml`은 고정 corpus commit을 받는 수동 검색 회귀 검사이며 자동 배포를 하지 않습니다.
 
+평가 책임과 비교 절차는 [품질 계약](docs/rag-quality-contract.md), 이번 변경은 [LLM 판단 구조 전환 결과](docs/caller-llm-retrieval.md)에 정리합니다. 이전 [2차 개선 기록](docs/rag-improvement-cycle-2.md)과 [평가 결과](docs/rag-quality-results.md)의 게이트 실패는 역사 기록으로 유지합니다.
 
 ## 테스트
 

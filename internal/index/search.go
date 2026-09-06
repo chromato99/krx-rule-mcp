@@ -13,6 +13,8 @@ import (
 )
 
 const (
+	RetrievalPolicyVersion           = "chunk-rrf-source-parent-scope-v4"
+	DefaultRetrievalCandidateLimit   = 120
 	evidenceOriginalCoverageWeight   = 0.016
 	evidenceExpansionCoverageWeight  = 0.012
 	evidencePhraseCoverageWeight     = 0.020
@@ -29,6 +31,7 @@ const (
 )
 
 type Filter struct {
+	documentIDs   map[string]struct{}
 	DocumentType  model.DocumentType `json:"document_type,omitempty"`
 	Language      string             `json:"language,omitempty"`
 	Category      string             `json:"category,omitempty"`
@@ -112,6 +115,8 @@ type ChunkCandidate struct {
 	FinalRank        int
 	RerankerScore    float64
 	Reranked         bool
+	expansionTokens  map[string]int
+	parentCoverage   float64
 }
 
 // SearchCandidateSet keeps retrieval candidates at chunk granularity until an
@@ -125,6 +130,7 @@ type SearchCandidateSet struct {
 // EvidenceMatch is a ranked, context-addressable reason why a document was
 // returned. SearchResult.MatchedChunkID always mirrors the first match.
 type EvidenceMatch struct {
+	ContextOnly      bool                   `json:"context_only,omitempty"`
 	ChunkID          string                 `json:"chunk_id"`
 	ChunkIndex       int                    `json:"chunk_index"`
 	Source           string                 `json:"source"`
@@ -175,12 +181,17 @@ type ChunkContext struct {
 }
 
 type Engine struct {
-	docs         map[string]model.Document
-	chunks       []chunk
-	chunkByID    map[string]int
-	chunkGroups  map[string][]int
-	df           map[string]int
-	avgDocLength float64
+	docs            map[string]model.Document
+	chunks          []chunk
+	chunkByID       map[string]int
+	chunkGroups     map[string][]int
+	df              map[string]int
+	avgDocLength    float64
+	postings        map[string][]int
+	metadataTokens  map[string]map[string]int
+	articleGroups   map[string][]int
+	paragraphGroups map[string][]int
+	sourceTitles    map[string][]string
 }
 
 type chunk struct {
@@ -265,6 +276,7 @@ func BuildWithAttachments(docs []model.Document, attachments map[string]Attachme
 	if len(e.chunks) > 0 {
 		e.avgDocLength = float64(totalLen) / float64(len(e.chunks))
 	}
+	e.prepareSearchCaches()
 	return e
 }
 
@@ -317,27 +329,24 @@ func (e *Engine) Search(opts SearchOptions) []SearchResult {
 // does not aggregate chunks into documents. This boundary lets a service apply
 // a bounded cross-encoder without duplicating retrieval logic.
 func (e *Engine) RetrieveCandidates(opts SearchOptions) SearchCandidateSet {
-	if opts.Limit <= 0 {
-		opts.Limit = 10
-	} else if opts.Limit > 50 {
-		opts.Limit = 50
-	}
 	originalQuery := strings.TrimSpace(opts.OriginalQuery)
 	if originalQuery == "" {
 		originalQuery = opts.Query
 	}
-	queryTokens := uniqueSearchTokens(Tokenize(opts.Query))
-	originalTerms := meaningfulQueryTerms(originalQuery)
-	candidateLimit := opts.CandidateLimit
-	if candidateLimit <= 0 {
-		candidateLimit = opts.Limit * 24
-		if candidateLimit < 64 {
-			candidateLimit = 64
+	if named := e.exactNamedSourceIDs(originalQuery, opts.Filter); len(named) > 0 {
+		opts.Filter.documentIDs = named
+		// Within an explicitly chosen source, its name is constant metadata,
+		// not a substantive topic term. Keep the original vector/query contract.
+		for id := range named {
+			for _, title := range e.sourceTitles[id] {
+				opts.Query = removeSourceTitle(opts.Query, title)
+				originalQuery = removeSourceTitle(originalQuery, title)
+			}
 		}
 	}
-	if candidateLimit > 512 {
-		candidateLimit = 512
-	}
+	queryTokens := uniqueSearchTokens(Tokenize(opts.Query))
+	originalTerms := meaningfulQueryTerms(originalQuery)
+	candidateLimit := EffectiveCandidateLimit(opts.CandidateLimit)
 	var bm25, vector []ChunkCandidate
 	var metadata []documentMetadataScore
 	var wait sync.WaitGroup
@@ -361,6 +370,18 @@ func (e *Engine) RetrieveCandidates(opts SearchOptions) SearchCandidateSet {
 		fused[index].FinalRank = index + 1
 	}
 	return SearchCandidateSet{Chunks: fused, metadata: metadata}
+}
+
+// The retrieval budget is a release setting, not a side effect of how many
+// results a client asks to display.
+func EffectiveCandidateLimit(limit int) int {
+	if limit <= 0 {
+		return DefaultRetrievalCandidateLimit
+	}
+	if limit > 512 {
+		return 512
+	}
+	return limit
 }
 
 // GroupCandidates converts a retrieved and optionally reranked chunk set into
@@ -455,8 +476,7 @@ func (e *Engine) ContextAround(chunkID string, before, after int) (model.Documen
 	if !ok {
 		return model.Document{}, nil, false
 	}
-	group := append([]int(nil), e.chunkGroups[chunkGroupKey(target)]...)
-	sort.Slice(group, func(i, j int) bool { return e.chunks[group[i]].Index < e.chunks[group[j]].Index })
+	group := e.chunkGroups[chunkGroupKey(target)]
 	pos := -1
 	for i, index := range group {
 		if e.chunks[index].ID == chunkID {
@@ -516,28 +536,30 @@ func (e *Engine) bm25ChunkCandidates(queryTokens, originalTerms []string, filter
 		k1 = 1.4
 		b  = 0.75
 	)
-	for _, c := range e.chunks {
-		if _, ok := allowedDocuments[c.DocID]; !ok {
-			continue
+	// Keep query-term accumulation order identical to the exhaustive scorer.
+	// Postings skip only zero-frequency terms, preserving exact BM25 scores.
+	scores := make([]float64, len(e.chunks))
+	for _, tok := range queryTokens {
+		weight := tokenWeights[tok]
+		if weight <= 0 {
+			weight = 1
 		}
-		var score float64
-		for _, tok := range queryTokens {
-			tf := float64(c.tokenMap[tok])
-			if tf == 0 {
+		idf := math.Log(1 + (float64(len(e.chunks))-float64(e.df[tok])+0.5)/(float64(e.df[tok])+0.5))
+		for _, index := range e.postings[tok] {
+			c := e.chunks[index]
+			if _, ok := allowedDocuments[c.DocID]; !ok {
 				continue
 			}
-			weight := tokenWeights[tok]
-			if weight <= 0 {
-				weight = 1
-			}
-			idf := math.Log(1 + (float64(len(e.chunks))-float64(e.df[tok])+0.5)/(float64(e.df[tok])+0.5))
+			tf := float64(c.tokenMap[tok])
 			denom := tf + k1*(1-b+b*float64(len(c.Tokens))/e.avgDocLength)
-			score += weight * idf * (tf * (k1 + 1) / denom)
+			scores[index] += weight * idf * (tf * (k1 + 1) / denom)
 		}
+	}
+	for index, score := range scores {
 		if score <= 0 {
 			continue
 		}
-		candidate := chunkCandidate(c)
+		candidate := chunkCandidate(e.chunks[index])
 		candidate.Score = score
 		candidate.BM25Score = score
 		pushChunkCandidate(top, candidate, limit)
@@ -635,7 +657,7 @@ func (e *Engine) metadataDocumentScores(queryTokens []string, filter Filter, tok
 		if !matchesFilter(doc, filter) {
 			continue
 		}
-		indexed := countTokens(Tokenize(doc.Title + " " + doc.Category))
+		indexed := e.metadataTokens[doc.ID]
 		var score float64
 		for _, token := range queryTokens {
 			if indexed[token] == 0 {
@@ -808,6 +830,13 @@ func (e *Engine) groupChunkCandidates(opts SearchOptions, fused []ChunkCandidate
 	if strings.TrimSpace(query) == "" {
 		query = opts.Query
 	}
+	parentQuery := query
+	for id := range e.exactNamedSourceIDs(query, opts.Filter) {
+		for _, title := range e.sourceTitles[id] {
+			parentQuery = removeSourceTitle(parentQuery, title)
+		}
+	}
+	parentTerms := meaningfulQueryTerms(parentQuery)
 	for documentID, aggregate := range aggregates {
 		doc := e.docs[documentID]
 		result := resultFromDoc(doc)
@@ -816,6 +845,37 @@ func (e *Engine) groupChunkCandidates(opts SearchOptions, fused []ChunkCandidate
 			evidenceLimit = 3
 		} else if evidenceLimit > 20 {
 			evidenceLimit = 20
+		}
+		if hasExpansionWeights(opts.EvidenceTokenWeights) || hasExpansionWeights(opts.DocumentIntentWeights) {
+			for i := range aggregate.candidates {
+				candidate := &aggregate.candidates[i]
+				candidate.expansionTokens = countTokens(indexTokenize(candidate.Text + " " + strings.Join(candidate.HeadingPath, " ") + " " + candidate.AttachmentTitle))
+			}
+		}
+		parentCoverage := map[string]float64{}
+		for i := range aggregate.candidates {
+			candidate := &aggregate.candidates[i]
+			idx, exists := e.chunkByID[candidate.ChunkID]
+			if !exists {
+				continue
+			}
+			group := e.boundedEvidenceParent(e.chunks[idx])
+			if len(group) == 0 {
+				continue
+			}
+			key := e.chunks[group[0]].ID
+			coverage, ok := parentCoverage[key]
+			if !ok {
+				var text strings.Builder
+				for _, p := range group {
+					text.WriteString(e.chunks[p].Text)
+					text.WriteByte(' ')
+				}
+				text.WriteString(strings.Join(e.chunks[group[0]].HeadingPath, " "))
+				coverage = termCoverage(parentTerms, text.String())
+				parentCoverage[key] = coverage
+			}
+			candidate.parentCoverage = coverage
 		}
 		retrievalSelected := selectBaselineEvidenceCandidates(aggregate.candidates, 3)
 		for rank, candidate := range retrievalSelected {
@@ -853,7 +913,7 @@ func (e *Engine) groupChunkCandidates(opts SearchOptions, fused []ChunkCandidate
 		results = append(results, result)
 	}
 	sort.Slice(results, func(i, j int) bool { return e.searchResultLess(results[i], results[j]) })
-	return trim(results, opts.Limit)
+	return trim(filterNamedDocumentResults(query, filterExplicitMarketResults(query, results)), opts.Limit)
 }
 
 func selectEvidenceCandidates(candidates []ChunkCandidate, limit int) []ChunkCandidate {
@@ -891,7 +951,7 @@ func selectExpandedEvidenceCandidates(
 	for index := range ranked {
 		candidate := &ranked[index]
 		candidate.Score = candidate.Score +
-			evidenceOriginalCoverageWeight*candidate.LexicalCoverage +
+			evidenceOriginalCoverageWeight*max(candidate.LexicalCoverage, candidate.parentCoverage) +
 			evidenceExpansionCoverageWeight*expandedTermCoverage(*candidate, tokenWeights) +
 			evidencePhraseCoverageWeight*expandedPhraseCoverage(*candidate, evidenceTerms) +
 			evidenceClaimCoverageWeight*evidenceClaimCoverage(*candidate, evidenceClaims) +
@@ -1040,7 +1100,7 @@ func evidenceClaimCoverage(candidate ChunkCandidate, claims []string) float64 {
 	evidence := normalizeClaimText(candidate.Text + " " + strings.Join(candidate.HeadingPath, " "))
 	matched := 0
 	for _, claim := range claims {
-		if strings.Contains(evidence, normalizeClaimText(claim)) {
+		if containsQuantitativeClaim(evidence, normalizeClaimText(claim)) {
 			matched++
 		}
 	}
@@ -1081,8 +1141,14 @@ func selectRankedEvidenceCandidates(candidates []ChunkCandidate, limit int, bett
 }
 
 func expandedTermCoverage(candidate ChunkCandidate, tokenWeights map[string]float64) float64 {
-	text := candidate.Text + " " + strings.Join(candidate.HeadingPath, " ") + " " + candidate.AttachmentTitle
-	tokens := countTokens(indexTokenize(text))
+	if !hasExpansionWeights(tokenWeights) {
+		return 0
+	}
+	tokens := candidate.expansionTokens
+	if tokens == nil {
+		text := candidate.Text + " " + strings.Join(candidate.HeadingPath, " ") + " " + candidate.AttachmentTitle
+		tokens = countTokens(indexTokenize(text))
+	}
 	var matched, total float64
 	for token, weight := range tokenWeights {
 		if weight <= 0 || weight >= 1 {
@@ -1097,6 +1163,15 @@ func expandedTermCoverage(candidate ChunkCandidate, tokenWeights map[string]floa
 		return 0
 	}
 	return matched / total
+}
+
+func hasExpansionWeights(weights map[string]float64) bool {
+	for _, weight := range weights {
+		if !(weight <= 0 || weight >= 1) {
+			return true
+		}
+	}
+	return false
 }
 func expandedPhraseCoverage(candidate ChunkCandidate, terms []string) float64 {
 	if len(terms) == 0 {
@@ -1483,6 +1558,11 @@ func resultFromDoc(doc model.Document) SearchResult {
 }
 
 func matchesFilter(doc model.Document, filter Filter) bool {
+	if filter.documentIDs != nil {
+		if _, allowed := filter.documentIDs[doc.ID]; !allowed {
+			return false
+		}
+	}
 	if filter.DocumentType != "" && doc.DocumentType != filter.DocumentType {
 		return false
 	}

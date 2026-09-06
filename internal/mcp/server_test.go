@@ -99,14 +99,8 @@ func TestSearchRulesFailsClosedOnRetrievalContractMismatch(t *testing.T) {
 		IndexerVersion: "obsolete-contract",
 	}}
 	_, output, err := service.searchRules(context.Background(), &mcpsdk.CallToolRequest{}, SearchRulesInput{Query: "상장 요건", Limit: 5})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if output.Answerable || output.Answerability.Status != searchindex.AnswerabilityUnknown || len(output.Results) != 0 {
-		t.Fatalf("contract mismatch did not fail closed: %#v", output)
-	}
-	if len(output.Answerability.ReasonCodes) == 0 || output.Answerability.ReasonCodes[0] != "retrieval_contract_mismatch" {
-		t.Fatalf("contract mismatch reason omitted: %#v", output.Answerability)
+	if err == nil || !strings.Contains(err.Error(), "retrieval contract mismatch") || len(output.Results) != 0 {
+		t.Fatalf("contract mismatch must be a tool error: out=%#v err=%v", output, err)
 	}
 }
 
@@ -207,7 +201,7 @@ func TestServiceSearchRulesLanguageFilter(t *testing.T) {
 	}
 }
 
-func TestSearchRulesReranksKoreanCandidatesBeforeAnswerability(t *testing.T) {
+func TestSearchRulesReranksKoreanCandidatesBeforeReturningCandidates(t *testing.T) {
 	docs := []model.Document{{
 		ID: "listing", Title: "상장 절차규정", Language: model.LanguageKorean, DocumentType: model.DocumentTypeRule,
 		Body: "**제1조(상장 심사)** 상장 심사 일반 사항을 정한다.\n\n**제2조(사전 조정)** 상장 심사 청구 전 진행 순서를 사전에 조정한다.",
@@ -217,7 +211,7 @@ func TestSearchRulesReranksKoreanCandidatesBeforeAnswerability(t *testing.T) {
 		Engine:    buildMCPTestEngine(docs, nil, nil),
 	}
 	reranker := &preferPassageReranker{contains: "사전 조정"}
-	service := &Service{Repo: repo, Reranker: reranker, RerankerRequired: true, RerankerCandidates: 2, RerankerAll: true}
+	service := &Service{Repo: repo, Reranker: reranker, RerankerRequired: true, RerankerCandidates: 2}
 	_, out, err := service.searchRules(context.Background(), &mcpsdk.CallToolRequest{}, SearchRulesInput{
 		Query: "상장 심사 청구 전 진행 순서 사전 조정", Language: "ko", DocumentType: "rule", Limit: 2,
 	})
@@ -252,39 +246,6 @@ func TestSearchRulesSkipsRerankerForEnglishQuery(t *testing.T) {
 	}
 	if reranker.calls != 0 || strings.Contains(out.Mode, "reranker") {
 		t.Fatalf("English query unexpectedly reranked: calls=%d mode=%q", reranker.calls, out.Mode)
-	}
-}
-
-func TestShouldRerankDecisionSelectsOnlyWeakSupportedKoreanEvidence(t *testing.T) {
-	base := searchindex.AnswerabilityDecision{
-		Status: searchindex.AnswerabilitySupported,
-		Features: searchindex.AnswerabilityFeatures{
-			SelectedEvidenceAnchored:           true,
-			SelectedEvidenceMaxLexicalCoverage: 0.20,
-		},
-	}
-	if !shouldRerankDecision("거래별 고유번호 근거", "ko", base) {
-		t.Fatal("weak supported Korean evidence was not selected for reranking")
-	}
-	for _, edit := range []func(*searchindex.AnswerabilityDecision){
-		func(decision *searchindex.AnswerabilityDecision) {
-			decision.Status = searchindex.AnswerabilityInsufficient
-		},
-		func(decision *searchindex.AnswerabilityDecision) {
-			decision.Features.SelectedEvidenceMaxLexicalCoverage = 0.40
-		},
-		func(decision *searchindex.AnswerabilityDecision) { decision.Features.MultiDocumentIntent = true },
-		func(decision *searchindex.AnswerabilityDecision) { decision.Features.QuantitativeClaimsPresent = true },
-		func(decision *searchindex.AnswerabilityDecision) { decision.Features.NormativeCounterEvidence = true },
-	} {
-		decision := base
-		edit(&decision)
-		if shouldRerankDecision("거래별 고유번호 근거", "ko", decision) {
-			t.Fatalf("unsafe or already-strong decision selected: %#v", decision)
-		}
-	}
-	if shouldRerankDecision("transaction identifier", "en", base) {
-		t.Fatal("English query selected for Korean reranking")
 	}
 }
 
@@ -806,7 +767,7 @@ func TestSearchRulesExpandsDomainTerms(t *testing.T) {
 	}
 }
 
-func TestSearchRulesExpansionDoesNotOverrideUnknownTerms(t *testing.T) {
+func TestSearchRulesKeepsMixedQueryCandidatesForCallerReview(t *testing.T) {
 	documents := []model.Document{
 		{
 			ID: "uti-rule", Title: "거래정보저장업무규정", CollectedAt: time.Now(),
@@ -847,8 +808,8 @@ func TestSearchRulesExpansionDoesNotOverrideUnknownTerms(t *testing.T) {
 			if out.QueryExpansion == nil {
 				t.Fatalf("expected domain expansion: %#v", out)
 			}
-			if out.Answerable || out.Answerability.Status != searchindex.AnswerabilityInsufficient || len(out.Results) != 0 {
-				t.Fatalf("mixed query was answerable: %#v", out)
+			if len(out.Results) == 0 || out.Retrieval.Status != RetrievalCandidatesFound {
+				t.Fatalf("mixed query candidates were hidden from caller review: %#v", out)
 			}
 		})
 	}

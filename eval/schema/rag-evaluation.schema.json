@@ -69,12 +69,19 @@
         },
         "manual_review_excluded_from_automatic_evidence_metrics": {
           "type": "boolean"
+        },
+        "evaluation_use": {
+          "type": "string",
+          "enum": [
+            "development",
+            "sealed-holdout"
+          ]
         }
       }
     },
     "cases": {
       "type": "array",
-      "minItems": 120,
+      "minItems": 1,
       "items": {
         "$ref": "#/$defs/case"
       }
@@ -104,6 +111,7 @@
           "enum": [
             "regression",
             "development",
+            "validation",
             "holdout"
           ]
         },

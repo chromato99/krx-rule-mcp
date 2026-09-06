@@ -109,9 +109,30 @@ func main() {
 		if err != nil {
 			fatal(err)
 		}
-		vectors, err := searchindex.EmbedSnapshotChunks(context.Background(), embeddingChunks, embedder)
+		vectors := map[string][]float64{}
+		missing := embeddingChunks
+		// A text-v1 input is independent of document metadata and chunk IDs.
+		// Reuse only exact text under a verified, identical, revision-pinned
+		// profile. --force always recomputes vectors.
+		if !*force && currentErr == nil && currentDescriptor.Vector != nil &&
+			inputFormat == searchindex.EmbeddingInputTextV1 && embedder.ModelRevision != "" {
+			previous, loadErr := searchindex.LoadSnapshot(currentIndexPath)
+			previousVectorPath := filepath.Join(currentDir, searchindex.VectorSnapshotFile)
+			if loadErr == nil && vectorFreshWithPolicy(previousVectorPath, previous, embedder, inputFormat, true) {
+				oldVectors, loadErr := searchindex.LoadVectorSnapshot(previousVectorPath)
+				if loadErr != nil {
+					fatal(loadErr)
+				}
+				vectors, missing = reuseExactTextVectors(previous, oldVectors, embeddingChunks)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "embedding chunks=%d reused=%d new=%d\n", len(embeddingChunks), len(vectors), len(missing))
+		generated, err := searchindex.EmbedSnapshotChunks(context.Background(), missing, embedder)
 		if err != nil {
 			fatal(err)
+		}
+		for id, vector := range generated {
+			vectors[id] = vector
 		}
 		model, dimensions := embedder.EmbeddingInfo()
 		if dimensions == 0 && len(vectors) > 0 {
@@ -145,6 +166,29 @@ func main() {
 		fmt.Printf(" vectors=%d model=%s", published.Vector.Vectors, published.Vector.Model)
 	}
 	fmt.Println()
+}
+
+func reuseExactTextVectors(previous searchindex.Snapshot, old searchindex.VectorSnapshot, chunks []searchindex.SnapshotChunk) (map[string][]float64, []searchindex.SnapshotChunk) {
+	byID := make(map[string][]float64, len(old.Vectors))
+	for _, item := range old.Vectors {
+		byID[item.ChunkID] = item.Vector
+	}
+	byText := make(map[string][]float64, len(previous.Chunks))
+	for _, chunk := range previous.Chunks {
+		if vector, ok := byID[chunk.ID]; ok {
+			byText[chunk.Text] = vector
+		}
+	}
+	reused := map[string][]float64{}
+	var missing []searchindex.SnapshotChunk
+	for _, chunk := range chunks {
+		if vector, ok := byText[chunk.Text]; ok {
+			reused[chunk.ID] = vector
+		} else {
+			missing = append(missing, chunk)
+		}
+	}
+	return reused, missing
 }
 
 func bm25Current(path string, snap searchindex.Snapshot) bool {

@@ -1,15 +1,41 @@
 package index
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/chromato99/krx-rule-mcp/internal/model"
 )
+
+func TestCandidateBudgetDoesNotDependOnResultLimit(t *testing.T) {
+	var body strings.Builder
+	for i := 1; i <= 180; i++ {
+		fmt.Fprintf(&body, "## 제%d조(증거금 납부)\n\n증거금 납부 의무와 절차 %d\n\n", i, i)
+	}
+	engine := buildTestEngine([]model.Document{{ID: "rule", Title: "규정", Body: body.String()}}, nil, nil)
+	var baseline []ChunkCandidate
+	for _, limit := range []int{5, 0, 1, 10, 50} {
+		got := engine.RetrieveCandidates(SearchOptions{Query: "증거금 납부", Limit: limit}).Chunks
+		if len(got) != DefaultRetrievalCandidateLimit {
+			t.Fatalf("limit=%d candidates=%d", limit, len(got))
+		}
+		if baseline == nil {
+			baseline = got
+			continue
+		}
+		for i := range got {
+			if got[i].ChunkID != baseline[i].ChunkID || got[i].Score != baseline[i].Score {
+				t.Fatalf("limit=%d changed candidate %d", limit, i)
+			}
+		}
+	}
+}
 
 func buildTestEngine(documents []model.Document, attachments map[string]AttachmentDocument, vectors map[string][]float64) *Engine {
 	searchable := true
@@ -468,6 +494,27 @@ func TestStructuredChunksSkipEnglishTOCAndPreserveSectionArticleAnchors(t *testi
 	}
 }
 
+func TestEnglishChapterOwnershipDoesNotTreatPartiesAsPartHeading(t *testing.T) {
+	text := "CHAPTER III. USE OF FUND\n\n§10. Use of Fund\n\nparties shall not be obligated to pay unrelated expenses.\n\nSection 1. Records\n\nGeneral introductory text.\n\n§11. Record Retention\n\nRecords shall be retained."
+	chunks := ChunkTextWithAnchors(text, 1600)
+	for _, chunk := range chunks {
+		if strings.Contains(chunk.Text, "parties shall") && chunk.ArticleID != "§10" {
+			t.Fatalf("parties reset owner: %#v", chunk)
+		}
+		if strings.Contains(chunk.Text, "General introductory") && chunk.ArticleID != "" {
+			t.Fatalf("previous article leaked into new section: %#v", chunk)
+		}
+		if strings.Contains(chunk.Text, "Records shall") && chunk.ArticleID != "§11" {
+			t.Fatalf("new article owner lost: %#v", chunk)
+		}
+		for _, heading := range chunk.HeadingPath {
+			if strings.HasPrefix(heading, "parties") {
+				t.Fatal("sentence became section heading")
+			}
+		}
+	}
+}
+
 func TestChunkCandidatesRemainIndependentUntilDocumentAggregation(t *testing.T) {
 	doc := model.Document{
 		ID: "rule-candidates", Title: "청크 후보 규정", CollectedAt: time.Now(),
@@ -912,7 +959,7 @@ func TestFormulaQueryPrefersConcreteFormulaChunk(t *testing.T) {
 func TestSearchQueryTokensAreDeduplicated(t *testing.T) {
 	got := uniqueSearchTokens([]string{"증거금", "증거금", "margin", "증거금", "margin"})
 	want := []string{"증거금", "margin"}
-	if !equalStrings(got, want) {
+	if !slices.Equal(got, want) {
 		t.Fatalf("uniqueSearchTokens() = %#v, want %#v", got, want)
 	}
 }

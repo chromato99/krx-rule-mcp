@@ -53,6 +53,8 @@ type releaseDescriptor struct {
 	DomainLexiconDigest     string                     `json:"domain_lexicon_digest"`
 	RuntimeVectorMode       string                     `json:"runtime_vector_mode"`
 	RetrievalCandidateLimit int                        `json:"retrieval_candidate_limit"`
+	RetrievalPolicy         string                     `json:"retrieval_policy"`
+	SearchContract          string                     `json:"search_contract"`
 	ServerImageDigest       string                     `json:"server_image_digest"`
 	TEIImageDigest          string                     `json:"tei_image_digest"`
 	RerankerImageDigest     string                     `json:"reranker_image_digest,omitempty"`
@@ -125,7 +127,7 @@ func main() {
 		toolOutputLimit          = flag.Int("tool-output-size-limit", envInt("RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT", 512<<10), "maximum structured tool output size in bytes")
 		maxQueryRunes            = flag.Int("max-query-runes", envInt("RULE_MCP_MAX_QUERY_RUNES", 1000), "maximum search query length in characters")
 		maxSearches              = flag.Int("max-concurrent-searches", envInt("RULE_MCP_MAX_CONCURRENT_SEARCHES", 16), "maximum concurrent search and query embedding operations")
-		retrievalCandidates      = flag.Int("candidate-limit", envInt("KRX_RETRIEVAL_CANDIDATE_LIMIT", 0), "first-stage candidate limit per channel, max 512; 0 derives it from result limit")
+		retrievalCandidates      = flag.Int("candidate-limit", envInt("KRX_RETRIEVAL_CANDIDATE_LIMIT", searchindex.DefaultRetrievalCandidateLimit), "first-stage candidate limit per channel, max 512; independent of result limit")
 		maxRequests              = flag.Int("max-concurrent-requests", envInt("RULE_MCP_MAX_CONCURRENT_REQUESTS", 64), "maximum concurrent HTTP MCP requests")
 		embedTimeout             = flag.Duration("embedding-timeout", envDuration("RULE_MCP_EMBEDDING_TIMEOUT", 3*time.Second), "query embedding deadline")
 		rerankerTimeout          = flag.Duration("reranker-timeout", envDuration("RULE_MCP_RERANKER_TIMEOUT", 30*time.Minute), "bounded candidate reranker deadline")
@@ -141,6 +143,7 @@ func main() {
 		_, _ = fmt.Fprintln(os.Stderr, "candidate limit must be between 1 and 512, or 0 for the default")
 		os.Exit(1)
 	}
+	*retrievalCandidates = searchindex.EffectiveCandidateLimit(*retrievalCandidates)
 	requestedMode := strings.ToLower(strings.TrimSpace(*mode))
 	var httpAuth httpAuthConfig
 	if requestedMode == "http" && !*printGeneration {
@@ -777,13 +780,13 @@ func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtime
 			batchSize = configured.BatchSize
 		}
 		rerankerDescriptor = &rerankerReleaseDescriptor{
-			Model: model, ModelRevision: revision, CandidateLimit: rerankerCandidates, BatchSize: batchSize, Mode: "weak-supported-korean", Timeout: rerankerTimeout.String(), InputFormat: "structured-korean-v1",
+			Model: model, ModelRevision: revision, CandidateLimit: rerankerCandidates, BatchSize: batchSize, Mode: "bounded-korean", Timeout: rerankerTimeout.String(), InputFormat: "structured-korean-v1",
 		}
 		rerankerModel = model
 		rerankerRevision = revision
 	}
 	descriptor := releaseDescriptor{
-		Schema:                  "krx-rule-mcp-release-v4",
+		Schema:                  "krx-rule-mcp-release-v6",
 		CorpusReleaseHash:       repo.CorpusReleaseHash,
 		IndexSourceHash:         repo.IndexSourceHash,
 		IndexBuildHash:          repo.IndexBuildHash,
@@ -795,6 +798,8 @@ func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtime
 		DomainLexiconDigest:     domainLexiconDigest,
 		RuntimeVectorMode:       runtimeVectorMode,
 		RetrievalCandidateLimit: retrievalCandidateLimit,
+		RetrievalPolicy:         searchindex.RetrievalPolicyVersion,
+		SearchContract:          mcpserver.SearchContractVersion,
 		ServerImageDigest:       serverImageDigest,
 		TEIImageDigest:          teiImageDigest,
 		RerankerImageDigest:     rerankerImageDigest,

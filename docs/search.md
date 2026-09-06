@@ -80,7 +80,7 @@ Each evidence match includes its `chunk_id`, zero-based `chunk_index`, source, o
 BM25 and vector retrieval keep bounded chunk candidates independently. Reciprocal-rank fusion is keyed by chunk ID, not document ID; only after fusion are up to three diverse evidence chunks grouped into each document. A bounded lexical-coverage signal breaks weak RRF ties without treating a ranking score as confidence. Filter eligibility is computed once before both channel scans, and vector norms are precomputed when the generation is loaded.
 문서 안의 최종 evidence 순서는 원 질의의 lexical coverage, high-confidence reviewed intent expansion, BM25/vector 채널 일치, 질의에 명시된 수치 claim을 사용해 다시 정렬합니다. Expansion phrase가 조문 heading에 직접 나타나면 간접 인용보다 우선하고, 구체적인 expansion phrase가 첨부 본문에 나타나면 일반 조문보다 우선할 수 있습니다. 각 evidence의 `score`는 이 최종 순서에 사용된 점수이고, `bm25_score`와 `vector_score`는 retrieval channel 진단값입니다. 이 신호들은 bounded retrieval 후보 안에서만 순서를 바꾸며 answerability confidence로 사용하지 않습니다.
 
-선택형 한국어 reranker가 활성화되면 baseline RRF와 answerability를 먼저 계산합니다. Baseline이 `supported`이고, 구조 anchor가 있으나 원 질의 lexical coverage가 0.4 미만인 한국어 단일문서·비수치·비반증 질의만 상위 20개 chunk를 cross-encoder로 재정렬합니다. 문서 점수는 baseline RRF로 고정되고 cross-encoder는 문서 내부 evidence 순서에만 관여합니다. 재정렬 뒤에도 answerability가 `supported`인 경우에만 결과를 채택합니다. `reranker_score`와 `reranker_rank` 역시 순위 진단값이지 confidence가 아닙니다.
+선택형 한국어 reranker가 활성화되면 한국어 질의의 상위 20개 chunk를 cross-encoder로 재정렬합니다. 문서 점수는 baseline RRF로 고정되고 cross-encoder는 문서 내부 evidence 순서에 관여합니다. 실행과 채택에 답변 가능 판정을 사용하지 않습니다. `reranker_score`와 `reranker_rank`는 순위 진단값이며 confidence가 아닙니다.
 
 
 `score`, `bm25_score`, and `vector_score` are ranking signals. They are useful for ordering and debugging retrieval, but they are not confidence probabilities.
@@ -91,7 +91,7 @@ Before BM25/vector search, `search_rules` applies the KRX domain lexicon loaded 
 
 Example: `동적상하한가` is expanded with terms such as `실시간가격제한제도`, `실시간 가격제한의 가격변동폭`, `가격변동폭`, `파생상품시장 업무규정 시행세칙`, and `별표25`.
 
-Expansion은 recall과 evidence 재정렬 신호입니다. high-confidence reviewed alias가 정규화된 질의 전체와 정확히 일치하면 짧은 전문용어 질의를 직접 지지할 수 있습니다. 그 밖의 expansion은 원 질의 lexical coverage, 미지어 비율, 복수 alias 또는 BM25/vector 일치가 함께 확인될 때만 `supported` 판정에 기여합니다. 알려진 alias와 설명되지 않은 추가 용어가 함께 있는 질의는 expansion만으로 answerable이 되지 않습니다.
+Expansion은 후보 탐색과 evidence 재정렬 신호입니다. 알려진 별칭이 일치해도 추가 조건이나 질문의 전제가 확인된 것은 아닙니다. 서버는 확장된 검색 후보를 반환하고 호출 LLM이 원 질문과 근거를 대조합니다.
 
 When expansion is applied, the response includes `query_expansion`:
 
@@ -143,24 +143,43 @@ Inputs are validated strictly: `query` is required and bounded, `document_type` 
 
 Search results are discovery aids from a collected derivative snapshot. Ranking scores are not confidence probabilities, English text is not a substitute for the Korean legal text, and converted attachments may lose tables, images, or formula semantics. For current or compliance-sensitive answers, follow `source_url` and verify the effective Korean document on the official KRX portal.
 
-## Answerability contract
+## Retrieval contract and caller assessment
 
-`search_rules` classifies retrieval evidence independently from legal truth:
+`search_rules` returns `contract_version: "retrieval-v1"`, ranked `results` and a
+`retrieval` object with `status` and `returned_results`:
 
-- `supported`: the active release returned directly addressable evidence. `answerable` is `true`.
-- `insufficient`: evidence failed the versioned gate. `results` is empty.
-- `ambiguous`: the query is too broad or evidence is not sufficiently anchored. A bounded diverse result set and `clarification` are returned, but `answerable` is `false`.
-- `unknown`: the loaded retrieval/index contract is incompatible. It fails closed with empty results.
+- `candidates_found`: at least one candidate is returned for review.
+- `no_candidates`: this query and its filters returned no candidates. It does
+  not establish that no applicable rule exists in the corpus or elsewhere.
 
-The `answerability` object contains `reason_codes`, `gate_version`, selected `evidence_chunk_ids`, and observable features such as original-query and bundle lexical coverage, BM25/vector agreement, structural anchors, explicit identifier/source checks, quantitative and instrumental-claim checks, conditional exceptions, and category diversity. These are deterministic gate inputs, not confidence probabilities. A query that explicitly requests comparison or multiple sources may use a bounded top-three-document evidence bundle; every chunk used by the checks is included in `evidence_chunk_ids`. Other queries remain restricted to the first result, so unrelated lower-ranked documents cannot make a claim pass.
+Neither status declares an answer supported, insufficient, ambiguous or true.
+The previous `answerable` and `answerability` fields are removed. Semantic
+uncertainty no longer clears results. A query with a false premise can retrieve
+contradicting evidence, and a broad question can return multiple candidates.
+Index incompatibility, invalid input and required embedding/reranker failures
+remain tool errors. Explicit filters, source ownership, output limits and
+conversion quality notices remain enforced.
 
-The evaluator reports document rank and evidence depth separately. Evidence Hit@1 means the expected article, attachment, or reviewed document-body evidence is the first `evidence_matches` item within the matching document; it is not inflated by, or flattened together with, the document's result rank. `all` and `at_least` policies accumulate distinct document/article/attachment targets across contexts before deciding success.
+The default result limit is 10, with a maximum of 50. Candidate depth remains
+120 per channel independently. Internal candidate traces are evaluation-only;
+the public response includes only the bounded result set. `evidence_matches`
+are candidate passages, not a certified answer bundle. A metadata-only document
+candidate can be inspected with `get_rule`; it does not count as retrieved
+substantive evidence in the evaluator.
 
-Before issuing any query, the evaluator audits every target against the loaded corpus and immutable index. A stale document, wrong article or attachment, input filter that excludes its own target, missing required phrase, present forbidden phrase, or missing contradiction polarity aborts the run. Raw article text is checked as well as index chunks so a PDF heading-layout defect is reported as an indexing problem rather than silently rewritten into a wrong fixture label.
+The calling LLM reads `get_context`, checks subject/market/date, conditions,
+exceptions and references, and decides whether to answer, search further or
+ask for missing scope. See [the client workflow](llm-client.md). Server initialize
+instructions and tool descriptions carry this guidance. Both `structuredContent`
+and a serialized JSON text block contain the same tool result; a host should
+forward one representation to the model. The complete HTTP response size limit
+still covers both representations and the envelope.
 
-Do not add aliases after inspecting the final unseen holdout merely to make its score pass. Corrections that change a factually wrong fixture label must be documented, checksum the fixture again, and reseal the holdout before another retrieval experiment. Audit-D was used to choose the reranker structure and is therefore development data. Model, candidate K, batch, evidence-only ranking, and the weak-supported selection policy were frozen before the document-disjoint audit-E holdout was written. The audit-E result is reported even when it fails and is not followed by another alias or weight adjustment.
-
-Clients should answer only when `answerable=true`, then fetch the returned evidence chunk with `get_context`. For `ambiguous`, ask the user for the provided clarification. For `insufficient` or `unknown`, state that the current corpus did not supply answerable evidence; do not reinterpret ranking scores as permission to answer.
+The retrieval evaluator measures document Hit@5 and the required evidence
+bundle within the first five returned results. It verifies every returned
+chunk's owner and full context, while internal candidate recall stays diagnostic.
+Question labels requiring refusal or clarification are reserved for caller
+answer evaluation; returning a candidate is not counted as answering them.
 
 ## Formula-Aware Retrieval
 
@@ -311,3 +330,31 @@ export KRX_EMBEDDING_INPUT_FORMAT=text-v1
 ```
 
 When both BM25 and vector scores are available, bounded chunk candidates are merged with reciprocal rank fusion before document grouping. The query embedding always uses the original user query; reviewed lexicon expansion remains a lower-weight BM25 signal and does not overwrite the vector query. Under the `optional` policy, an unavailable runtime embedder is logged and the server returns BM25 results. Under the `required` policy, embedding failures and invalid vectors return a tool error and `/readyz` returns 503 until a valid canary embedding succeeds.
+
+## Current bounded retrieval policy
+
+`chunk-rrf-source-parent-scope-v4` keeps 120 candidates per channel independent
+of the requested result count. BM25 uses derived in-memory postings with the
+same scoring formula. Query-independent metadata is cached; weighted expansion
+coverage skips inactive weights and reuses tokenization within each request.
+
+A complete named rule title can constrain retrieval before top-K truncation.
+Contained parent titles do not override a more specific enforcement-rule title;
+different named sources are not collapsed into the longest title. Printed
+English legal titles supplement abbreviated/Korean portal titles. Within a
+named source, its name is removed from lexical topic matching; the embedding
+still receives the original query. Explicit market filtering precedes softer
+generic rule-title hints.
+
+Within the first five document candidates, complete owning-article or paragraph
+context can supplement retrieved evidence, bounded by 12 chunks and 8,000 runes
+per document. It preserves document, attachment and article-instance ownership.
+Supplemental evidence is marked `context_only`; its retrieval scores and lexical
+coverage remain zero. Ranking may use bounded parent coverage; the calling LLM assesses
+the concrete source text retrieved through the returned chunk IDs. These ranking
+signals are not confidence estimates or proof of every legal condition.
+
+The release descriptor v6 includes the retrieval policy and public search
+contract version (`retrieval-v1`). Retrieval reports distinguish internal
+candidate presence from accessible evidence in the actual top-5 results.
+See [the current change and measured limits](caller-llm-retrieval.md).

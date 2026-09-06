@@ -51,7 +51,7 @@ To run without bearer authentication on a trusted private network, set
 for the Compose bind mount, but `bearer-tokens.yaml` may be absent. All other
 HTTP controls remain enabled.
 
-HTTP request and complete JSON-RPC response bodies default to 1 MiB (`RULE_MCP_REQUEST_SIZE_LIMIT` and `RULE_MCP_RESPONSE_SIZE_LIMIT`, minimum 1024 bytes). Tool payload shaping has a separate 512 KiB default (`RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT`). The response limit covers the final wire representation after SDK serialization, not only `structuredContent`.
+HTTP request and complete JSON-RPC response bodies default to 1 MiB (`RULE_MCP_REQUEST_SIZE_LIMIT` and `RULE_MCP_RESPONSE_SIZE_LIMIT`, minimum 1024 bytes). Tool payload shaping has a separate 512 KiB default (`RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT`). The response limit covers the final wire representation after SDK serialization, including both `structuredContent` and its identical JSON text block. Hosts should forward one representation to the LLM. Requests that exceed the payload or wire limit need a smaller page.
 
 ### Optional Korean reranker
 

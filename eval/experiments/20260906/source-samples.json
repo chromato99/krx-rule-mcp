@@ -1,0 +1,380 @@
+{
+  "corpus_release": "469cda6799dfa33d7f8e88e175a6f745f81851a4f76d99e4529e9a4f7a7f5c84",
+  "sources": [
+    {
+      "id": "204847342",
+      "source_id": "204847342",
+      "title": "전문가회의 운영지침",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제6조",
+          "heading_path": [
+            "제6조(전문가회의 구성)",
+            "①"
+          ],
+          "text": "**제6조(전문가회의 구성)**① 전문가회의의 구성인원은 6인 이내로 구성하되, 필요시 코스닥시장본부 담당 본부장보(이하 \"본부장보\"라 한다)가 증원 또는 감원하여 구성할 수 있다. \u003c개정 2023. 12. 28.\u003e\n\n② 전문가회의 참여자(이하 \"위원\"이라 한다)는 다음 각 호의 자 중에서 위원장이 위촉하는 자로 구성한다. \u003c개정 2023. 12. 28.\u003e\n\n1. 삭제 \u003c2023. 12. 28.\u003e\n\n2. 코스닥시장 상장위원회 위원\n\n3. 해당 상장신청인의 기술평가에 참여한 전문평가기관의 전문위원\n\n4. 상장신청인의 기술성 등의 평가를 위해 필요하다고 인정되는 산·학·연 외부전문가. 이 경우 해당 외부전문가는 「국가연구개발혁신법」 제20조에 따라 국가연구개발사업에 참여하는 연구자 및 연구이력, 평가위원, 수행기관 정보를 등록·관리하기 위해 구축한 국가연구자정보시스템에 등록된 연구자 중에서 선정할 수 있다.",
+          "selection_hash": "12987558fb9640e6a88865af8b216bcb182970b468c4c8dad7ba467b4c7c1f84"
+        },
+        {
+          "article_id": "제2조",
+          "heading_path": [
+            "제2조(적용범위)"
+          ],
+          "text": "**제2조(적용범위)**전문가회의 운영에 관한 사항은 「코스닥시장 상장규정」(이하 \"규정\"이라 한다) 및 「코스닥시장 상장규정 시행세칙」(이하 \"세칙\"이라 한다)에서 따로 정하는 경우를 제외하고는 이 지침에서 정하는 바에 따른다. \u003c개정 2018. 12. 21., 2021. 4. 21., 2023. 12. 28.\u003e",
+          "selection_hash": "2a25ec0222e2317e41df5c076cc0d6062ea71a83d1a8324a853d85386bf0969f"
+        }
+      ]
+    },
+    {
+      "id": "204847353",
+      "source_id": "204847353",
+      "title": "코스닥시장 불성실공시 신고 및 포상에 관한 기준",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제3조",
+          "heading_path": [
+            "제3조(신고내용의 처리 및 통지)",
+            "①"
+          ],
+          "text": "**제3조(신고내용의 처리 및 통지)**① 거래소는 신고내용과 관련하여 신고일로부터 10영업일 이내에 다음 각 호 중 어느 하나의 결정을 하고 그 사실을 신고자에게[별지 제2호 서식]에 따라 지체 없이 통지하여야 한다. 다만, 신고내용의 추가적인 확인 등을 위해 필요한 경우에는 그 기간을 연장할 수 있다.\n\n1. 종결처리\n\n2. 불성실공시 미해당\n\n3. 불성실공시법인 지정예고\n\n② 거래소는 신고내용이 다음 각 호의 어느 하나에 해당하는 경우 종결처리 할 수 있다.\n\n1. 제2조에 의한 신고방법에 적합하지 아니한 경우\n\n2. 신고자의 신원을 확인할 수 없거나 소재불명 등으로 연락이 어려운 경우\n\n3. 신고내용이 불성실공시와 직접적인 관련이 없는 경우\n\n4. 신고내용이 허위인 경우\n\n5. 동일한 신고내용(중요부분이 같은 경우를 포함한다)이 이미 제출된 경우\n\n6. 공시자료, 언론보도 등에 의하여 널리 알려진 사실이나 풍문을 바탕으로 신고한 경우로서 새로운 사실이나 증거가 없는 경우\n\n7. 신고내용이 신고일로부터 3년 이전에 발생한 경우\n\n8. 그 밖에 거래소가 필요하다고 인정하는 경우",
+          "selection_hash": "1ae32c2bd6d85108c9724b2f2351bfd3b2c18c56fee77af4042df4dd6f17a0bc"
+        },
+        {
+          "article_id": "제4조",
+          "heading_path": [
+            "제4조(포상기준)",
+            "①"
+          ],
+          "text": "**제4조(포상기준)**①  거래소는 신고내용과 관련하여 다음 각 호의 어느 하나에 해당하는 경우에는 해당 호에서 정하는 방법으로 포상 포인트를 산정한다.\n\n1. 신고자가 공시의무 위반사실을 신고한 코스닥시장상장법인(이하 이 조에서 '신고대상법인'이라 한다)이 불성실공시법인으로 지정된 경우 : 규정 제32조에 따라 부과된 벌점(규정 제34조에 따른 공시위반제재금으로 대체부과된 벌점을 포함한다)을 포상 포인트로 한다.\n\n2. 신고대상법인이 불성실공시법인으로 지정예고 되었으나 지정유예 또는 미지정된 경우 : 포상 포인트 1 포인트를 부여한다.\n\n②  거래소는 매 반기마다 신고자의 누적 포상포인트를 1 포인트당 30만원(0.5포인트는 15만원)으로 산정한 포상금(세후를 기준으로 하되 연간 총 포상금은 600만원을 초과할 수 없다)을 지급한다. 다만, 우수 신고자에 대하여는 별도로 포상할 수 있다.\n\n③  신고자의 신고대상법인별 연간 누적 포상 포인트는 10 포인트를 초과할 수 없다.\n\n[전문개정 2024. 7. 18.]",
+          "selection_hash": "5e324da14330d39fdc4069ba6508d6af71a467731088bacb2ea28b5d8eadd889"
+        }
+      ]
+    },
+    {
+      "id": "204847824",
+      "source_id": "204847824",
+      "title": "배출권 거래시장 시장감시 및 분쟁조정 규정 시행세칙",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제24조의2",
+          "heading_path": [
+            "제4장 심리 또는 감리 결과의 조치",
+            "제24조의2(회원의 수개의 위반행위에 대한 징계)",
+            "①"
+          ],
+          "text": "**제24조의2(회원의 수개의 위반행위에 대한 징계)**①  규정 제19조제4항에 따라 회원의 하나의 행위가 수개의 위반유형에 해당하는 경우에는 각각에 대한 징계 중 가장 중한 사항에 해당하는 징계를 할 수 있다.\n\n②  회원의 수개의 행위가 수개의 위반유형 또는 위반행위에 해당하는 경우에는 각각에 대해 징계할 수 있다.\n\n③  회원의 수개의 위반행위에 대한 징계방법 등에 관한 세부적인 사항은 위원장이 따로 정한다.\n\n[본조신설 2024. 10. 15.]",
+          "selection_hash": "00140c810ef251edb832ce3d783e8177381ba9850c35834b7844c87bf262973a"
+        },
+        {
+          "article_id": "제39조",
+          "heading_path": [
+            "제5장 분쟁조정",
+            "제39조(조정기일의 변경)",
+            "①"
+          ],
+          "text": "**제39조(조정기일의 변경)**① 규정 제42조제3항에 따라 위원회 또는 당사자의 긴급한 사정으로 조정기일을 변경하고자 할 경우에는 위원장은 당사자의 동의를 얻어 조정기일의 1일전까지 이를 변경할 수 있다.\n\n② 위원장은 당사자가 조정기일의 변경을 신청하는 경우에는 특별한 사유가 없는 한 조정기일을 다시 정하고 이를 당사자에게 통지하여야 한다.",
+          "selection_hash": "063b898cb71497aedf379e27a5e71c3a560642fd9547f002fa2a9c996ac4e500"
+        }
+      ]
+    },
+    {
+      "id": "204847919",
+      "source_id": "204847919",
+      "title": "환매조건부채권 매매전문참가자 관리지침",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제8조",
+          "heading_path": [
+            "제3장 참가자의 의무",
+            "제8조(결제위탁계약의 체결)",
+            "①"
+          ],
+          "text": "**제8조(결제위탁계약의 체결)**① 참가자는 자기의 명의로 성립된 환매조건부채권매매거래의 결제를 위하여 같은 종류의 거래를 하는 거래소 결제회원과 결제위탁계약을 체결하여야 한다.\n\n② 결제위탁계약에는 다음 각 호의 사항이 포함되어야 한다.\n\n1. 참가자 및 결제회원의 명칭\n\n2. 결제위탁계약의 기간\n\n3. 결제를 위탁하는 거래의 범위\n\n4. 결제의 방법 및 시한\n\n5. 참가자가 결제회원에게 예탁하는 증거금에 관한 사항\n\n6. 참가자가 결제회원에 대하여 결제를 이행하지 아니하는 경우 거래의 제한 또는 현금·증권 등 점유물의 처분 등 결제회원의 조치사항\n\n7. 결제위탁수수료 등 비용부담에 관한 사항\n\n8. 그 밖에 결제위탁에 관하여 필요한 사항",
+          "selection_hash": "0827db6f0691d4115b80a9e57dadc0089a90d985805efb06c08b208d97910fc0"
+        },
+        {
+          "article_id": "제16조",
+          "heading_path": [
+            "제4장 참가자의 관리",
+            "제16조(참가자에 대한 조치 및 통보)",
+            "①"
+          ],
+          "text": "**제16조(참가자에 대한 조치 및 통보)**① 거래소는 참가자의 행위가 제15조 각 호의 어느 하나에 해당하는 경우에는 해당 참가자에 대하여 다음 각 호의 어느 하나에 해당하는 조치를 할 수 있다.\n\n1. 주의환기 및 제14조에 따른 시정요구\n\n2. 경고\n\n3. 환매거래부채권매매거래 참가의 전부 또는 일부 제한\n\n② 거래소는 제1항에 따라 조치를 취할 경우에는 참가자에 조치 내용을 미리 통보하며, 조치에 이의가 있는 참가자는 그에 대한 소명을 할 수 있다.\n\n③ 거래소는 참가자에 대하여 제1항에 따른 조치를 취한 경우 그 내용을 모든 참가자에게 통보한다.",
+          "selection_hash": "0e970b9dfc51a68a3d8c631cf87a17656e8b6178a9805efe3d843332b9396e3a"
+        }
+      ]
+    },
+    {
+      "id": "204848017",
+      "source_id": "204848017",
+      "title": "KRX석유시장 이용계약서",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제12조",
+          "heading_path": [
+            "제12조(조치)",
+            "①"
+          ],
+          "text": "**제12조(조치)**① 거래소는 매매거래의 공정한 거래질서의 유지와 이 계약사항의 효율적 집행을 위해 필요하다고 인정하는 경우 참가자에 대하여 관련자료 또는 경위서의 제출, 관련자 면담 등 필요한 사항을 서면 또는 유·무선통신으로 요구할 수 있다. 이 경우 참가자는 거래소가 인정하는 특별한 사유가 있는 경우를 제외하고 이에 즉시 응하여야 한다.\n\n② 거래소는 참가자가 매매거래에 따른 채무이행을 하지 않거나 이 계약에서 정한 사항을 위반하는 경우 이에 따른 시정요구, 각서 징구, 주의, 경고, 위약금 부과, 거래정지, 탈퇴 등 필요한 조치를 취할 수 있다.",
+          "selection_hash": "141e3134a50b31983d963142b023fe643ce1cb89d7e8919ed321af575e9cf736"
+        },
+        {
+          "article_id": "제11조",
+          "heading_path": [
+            "제11조(참가자의 의무)",
+            "①"
+          ],
+          "text": "**제11조(참가자의 의무)**① 참가자는 이 계약서와 현재 시행중인 그리고 향후 제·개정되는 다음 각 호의 법규 및 이에 따른 처분이나 조치를 성실하게 준수하여야 한다.\n\n1. 「석유 및 석유대체연료 사업법」,「전자거래기본법」,「전자서명법」등 관련 법규\n\n2. KRX석유시장 운영규정\n\n② 참가자는 매매거래와 관련하여 공정거래질서를 저해하거나 신의칙에 반하는 행위를 하여서는 아니 된다.\n\n③ 특정 정제업자와 상표권 계약을 체결하지 아니한 대리점은 해당 정제업자의 상표로 매도하여서는 아니 된다. 이에 대한 위반 사실을 인지한 경우 거래소는 그 위반 사실을 해당 정제업자에게 통지할 수 있다.\n\n④ 특정 정제업자 또는 그의 대리점과 해당 석유제품을 전량 공급받기로 하는 계약(이하 \"전속공급계약\"이라 한다)을 체결한 주유소는 해당 계약에서 정하는 바에 따라 해당 정제업자의 석유제품을 매수하여야 한다. 이에 대한 위반사실을 인지한 경우 거래소는 그 위반 사실을 해당 정제업자 또는 그의 대리점에게 통지할 수 있다.",
+          "selection_hash": "1f93eea25228da1070242f5d137c66c11a3cf378442a21ebce4dc1cdaf1ba411"
+        }
+      ]
+    },
+    {
+      "id": "210024015",
+      "source_id": "210024015",
+      "title": "거래정보저장업무규정 시행세칙",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제4조",
+          "heading_path": [
+            "제2장 이용자",
+            "제1절 이용자의 등록",
+            "제4조(이용자 등록의 변경 신청 등)",
+            "①"
+          ],
+          "text": "**제4조(이용자 등록의 변경 신청 등)**① 규정 제5조제5항에 따라 이용자가 이용자 등록의 내용을 변경하려는 경우에는 별지 제1호 또는 제2호의 서식에 따라 KRX-TR에 이용자 등록변경을 신청하여야 한다.\n\n② 제1항에 따른 이용자 등록변경 신청의 심사 및 승인에 관하여는 규정 제5조제2항 및 제3항을 준용한다.\n\n③ 이용자 등록·등록변경의 신청은 모사전송 또는 전자우편의 방법으로 한다.",
+          "selection_hash": "00ccb546aaee31668b0ad99c7f4c32b66cfec223e701a8582ef6c958119f20cf"
+        },
+        {
+          "article_id": "제9조",
+          "heading_path": [
+            "제3장 거래정보의 보고",
+            "제1절 보고대상거래",
+            "제9조(금융투자상품거래청산회사의 보고)"
+          ],
+          "text": "**제9조(금융투자상품거래청산회사의 보고)**규정 제14조제3항에 따라 금융투자상품거래청산회사는 보고대상거래에 관한 거래당사자 양쪽의 거래정보를 모두 보고하여야 한다.",
+          "selection_hash": "03560e797cc155aa91cb34506da1a1bb49dd909deb7df86042a860a2e301d712"
+        }
+      ]
+    },
+    {
+      "id": "210084351",
+      "source_id": "210084351",
+      "title": "KRX석유시장 운영규정 시행세칙",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제20조의2",
+          "heading_path": [
+            "제3장 매매거래",
+            "제3절 매매계약의 체결",
+            "제20조의2(선박·송유관 거래)",
+            "①"
+          ],
+          "text": "**제20조의2(선박·송유관 거래)**① 거래소는 제20조제1항의 입력내용 이외에 선박 또는 송유관을 이용하는 협의상대거래를 체결시킬 수 있다. 이 경우 매도자는 거래를 체결하는 날의 직전 매매거래일 이전에 제20조제1항의 내용을 거래소에 통지하여야 하며, 제20조제1항제4호의 수량한도기준은 적용하지 않는다.\n\n② 선박·송유관 거래 시 매수참가자는 거래소가 정하는 일정비율만큼 재판매 의무를 부담한다. 이 경우 거래소는 해당 비율에 대한 매수참가자의 거래수수료를 감면해 줄 수 있으며, 거래수수료 감면비율은 거래소가 별도로 정하는 바에 따른다.\n\n③ 거래소는 매수참가자가 제2항에 따른 재판매 의무를 이행하지 아니한 경우 매도자가 다음 선박·송유관 거래를 통지한 때 해당 매수참가자의 선박·송유관거래를 거부할 수 있다. \u003c신설 2020. 11. 30.\u003e",
+          "selection_hash": "09e363085ec4f1bc7a3701c82f0a178a0c6adbbc850482a334a0f43eb17c98cf"
+        },
+        {
+          "article_id": "제32조",
+          "heading_path": [
+            "제5장 알뜰공급계약 대상종목 관련 특례",
+            "제32조(적용범위 특례)"
+          ],
+          "text": "**제32조(적용범위 특례)**규정 제59조제2항에서 \"세칙에서 정하는 사항\"이란 제20조제1항제5호부터 제7호, 제24조제7호·제8호 및 제10호를 말한다.",
+          "selection_hash": "15a6d877884010f47c2c705aec2264acca9f504586090d273537ee18082d5514"
+        }
+      ]
+    },
+    {
+      "id": "210137438",
+      "source_id": "210137438",
+      "title": "종류형집합투자기구 상장형 수익증권시장 운영규정 시행세칙",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제8조",
+          "heading_path": [
+            "제4장 시장운영, 매매거래, 청산결제 등",
+            "제8조(기준가격)",
+            "①"
+          ],
+          "text": "**제8조(기준가격)**① 규정 제16조제1항에서 \"세칙으로 정하는 기준가격\"이란 다음 각 호의 구분에 따른 가격을 말한다.\n\n1. 제2호부터 제4호까지 외의 종목 : 전일종가(그 가격이 호가가격단위와 일치하지 않는 경우에는 그 가격보다 높고 호가가격단위와 일치하는 가격 중 그 가격에 가장 가까운 가격으로 하고, 전일종가가 없는 경우에는 전일의 기준가격으로 한다. 이하 같다)\n\n2. 신규상장종목 : 법 제238조제6항에 따라 산정된 기준가격을 10,000좌 단위로 산정한 가격. 이 경우 상장일을 기준으로 가장 최근에 공표된 기준가격으로 하며, 상장일 전일에 공표되는 경우에는 17시까지 공표된 것으로 한정한다.\n\n3. 시가기준가종목 : 「유가증권시장 업무규정」(이하 \"업무규정\"이라 한다) 제37조제1항에 따라 최초로 결정된 가격. 이 경우 최초의 가격이 장종료시까지 결정되지 아니한 경우에는 다음 각 목의 구분에 따른 가격을 다음 매매거래일의 기준가격으로 한다.\n\n가. 업무규정 시행세칙 별표 1에서 정하는 평가가격(그 가격이 없는 경우에는 최저호가가격으로 한다. 이하 이 조에서 \"평가가격\"이라 한다)보다 낮은 매도호가가 있는 경우 : 가장 낮은 매도호가의 가격\n\n나. 평가가격보다 높은 매수호가가 있는 경우 : 가장 높은 매수호가의 가격\n\n다. 가목 및 나목 외의 경우 : 평가가격\n\n4. 이익금 분배를 거래소에 신고한 종목 : 업무규정 시행세칙 제132조제1항에 따른 기준일의 2매매거래일 전일의 종가에서 10,000좌당 분배금액(분배금액이 확정되지 아니한 경우에는 법 제238조제6항에 따라 산정된 기준가격 중 17시까지 발표된 가격을 감안하여 산정한 금액으로 한다)을 차감한 가격.\n\n② 제1항제2호 및 제4호에 따른 가격(1원 미만은 버린다)이 호가가격단위와 일치하지 않는 경우에는 그 가격보다 높고 호가가격단위와 일치하는 가격 중 그 가격에 가장 가까운 가격으로 한다.\n\n③ 규정 제16조제1항 단서에 따라 기준가격에 가격제한폭을 더한 가격이 호가가격단위와 일치하지 아니하는 경우에는 그 가격보다 낮고 호가가격단위와 일치하는 가격 중 그 가격에 가장 가까운 가격을 상한가로 하고, 기준가격이 호가가격단위 중 가장 낮은 가격인 경우에는 해당 가격을 하한가로 한다.\n\n④ 규정 제16조제3항에서 \"세칙으로 정하는 경우\"란 다음 각 호의 어느 하나에 해당하는 경우를 말한다.\n\n1. 장기휴장 이후 최초로 매매거래를 재개하는 경우\n\n2. 장기간 매매거래가 이루어지지 아니하거나 권리내용의 중대한 변경 또는 시장상황급변 등의 사유로 제1항 및 제2항에 따른 기준가격을 적용하는 것이 현저하게 곤란하다고 인정되는 경우",
+          "selection_hash": "0b49cba5f70d5b8a3713ddf04b291f711255df213f29c884c726b019b63cfdf6"
+        },
+        {
+          "article_id": "제16조",
+          "heading_path": [
+            "제4장 시장운영, 매매거래, 청산결제 등",
+            "제16조(호가단위)",
+            "①"
+          ],
+          "text": "**제16조(호가단위)**① 규정 제21조에 따른 호가수량단위는 10,000좌로 한다.\n\n② 규정 제21조에 따른 호가가격단위는 다음 각 호와 같다.\n\n1. 10,000좌의 가격이 2,000원 미만인 종목: 1원\n\n2. 10,000좌의 가격이 2,000원 이상인 종목: 5원",
+          "selection_hash": "0bca83376067a6935c5c8abdd37b7b6b66fb02339c319dc09bf375942706de3c"
+        }
+      ]
+    },
+    {
+      "id": "210137438-en",
+      "source_id": "210137438",
+      "title": "Enforcement Rules of Market Operation of Class X Ben. Certificates 20250509",
+      "language": "en",
+      "samples": [
+        {
+          "article_id": "§5",
+          "heading_path": [
+            "Chapter II. Listing of Class X Beneficiary Certificates of a Multiple Class Fund",
+            "§5. Application Documents for Supplementary Listing and Listing Change"
+          ],
+          "text": "§5. Application Documents for Supplementary Listing and Listing Change\n\n(1) “An application for supplementary listing and the accompanying documents stipulated by\nthe Enforcement Rules” in [§7(1)] of the Regulation shall refer to those prescribed in Appendix\n\n4.\n\n(2)  “An  application  for  listing  change  and  the  accompanying  documents  stipulated  by  the\nEnforcement Rules” in [§7(2)] of the Regulation shall refer to those prescribed in Appendix 5.",
+          "selection_hash": "0748c2e573bdeb7299d575432fb2019c8f101e71eacca329011e13d8daec8a56"
+        }
+      ]
+    },
+    {
+      "id": "210179748",
+      "source_id": "210179748",
+      "title": "유가증권시장 공시규정 시행세칙",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제5조",
+          "heading_path": [
+            "제5조(풍문 및 보도)"
+          ],
+          "text": "**제5조(풍문 및 보도)**규정 제12조제1항에 따른 \"풍문 및 보도\"는 유가증권시장주권상장법인의 기업내용에 관하여 거래소가 수집한 내용 및 「신문 등의 진흥에 관한 법률」에 따른 일반일간신문 또는 경제 분야의 특수일간신문 중 전국을 보급지역으로 하는 신문에 게재된 기사로 한다. \u003c개정 2005. 12. 27., 2006. 9. 11., 2009. 2. 3., 2015. 8. 28.\u003e",
+          "selection_hash": "02eed4d7aacff93ebc76d469fc811c9e481e7f50b4e9ccab7eb0671e528eb940"
+        },
+        {
+          "article_id": "제18조의5",
+          "heading_path": [
+            "제18조의5(확인절차 대상법인 등)",
+            "①"
+          ],
+          "text": "**제18조의5(확인절차 대상법인 등)**① 규정 제56조에서 \"세칙으로 정하는 채권상장법인\"이라 함은 규정 제53조제1항에 따른 채권상장법인을 말한다.\n\n② 규정 제56조에서 \"세칙으로 정하는 신고내용\"이라 함은 규정 제57조에 따른 주요경영사항과 규정 제57조의2에 따라 조회공시 요구에 응한 경우 해당 공시사항을 말한다.\n\n[본조신설 2015. 8. 28.]",
+          "selection_hash": "0b8d2f6fe6f77855ae5d7a7fe15914658f43fe129def8b6579f3d05547d2d4c8"
+        }
+      ]
+    },
+    {
+      "id": "210179748-en",
+      "source_id": "210179748",
+      "title": "Enforcement Rules of KOSPI Market Disclosure Regulation 20260225",
+      "language": "en",
+      "samples": [
+        {
+          "article_id": "§4-4",
+          "heading_path": [
+            "§4-4. Market Price-Dividends Ratio, etc."
+          ],
+          "text": "§4-4. Market Price-Dividends Ratio, etc.\n\n“Market price-dividends ratio specified in the Enforcement Rules” in [§7(1)2(e)(v)] of\nthe Regulation shall refer to the percentage of dividend per share price (in the case of\ndividend in kind, it shall be the amount converted into cash) obtained by averaging the\nclosing  prices  in  the  KOSPI  market  for  one  (1)  week  retroactive  from  the  day  before\ntwo  (2)  trading  days  (in  cases  where  a  decision  on  dividends  is  made  before  the\ndividend  record  date,  it  shall  be  the  trading  day  immediately  preceding  the  date  of\ndecision)  from  the  dividend  record  date  (if  the  day  is  a  holiday,  it  shall  be  the\nimmediately preceding trading day). (Amended on April 19, 2012; February 26, 2013;\nMarch 30, 2023)",
+          "selection_hash": "0fafb63fff6512d4fb8c1ee517a810beccb2f3eac878540c542f74609d51e9cc"
+        }
+      ]
+    },
+    {
+      "id": "210199110",
+      "source_id": "210199110",
+      "title": "증권시장 청산결제 업무규정 시행세칙",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제52조",
+          "heading_path": [
+            "제3장 거래증거금등",
+            "제52조(주식군에 해당하는 증권 중 신규상장종목등의 사정비율 특례)",
+            "①"
+          ],
+          "text": "**제52조(주식군에 해당하는 증권 중 신규상장종목등의 사정비율 특례)**① 제50조제2항·제3항제1호, 제51조 및 제54조제3항제1호에도 불구하고 주식군에 해당하는 증권 중 신규상장종목 및 재상장종목의 사정비율은 다음 각 호와 같다.\n\n1. 유가증권시장 상장주권·상장외국주식예탁증권 : 70%\n\n2. 코스닥시장 상장주권, 상장외국주식예탁증권 및 기업성장집합투자기구 집합투자증권 : 70% \u003c개정 2026. 4. 17.\u003e\n\n3. 코넥스시장 상장주권 : 60%\n\n4. 상장지수집합투자기구 집합투자증권, 상장지수증권 및 상장수익증권 중 별표 4의 분류내용이 주식군에 해당하는 증권 : 70%\n\n② 제1항에 따른 사정비율은 최초 매매거래 개시일부터 최초 매매거래 개시일이 속하는 분기의 다음 분기말까지 적용한다.",
+          "selection_hash": "01937fd12302b46806459fa23ad3daae521164b014dec2ec5420ab0e9c9431c0"
+        },
+        {
+          "article_id": "제1조",
+          "heading_path": [
+            "제1장 총칙",
+            "제1조(목적)"
+          ],
+          "text": "**제1조(목적)**이 세칙은「증권시장 청산결제 업무규정」의 시행에 필요한 사항을 규정함을 목적으로 한다.",
+          "selection_hash": "01c77a795e18b4ffd106101d9bd0fb2647dbadaa80f5c9fd2a9189becfc01341"
+        }
+      ]
+    },
+    {
+      "id": "210199110-en",
+      "source_id": "210199110",
+      "title": "Enforcement Rules of Securities Market Clearing...",
+      "language": "en",
+      "samples": [
+        {
+          "article_id": "§31",
+          "heading_path": [
+            "CHAPTER II. CLEARING AND SETTLEMENT IN SECURITIES MARKET",
+            "Section 3. Special Cases of Securities Settlement",
+            "§31. Special Cases Concerning Securities Settlement"
+          ],
+          "text": "§31. Special Cases Concerning Securities Settlement\n\n(1) Cash or a similar issue that substitutes the issue to be settled at the settlement deadline\npursuant to [§26(2)] of the Regulation, (hereinafter referred to as “original issue”) shall\nbe selected by a clearing member who will receive the original issue. Provided that, in\ncases where it is recognized that the settlement using the selected issues is difficult, the\nExchange shall select the issue in consultation with the relevant clearing member.\n\n(2) In the case of making the settlement in cash instead of the original issue, the amount\nshall be the greater of the amount noted in subparagraph 3 and the sum of the amount\nnoted in subparagraph 1 and the amount noted in subparagraph 2. In such cases, if the\noriginal  issue  is  a  foreign  currency-denominated  debt  security,  it  shall  be  the  amount\nconverted  into  Korean  currency  by  applying  the  basic  exchange  rate,  etc.  as  of  the\nsettlement  date  that  is  determined  and  made  public  in  accordance  with  the  Foreign\nExchange Transaction Regulation:\n\n1. The amount obtained by multiplying the quantity not settled by the closing price of\nthe original issue on the trading day;\n\n2. The amount obtained by multiplying the amount under subparagraph 1 by 20% (5%\nfor debt securities); and\n\n3. The amount obtained by multiplying the quantity not settled by the closing price of\nthe original issue on the date of cash payment (in cases where the  delivery is made\nbefore  the  determination  of  the  closing  price  of  the  day,  the  closing  price  of  the\nprevious day shall be used; the same hereinafter in this Article).\n\n(3) In the case of intending to settle with a similar issue, instead of the original issue, the\n\n23\n\nquantity of such issue shall be the number obtained by dividing the amount determined\nin accordance with paragraph (2) by the closing price of the delivery day of the relevant\nissue. In such cases, the quantity less than the trading quantity unit shall be paid in cash.\n\n(4) In cases where the number of issues pursuant to paragraph (3) is two (2) or more, the\nquantity  of  each  issue  shall  be  the  quantity  when  the  sum  of  the  amount  obtained  by\nmultiplying  the  quantity  of  each  issue  by  the  closing  price  on  the  delivery  day  of  the\nrelevant issue becomes equal to the amount noted in paragraph (2).\n\n(5) Notwithstanding paragraphs (1) through (4), in cases where the clearing member who\nhas not delivered the original issue and the clearing member who entitles to receive the\noriginal issue have made a different agreement, such agreement shall apply.\n\n(6) When settling the trade using cash or other similar issue instead of the original issue,\nthe Exchange shall notify such fact to the Korea Securities Depository.",
+          "selection_hash": "00073779e6b4144e54d591ca3becb532999ecdc471511b23e131927e2b8475c8"
+        }
+      ]
+    },
+    {
+      "id": "210212163",
+      "source_id": "210212163",
+      "title": "코넥스시장 상장적격성 실질심사지침",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제1조",
+          "heading_path": [
+            "제1장 총칙",
+            "제1조(목적)"
+          ],
+          "text": "**제1조(목적)**이 지침은 「코넥스시장 상장규정」(이하 \"규정\"이라 한다) 제28조제2항, 제29조, 제30조, 「코넥스시장 상장규정 시행세칙」(이하 \"세칙\"이라 한다) 제24조부터 제27조까지의 규정에 따라 한국거래소(이하 \"거래소\"라 한다)가 수행하는 코넥스시장 상장법인의 상장적격성 실질심사(이하 \"실질심사\"라 한다)와 관련하여 필요한 사항을 규정함을 목적으로 한다.",
+          "selection_hash": "03b1b23f9e725f4043811dde5f8d893cba9af2dc86f20721841c55a1e751fa78"
+        },
+        {
+          "article_id": "제6조",
+          "heading_path": [
+            "제2장 실질심사방법",
+            "제6조(심사자료의 요청)",
+            "①"
+          ],
+          "text": "**제6조(심사자료의 요청)**① 거래소는 실질심사를 위하여 필요하다고 인정되는 경우 실질심사대상법인에 대하여 관련 자료를 요청할 수 있다.\n\n② 제1항에 따른 요청은 [별표 1]의 실질심사 서류 및 정보요구서를 참고하여 자료목록, 제출양식, 제출기한 등을 명시하여 서면 또는 전자문서의 방법으로 한다.\n\n③ 거래소는 실질심사의 주요 쟁점에 대하여 해당 법인 및 외부 전문가(공인회계사, 변호사 등)의 의견을 첨부하도록 요청할 수 있다.\n\n④ 실질심사대상법인은 제2항에 따른 제출기한을 준수하여야 하며 거래소가 불가피하다고 인정하는 경우에는 규정 제36조에 따른 코넥스시장 상장공시위원회(이하 \"위원회\"라 한다)의 심의일 3일 전까지 제출할 수 있다.",
+          "selection_hash": "18da82ecfac513757290d6ad3ac6a2a01dcf69d31e06f3a236b01bd169cc8118"
+        }
+      ]
+    },
+    {
+      "id": "210224312",
+      "source_id": "210224312",
+      "title": "코넥스시장 공시규정 시행세칙",
+      "language": "ko",
+      "samples": [
+        {
+          "article_id": "제5조",
+          "heading_path": [
+            "제2장 공시의무",
+            "제5조(공시사항 신고시기 의제)"
+          ],
+          "text": "**제5조(공시사항 신고시기 의제)**규정 제6조 본문에서 \"부득이한 사유로 세칙에서 정하는 바에 따라 신고한 경우\"란 해당 신고를 다음날의 장개시전 시간외시장 개시 10분전까지 하는 경우를 말한다. 다만, 해당 종목의 장개시전 시간외시장이 성립되지 아니하는 경우에는 해당 신고를 다음날 정규시장 매매거래 개시 30분전까지(해당 종목의 경매매가 있는 경우에는 정규시장 매매거래 개시 1시간 전까지) 하는 경우를 말한다.",
+          "selection_hash": "01c0bb031187edfe74fbf82d49d736c1a8c263277cbeee41d181f5e02df2fa6a"
+        },
+        {
+          "article_id": "제18조",
+          "heading_path": [
+            "제5장 보칙",
+            "제18조(공시기간의 계산)",
+            "①"
+          ],
+          "text": "**제18조(공시기간의 계산)**① 공시와 관련된 기간의 계산은 이 세칙에서 별도로 정하는 경우 이외에는 다음 각 호의 어느 하나의 방법에 따른다. \u003c개정 2015. 4. 30.\u003e\n\n1. 기간의 초일은 이를 산입하지 아니한다.\n\n2. 기간을 일로 정한 때에는 매매거래일(「코넥스시장 업무규정」 제5조제4호에 따른 연말 휴장일을 포함한다)에 따라 계산한다. 다만, 규정 제6조제5호다목·제43조 및 제10조의2에 따른 기간의 일수는 역에 따라 계산한다.\n\n3. 기간을 주, 월 또는 연으로 계산한 때에는 역에 따라 계산한다.\n\n② 이 규정에서 당일·다음날 및 오후의 공시시한은 각각 18시까지를 기준으로 하며, 규정 제44조에 따른 집합투자업자 등의 신고시한은 전자공시시스템 운영시간까지로 한다.\n\n③ 제2항 및 제5조에도 불구하고 거래소가 전자공시시스템 장애 및 공시처리시간 등을 고려하여 불가피하다고 인정하는 경우에는 공시시한을 연장하여 운영할 수 있다.",
+          "selection_hash": "0329b9f4e20236a7007301ac42997c77980c3a683d5923c7598f3349a2c23ba0"
+        }
+      ]
+    }
+  ]
+}

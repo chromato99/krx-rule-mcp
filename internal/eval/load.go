@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -45,8 +46,13 @@ func ValidateFixture(fixture Fixture) error {
 	if !strings.HasPrefix(fixture.FixtureVersion, "rag-v") {
 		return fmt.Errorf("evaluation fixture version %q is invalid", fixture.FixtureVersion)
 	}
-	if len(fixture.Cases) < 120 {
-		return fmt.Errorf("evaluation fixture has %d cases, want at least 120", len(fixture.Cases))
+	if len(fixture.Cases) == 0 {
+		return fmt.Errorf("evaluation fixture has no cases")
+	}
+	switch fixture.Policies.EvaluationUse {
+	case "", "development", "sealed-holdout":
+	default:
+		return fmt.Errorf("invalid evaluation_use %q", fixture.Policies.EvaluationUse)
 	}
 	if fixture.Policies.ChunkIDsInExpectations {
 		return fmt.Errorf("evaluation fixture must not pin release-specific chunk ids")
@@ -58,8 +64,6 @@ func ValidateFixture(fixture Fixture) error {
 		return fmt.Errorf("evaluation source sha256 %q is invalid", fixture.Source.SHA256)
 	}
 	seen := map[string]struct{}{}
-	splitCounts := map[string]int{}
-	englishHoldoutCases := 0
 	for index, item := range fixture.Cases {
 		if !caseIDPattern.MatchString(item.ID) {
 			return fmt.Errorf("evaluation case %d has invalid id %q", index, item.ID)
@@ -68,30 +72,32 @@ func ValidateFixture(fixture Fixture) error {
 			return fmt.Errorf("evaluation case id %q is duplicated", item.ID)
 		}
 		seen[item.ID] = struct{}{}
-		splitCounts[item.Split]++
-		if item.Split == "holdout" && item.Input.Language == "en" {
-			englishHoldoutCases++
+		if fixture.Policies.EvaluationUse == "sealed-holdout" && item.Split != "holdout" {
+			return fmt.Errorf("sealed holdout contains non-holdout case %q", item.ID)
 		}
 		if err := validateCase(item); err != nil {
 			return fmt.Errorf("evaluation case %q: %w", item.ID, err)
 		}
 	}
-	for _, requirement := range []struct {
-		split   string
-		minimum int
-	}{
-		{split: "regression", minimum: 50},
-		{split: "development", minimum: 20},
-		{split: "holdout", minimum: 20},
-	} {
-		if splitCounts[requirement.split] < requirement.minimum {
-			return fmt.Errorf("evaluation fixture split %q has %d cases, want at least %d", requirement.split, splitCounts[requirement.split], requirement.minimum)
-		}
-	}
-	if englishHoldoutCases < 10 {
-		return fmt.Errorf("evaluation fixture has %d English holdout cases, want at least 10", englishHoldoutCases)
-	}
 	return nil
+}
+
+// Split/group labels may change when a holdout is consumed; the question and
+// target contracts must stay identical for a before/after quality comparison.
+func FixtureContractHash(fixture Fixture) string {
+	type contract struct {
+		ID          string      `json:"id"`
+		Input       CaseInput   `json:"input"`
+		Expectation Expectation `json:"expectation"`
+	}
+	contracts := make([]contract, 0, len(fixture.Cases))
+	for _, item := range fixture.Cases {
+		contracts = append(contracts, contract{item.ID, item.Input, item.Expectation})
+	}
+	sort.Slice(contracts, func(i, j int) bool { return contracts[i].ID < contracts[j].ID })
+	data, _ := json.Marshal(contracts)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func VerifySourceFixture(path, expectedHash string, expectedCases int) error {
@@ -121,7 +127,7 @@ func validateCase(item Case) error {
 		return fmt.Errorf("group is required")
 	}
 	switch item.Split {
-	case "regression", "development", "holdout":
+	case "regression", "development", "validation", "holdout":
 	default:
 		return fmt.Errorf("unsupported split %q", item.Split)
 	}

@@ -1,0 +1,720 @@
+{
+  "provenance": {
+    "evaluator_version": "rag-evaluator-v1",
+    "server_commit": "3d6fe64+frozen-dc0fa39e4f01",
+    "release_generation": "a022ba45cd163656adb4490b6c4f6a3c9a9fd596c08d5d0a16e6dc690ef87326",
+    "corpus_release_hash": "469cda6799dfa33d7f8e88e175a6f745f81851a4f76d99e4529e9a4f7a7f5c84",
+    "index_generation": "70e23cf74164d137ba35316e875edac3350ed7ff0f944c04a9e6fd443034e78f",
+    "index_source_hash": "cee262a9718f370bd34b685b79af0524c2aa25f33d6cf7f0f433d19c008a4c3c",
+    "index_build_hash": "7f802f5a1d1810c26e068825dca51cbcfdd56134b63b3e0535b24f33f1f8120b",
+    "indexer_version": "tokenizer-ko-2gram-3gram-script-html-alias-structured-anchor-v2-en-section-bounded-headings-evidence-only-chunk1600-md-html-table-row-equation-pair-bm25-k1-1.4-b-0.75-chunk-rrf-v1",
+    "bm25_artifact_digest": "9da73c2886e109d7c73fc7320fd0af4a7893ef328d4426af96dfe9fcdb8ab01e",
+    "bm25_snapshot_version": 6,
+    "embedding": {
+      "model": "intfloat/multilingual-e5-small",
+      "revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+      "dimensions": 384,
+      "query_prefix": "query: ",
+      "document_prefix": "passage: ",
+      "scope": "full",
+      "input_format": "text-v1",
+      "expected_chunk_count": 51929,
+      "stored_vector_count": 51929,
+      "coverage": 1,
+      "artifact_digest": "ca5a6a9ddf619ec5938f8a23de715532a6fd1a3f902dd67339ff8dadba48083d",
+      "metadata_digest": "6cfed19a6007adc32ab81ae35dc5b51f28ba0eb477a2077f9347990b9f9672b9"
+    },
+    "lexicon_digest": "53f5251b2a185ac28c131f7bf55a02f994abdf6b88146ad6a5796d5fc8b09dfd",
+    "runtime_vector_mode": "bm25+vector",
+    "retrieval_candidate_limit": 120,
+    "retrieval_contract": "chunk-rrf-v1",
+    "answerability_gate": "evidence-gate-v4",
+    "fixture_version": "rag-v1",
+    "fixture_sha256": "7b319366d788c7b0c4da8e7b2840c28f6e65983d33791fc9641868556d2a9245",
+    "case_set_sha256": "0a3892f7e1450361a8ae6eeed483bb82cfa7041b13840a5793496e318d5b9cd7",
+    "evaluation_use": "sealed-holdout",
+    "source_fixture_sha256": "0deb6356297168823ed5d6a5af88c1e75c0984d248098fe9b0fd192056906796",
+    "extra": {
+      "lexicon_mode": "full"
+    }
+  },
+  "summary": {
+    "cases": 39,
+    "supported_cases": 28,
+    "insufficient_cases": 8,
+    "ambiguous_cases": 3,
+    "document_eligible": 28,
+    "document_hit_at_1": 11,
+    "document_hit_at_5": 18,
+    "document_hit_at_5_rate": 0.6428571428571429,
+    "mrr_at_5": 0.5178571428571429,
+    "evidence_eligible": 28,
+    "evidence_hit_at_1": 8,
+    "evidence_hit_at_1_rate": 0.2857142857142857,
+    "evidence_recall_at_3": 10,
+    "evidence_recall_at_3_rate": 0.35714285714285715,
+    "candidate_evidence_eligible": 28,
+    "candidate_evidence_recall_at_64": 19,
+    "candidate_evidence_recall_at_64_rate": 0.6785714285714286,
+    "reranker_pool_eligible": 0,
+    "reranker_pool_hit": 0,
+    "reranker_pool_hit_rate": 0,
+    "reranker_attempted": 0,
+    "reranker_adopted": 0,
+    "manual_evidence_eligible": 0,
+    "manual_evidence_hit_at_1": 0,
+    "manual_evidence_hit_at_1_rate": 0,
+    "status_correct": 25,
+    "status_accuracy": 0.6410256410256411,
+    "insufficient_refused": 6,
+    "insufficient_refusal_rate": 0.75,
+    "false_supported": 11,
+    "false_supported_rate": 0.5238095238095238,
+    "answered_cases": 21,
+    "assessed_answers": 21,
+    "unassessed_answers": 0,
+    "selected_evidence_correct": 10,
+    "selected_evidence_precision": 0.47619047619047616,
+    "correct_answer_coverage": 0.35714285714285715,
+    "insufficient_false_accepted": 2,
+    "ambiguous_false_accepted": 1,
+    "incorrect_evidence_answers": 8,
+    "ambiguous_clarified": 1,
+    "ambiguous_clarification_rate": 0.3333333333333333,
+    "context_checks": 426,
+    "context_consistent": 426,
+    "context_consistency_rate": 1,
+    "filter_leaks": 0,
+    "expansion_checks": 0,
+    "expansion_passed": 0,
+    "english_canonical_checks": 4,
+    "english_canonical_passed": 4,
+    "hwp_attachment_checks": 0,
+    "hwp_attachment_passed": 0,
+    "automatic_passed": 17,
+    "manual_review_cases": 0,
+    "p95_search_latency_ms": 808.973,
+    "p95_reranker_latency_ms": 0,
+    "p95_latency_ms": 809.626
+  },
+  "language_summaries": {
+    "en": {
+      "cases": 5,
+      "supported_cases": 4,
+      "insufficient_cases": 1,
+      "ambiguous_cases": 0,
+      "document_eligible": 4,
+      "document_hit_at_1": 2,
+      "document_hit_at_5": 4,
+      "document_hit_at_5_rate": 1,
+      "mrr_at_5": 0.75,
+      "evidence_eligible": 4,
+      "evidence_hit_at_1": 1,
+      "evidence_hit_at_1_rate": 0.25,
+      "evidence_recall_at_3": 1,
+      "evidence_recall_at_3_rate": 0.25,
+      "candidate_evidence_eligible": 4,
+      "candidate_evidence_recall_at_64": 2,
+      "candidate_evidence_recall_at_64_rate": 0.5,
+      "reranker_pool_eligible": 0,
+      "reranker_pool_hit": 0,
+      "reranker_pool_hit_rate": 0,
+      "reranker_attempted": 0,
+      "reranker_adopted": 0,
+      "manual_evidence_eligible": 0,
+      "manual_evidence_hit_at_1": 0,
+      "manual_evidence_hit_at_1_rate": 0,
+      "status_correct": 4,
+      "status_accuracy": 0.8,
+      "insufficient_refused": 0,
+      "insufficient_refusal_rate": 0,
+      "false_supported": 3,
+      "false_supported_rate": 0.6,
+      "answered_cases": 5,
+      "assessed_answers": 5,
+      "unassessed_answers": 0,
+      "selected_evidence_correct": 2,
+      "selected_evidence_precision": 0.4,
+      "correct_answer_coverage": 0.5,
+      "insufficient_false_accepted": 1,
+      "ambiguous_false_accepted": 0,
+      "incorrect_evidence_answers": 2,
+      "ambiguous_clarified": 0,
+      "ambiguous_clarification_rate": 0,
+      "context_checks": 144,
+      "context_consistent": 144,
+      "context_consistency_rate": 1,
+      "filter_leaks": 0,
+      "expansion_checks": 0,
+      "expansion_passed": 0,
+      "english_canonical_checks": 4,
+      "english_canonical_passed": 4,
+      "hwp_attachment_checks": 0,
+      "hwp_attachment_passed": 0,
+      "automatic_passed": 2,
+      "manual_review_cases": 0,
+      "p95_search_latency_ms": 187.708,
+      "p95_reranker_latency_ms": 0,
+      "p95_latency_ms": 191.175
+    },
+    "ko": {
+      "cases": 34,
+      "supported_cases": 24,
+      "insufficient_cases": 7,
+      "ambiguous_cases": 3,
+      "document_eligible": 24,
+      "document_hit_at_1": 9,
+      "document_hit_at_5": 14,
+      "document_hit_at_5_rate": 0.5833333333333334,
+      "mrr_at_5": 0.4791666666666667,
+      "evidence_eligible": 24,
+      "evidence_hit_at_1": 7,
+      "evidence_hit_at_1_rate": 0.2916666666666667,
+      "evidence_recall_at_3": 9,
+      "evidence_recall_at_3_rate": 0.375,
+      "candidate_evidence_eligible": 24,
+      "candidate_evidence_recall_at_64": 17,
+      "candidate_evidence_recall_at_64_rate": 0.7083333333333334,
+      "reranker_pool_eligible": 0,
+      "reranker_pool_hit": 0,
+      "reranker_pool_hit_rate": 0,
+      "reranker_attempted": 0,
+      "reranker_adopted": 0,
+      "manual_evidence_eligible": 0,
+      "manual_evidence_hit_at_1": 0,
+      "manual_evidence_hit_at_1_rate": 0,
+      "status_correct": 21,
+      "status_accuracy": 0.6176470588235294,
+      "insufficient_refused": 6,
+      "insufficient_refusal_rate": 0.8571428571428571,
+      "false_supported": 8,
+      "false_supported_rate": 0.5,
+      "answered_cases": 16,
+      "assessed_answers": 16,
+      "unassessed_answers": 0,
+      "selected_evidence_correct": 8,
+      "selected_evidence_precision": 0.5,
+      "correct_answer_coverage": 0.3333333333333333,
+      "insufficient_false_accepted": 1,
+      "ambiguous_false_accepted": 1,
+      "incorrect_evidence_answers": 6,
+      "ambiguous_clarified": 1,
+      "ambiguous_clarification_rate": 0.3333333333333333,
+      "context_checks": 282,
+      "context_consistent": 282,
+      "context_consistency_rate": 1,
+      "filter_leaks": 0,
+      "expansion_checks": 0,
+      "expansion_passed": 0,
+      "english_canonical_checks": 0,
+      "english_canonical_passed": 0,
+      "hwp_attachment_checks": 0,
+      "hwp_attachment_passed": 0,
+      "automatic_passed": 15,
+      "manual_review_cases": 0,
+      "p95_search_latency_ms": 808.973,
+      "p95_reranker_latency_ms": 0,
+      "p95_latency_ms": 809.626
+    }
+  },
+  "failure_stage_counts": {
+    "answerability": 14,
+    "candidate-generation": 9,
+    "evidence-selection": 9,
+    "selected-evidence": 8,
+    "top1-ranking": 2
+  },
+  "cases": [
+    {
+      "id": "reserved-01",
+      "query": "거래소 정관에서 코스닥시장본부장의 해임을 건의할 수 있는 주체와 건의 대상, 사유는 무엇인가",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-02",
+      "query": "거래소 이사회를 구성하는 임원의 범위는 정관의 어느 조항을 기준으로 정하나",
+      "expected_status": "supported",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=supported",
+        "expected document absent from results",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "evidence-selection",
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-03",
+      "query": "Which classes of shares may the Korea Exchange issue under its articles of incorporation?",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": false,
+      "failures": [
+        "selected evidence bundle does not satisfy expected targets",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "candidate-generation",
+        "selected-evidence"
+      ]
+    },
+    {
+      "id": "reserved-04",
+      "query": "신종증권시장 운영규정 시행세칙에서 매매계약 체결방법을 변경할 때 복수가격 경쟁매매는 어떤 방식으로 바뀌나",
+      "expected_status": "supported",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=supported",
+        "expected document absent from results",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "evidence-selection",
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-05",
+      "query": "신종증권 신규상장을 신청하면서 이미 낸 첨부문서에 바뀐 내용이 없으면 다시 내야 하나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": false,
+      "failures": [
+        "selected evidence bundle does not satisfy expected targets"
+      ],
+      "failure_stages": [
+        "selected-evidence"
+      ]
+    },
+    {
+      "id": "reserved-06",
+      "query": "What confidentiality protections must a designated advisor appointment contract include in the new-type securities market?",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": false,
+      "failures": [
+        "selected evidence bundle does not satisfy expected targets",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "evidence-selection",
+        "selected-evidence"
+      ]
+    },
+    {
+      "id": "reserved-07",
+      "query": "코스닥시장 상장적격성 실질심사지침에서 현지조사 전에 회사와 협의해야 하는 항목은 무엇인가",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": false,
+      "failures": [
+        "selected evidence bundle does not satisfy expected targets",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "evidence-selection",
+        "selected-evidence"
+      ]
+    },
+    {
+      "id": "reserved-08",
+      "query": "코스닥 기업의 실질심사에서 기업심사위원회가 상장폐지 의견을 내면 최종 확정 전에 어느 위원회의 추가 의결을 거쳐야 하나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-09",
+      "query": "배출권 거래시장 운영규정 시행세칙상 체결 결과를 위탁자에게 알릴 때 어떤 거래정보 항목을 통지하나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": false,
+      "failures": [
+        "selected evidence bundle does not satisfy expected targets",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "candidate-generation",
+        "selected-evidence"
+      ]
+    },
+    {
+      "id": "reserved-10",
+      "query": "다른 회사로부터 배출권시장 회원 지위를 넘겨받으려면 거래소에 어떤 신청서를 내야 하나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [],
+      "failure_stages": [
+        "top1-ranking"
+      ]
+    },
+    {
+      "id": "reserved-11",
+      "query": "유가증권시장 상장적격성 실질심사지침은 실질심사의 기본 수행 원칙을 어떻게 정하나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": false,
+      "failures": [
+        "selected evidence bundle does not satisfy expected targets",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "candidate-generation",
+        "selected-evidence"
+      ]
+    },
+    {
+      "id": "reserved-12",
+      "query": "유가증권시장 기업심사위원회가 심의한 뒤 거래소는 상장폐지 결론을 언제 내리고 회사에는 어떻게 알리나",
+      "expected_status": "supported",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=supported",
+        "expected document absent from results",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "candidate-generation",
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-13",
+      "query": "코스닥시장 상장규정에서 종속회사가 있는 외국주식 신규상장신청인은 최근 사업연도에 어떤 감사의견을 받아야 하나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [],
+      "failure_stages": [
+        "top1-ranking"
+      ]
+    },
+    {
+      "id": "reserved-14",
+      "query": "코스닥 회사가 합병으로 경영권이 바뀌는 경우 소규모합병도 우회상장 판단에 그대로 포함되나",
+      "expected_status": "supported",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=supported",
+        "expected document absent from results",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "candidate-generation",
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-15",
+      "query": "신종증권시장 운영규정에서 사업연도 결산보고서와 반기보고서를 거래소에 제출하는 기한은 각각 어떻게 다른가",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-16",
+      "query": "신종증권 발행사가 해명 내용을 아직 결정하지 못했다고 공시했다면 어떤 내용으로 후속 공시를 하고 원칙적인 시한은 언제인가",
+      "expected_status": "supported",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=supported",
+        "expected document absent from results",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "evidence-selection",
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-17",
+      "query": "Under the new-type securities market regulation, can an auditor report be used if the auditor owns shares or stock options in the issuer?",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-18",
+      "query": "KRX금시장 운영규정 시행세칙은 종가 대비 국제금가격 괴리율을 어떤 산식으로 계산하고 어느 범위로 정하나",
+      "expected_status": "supported",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=supported",
+        "expected document absent from results",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "evidence-selection",
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-19",
+      "query": "금시장 장종료 가격을 정할 때 단일가 참여호가 범위가 늘어나면 연장 시간은 얼마이며 거래소가 따로 공표하나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": false,
+      "failures": [
+        "selected evidence bundle does not satisfy expected targets",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "candidate-generation",
+        "selected-evidence"
+      ]
+    },
+    {
+      "id": "reserved-20",
+      "query": "전자금융거래 분쟁처리지침에서 전산장애 손해배상을 받으려면 매매의사를 어떻게 확인할 수 있어야 하나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-21",
+      "query": "거래소의 전자금융거래 서비스에 관해 정당한 불만을 제기하면 어떤 규정의 절차에 따라 접수해 처리하나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-22",
+      "query": "전문평가제도 운영지침에서 두 기관의 전문평가 통보 날짜가 다르면 재신청 제한기간의 시작일을 어떻게 잡나",
+      "expected_status": "supported",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=supported",
+        "expected document absent from results",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "evidence-selection",
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-23",
+      "query": "혁신기술기업으로 상장하려는 회사도 기술성과 시장성을 보는 전문평가 대상에 들어가나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": false,
+      "failures": [
+        "selected evidence bundle does not satisfy expected targets",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "candidate-generation",
+        "selected-evidence"
+      ]
+    },
+    {
+      "id": "reserved-24",
+      "query": "회원시스템 접속 등에 관한 지침은 회원·거래소·위탁자 사이의 어떤 연결 관계를 대상으로 하나",
+      "expected_status": "supported",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=supported",
+        "expected document absent from results",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "evidence-selection",
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-25",
+      "query": "금시장 시스템을 연결하려면 전용 회선을 새로 마련하나 아니면 증권시장에 배정된 회선과 세션을 이용하나",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-26",
+      "query": "장외파생상품 청산업무규정 시행세칙에서 공동기금 산출기준일을 기준으로 정한 기간은 어느 영업일 몇 시까지인가",
+      "expected_status": "supported",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=supported",
+        "expected document absent from results",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "evidence-selection",
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-27",
+      "query": "장외파생상품 청산에서 고객이 위탁증거금으로 예탁하는 외화의 종류와 평가가격은 거래소가 직접 정하나 일반청산회원이 정하나",
+      "expected_status": "supported",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=supported",
+        "expected document absent from results",
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "candidate-generation",
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-28",
+      "query": "For clients of a clearing member subject to measures, what minimum multipliers apply to the client net exposure margin and intraday client margin under the OTC clearing enforcement rules?",
+      "expected_status": "supported",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [
+        "expected automatic evidence absent from contexts"
+      ],
+      "failure_stages": [
+        "candidate-generation"
+      ]
+    },
+    {
+      "id": "reserved-negative-01",
+      "query": "한국거래소 정관에 항공기 좌석 배정 순서를 정하는 조항이 있나",
+      "expected_status": "insufficient",
+      "observed_status": "supported",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=supported want=insufficient"
+      ],
+      "failure_stages": [
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-negative-02",
+      "query": "신종증권시장 운영규정으로 국제 우편물 통관 수수료를 계산할 수 있나",
+      "expected_status": "insufficient",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-negative-03",
+      "query": "코스닥 상장적격성 실질심사 결과로 아파트 층간소음 허용치를 산정하나",
+      "expected_status": "insufficient",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-negative-04",
+      "query": "배출권 거래시장 회원 승계 신청서로 반려동물 등록번호를 증명하나",
+      "expected_status": "insufficient",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-negative-05",
+      "query": "유가증권시장 실질심사 지침이 토양의 산성도 측정 방법을 정하나",
+      "expected_status": "insufficient",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-negative-06",
+      "query": "KRX금시장 시스템 연결 지침으로 상수도 요금을 부과하는 산식을 알려줘",
+      "expected_status": "insufficient",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-negative-07",
+      "query": "전문평가제도 운영지침에서 체스 대회의 대진표 추첨 절차를 찾을 수 있나",
+      "expected_status": "insufficient",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-negative-08",
+      "query": "Can the OTC clearing rules determine the warranty period of a household refrigerator?",
+      "expected_status": "insufficient",
+      "observed_status": "supported",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=supported want=insufficient"
+      ],
+      "failure_stages": [
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-ambiguous-01",
+      "query": "장외청산에서 예탁 주체를 특정하지 않은 외화의 평가가격 산출 주체를 한 곳으로 확정해줘",
+      "expected_status": "ambiguous",
+      "observed_status": "supported",
+      "selected_evidence_matched": true,
+      "failures": [
+        "status=supported want=ambiguous"
+      ],
+      "failure_stages": [
+        "answerability"
+      ]
+    },
+    {
+      "id": "reserved-ambiguous-02",
+      "query": "어떤 보고서인지 구분하지 않고 거래소에 제출해야 하는 마감 날짜를 하나로 확정해줘",
+      "expected_status": "ambiguous",
+      "observed_status": "ambiguous",
+      "selected_evidence_matched": false,
+      "failures": [],
+      "failure_stages": []
+    },
+    {
+      "id": "reserved-ambiguous-03",
+      "query": "신종증권시장 매매계약체결방법 변경의 기준 비율을 시점이나 경우 구분 없이 하나의 수치로 답해줘",
+      "expected_status": "ambiguous",
+      "observed_status": "insufficient",
+      "selected_evidence_matched": false,
+      "failures": [
+        "status=insufficient want=ambiguous"
+      ],
+      "failure_stages": [
+        "answerability"
+      ]
+    }
+  ]
+}

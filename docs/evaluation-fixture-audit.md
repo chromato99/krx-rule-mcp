@@ -1,5 +1,7 @@
 # Evaluation fixture audit
 
+This records the label audit before the PDF reading-order rebuild. The 46 former holdout cases are now labelled `validation`; their question/target contracts are unchanged. Current generation identities and results are recorded in [rag-quality-results.md](rag-quality-results.md).
+
 ## Scope
 
 The 210-case `eval/golden/rag-v1.json` fixture was reviewed against corpus
@@ -113,9 +115,7 @@ formula/notice evidence. That decrease is an evaluation correction and must not
 be hidden by restoring the old labels.
 
 One English indexing defect was exposed rather than relabelled:
-`english-holdout-jcf-default-loss` correctly targets JCF Article 10, but the PDF
-places `CHAPTER 3` immediately after the Article 10 heading and the current
-structured chunker clears the article owner before the substantive paragraph.
+`english-holdout-jcf-default-loss` correctly targets JCF Article 10, but the former PDF extraction placed `CHAPTER 3` after the Article 10 heading. The source PDF has the correct chapter-first order. The extraction order has been repaired and the chapter-boundary behavior is regression tested.
 The raw article audit confirms that the fixture is correct; the missing search
 anchor remains a retrieval defect.
 
@@ -131,9 +131,10 @@ The same run exposed the missing Article 20 alternative on
 `attachment-margin-vars-variant`; the already-established fixture correction
 was applied consistently. Because a candidate was rejected and one fixture
 label was corrected after observing this set, these 46 cases are now a consumed
-validation set, not an untouched final test. Any next retrieval or
-answerability tuning must finish against regression/development data and then
-use a new document-disjoint holdout before merge.
+validation set, not an untouched final test. Any next retrieval tuning must finish against regression/development data
+before a new document-disjoint evaluation is used as generalization evidence.
+The current server delegates answer assessment to the calling LLM; see
+[the current quality contract](rag-quality-contract.md).
 
 ## Limits
 

@@ -11,7 +11,8 @@
   "policies": {
     "chunk_ids_in_expectations": false,
     "scores_are_confidence": false,
-    "manual_review_excluded_from_automatic_evidence_metrics": true
+    "manual_review_excluded_from_automatic_evidence_metrics": true,
+    "evaluation_use": "development"
   },
   "cases": [
     {
@@ -1937,7 +1938,7 @@
     {
       "id": "english-lei-variant",
       "group": "english-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "which LEI identifies a reporting counterparty",
         "language": "en",
@@ -1959,7 +1960,7 @@
     {
       "id": "attachment-duty-rate-variant",
       "group": "attachment-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "시장조성 기간의무이행률 의무충족일수 산식",
         "language": "ko",
@@ -1988,7 +1989,7 @@
     {
       "id": "attachment-latex-variant",
       "group": "attachment-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "시장조성일수 대비 의무충족일수 LaTeX 분수",
         "language": "ko",
@@ -2017,7 +2018,7 @@
     {
       "id": "attachment-score-variant",
       "group": "attachment-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "거래실적 상품별 평가점수 최소 10 기준",
         "language": "ko",
@@ -2046,7 +2047,7 @@
     {
       "id": "attachment-margin-vars-variant",
       "group": "attachment-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "상품군 가격상관율과 상대적규모비율로 증거금 감면액 계산",
         "language": "ko",
@@ -2084,7 +2085,7 @@
     {
       "id": "attachment-quote-duty-variant",
       "group": "attachment-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "의무호가 발생시간과 일중 이행률 계산",
         "language": "ko",
@@ -2124,7 +2125,7 @@
     {
       "id": "notice-dual-listing-variant",
       "group": "filter-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "우회 중복상장과 위약금 관련 개정예고",
         "language": "ko",
@@ -2169,7 +2170,7 @@
     {
       "id": "notice-short-selling-variant",
       "group": "filter-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "업틱룰 예외 차입공매도 제도 개정예고",
         "language": "ko",
@@ -2196,7 +2197,7 @@
     {
       "id": "filter-rule-listing-variant",
       "group": "filter-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "규정 중 상장신청 사전협의 조항",
         "language": "ko",
@@ -2218,7 +2219,7 @@
     {
       "id": "filter-category-limit-variant",
       "group": "filter-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "파생상품시장 규정의 가격제한폭",
         "language": "ko",
@@ -2243,7 +2244,7 @@
     {
       "id": "fact-nav-threshold-variant",
       "group": "fact-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "국내기초자산 ETF는 NAV 대비 3%, 해외기초자산 ETF는 6% 괴리 시 어떤 LP 호가를 내나",
         "language": "ko",
@@ -2271,7 +2272,7 @@
     {
       "id": "fact-intraday-1400-variant",
       "group": "fact-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "일중청산위탁증거금 예탁 마감은 오후 두 시인가",
         "language": "ko",
@@ -2299,7 +2300,7 @@
     {
       "id": "fact-listing-scope-variant",
       "group": "fact-variant",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "상장 전에 절차·시기와 우회상장 여부까지 협의하는가",
         "language": "ko",
@@ -2676,7 +2677,7 @@
     {
       "id": "hard-fictional-margin-time",
       "group": "hard-negative",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "위탁증거금은 화성력 37분 안에 예탁해야 한다는 규정",
         "language": "ko",
@@ -2693,7 +2694,7 @@
     {
       "id": "hard-wrong-subject",
       "group": "hard-negative",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "거래소 직원이 고객 위탁증거금을 개인 투자에 사용할 의무",
         "language": "ko",
@@ -2710,7 +2711,7 @@
     {
       "id": "hard-composite-patent",
       "group": "hard-negative",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "상장 사전협의와 특허청 발명 심사를 동시에 신청해야 하나",
         "language": "ko",
@@ -2727,7 +2728,7 @@
     {
       "id": "hard-short-sale-penalty",
       "group": "hard-negative",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "공매도 업틱룰 위반 시 징역 99년이라는 KRX 조항",
         "language": "ko",
@@ -2744,7 +2745,7 @@
     {
       "id": "hard-nav-threshold",
       "group": "hard-negative",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "ETF NAV 괴리율이 73퍼센트면 자동 상장폐지되는가",
         "language": "ko",
@@ -2761,7 +2762,7 @@
     {
       "id": "hard-uti-resident-id",
       "group": "hard-negative",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "UTI 대신 주민등록번호를 보고대상거래에 포함해야 하는가",
         "language": "ko",
@@ -2791,7 +2792,7 @@
     {
       "id": "hard-clearing-mars-time",
       "group": "hard-negative",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "청산회원은 화성시간 오후 2시까지 달러를 채굴해야 하는가",
         "language": "ko",
@@ -2880,7 +2881,7 @@
     {
       "id": "ambiguous-suspension",
       "group": "ambiguous",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "거래정지",
         "language": "ko",
@@ -2898,7 +2899,7 @@
     {
       "id": "ambiguous-delisting",
       "group": "ambiguous",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "상장폐지",
         "language": "ko",
@@ -2916,7 +2917,7 @@
     {
       "id": "ambiguous-member",
       "group": "ambiguous",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "회원",
         "language": "ko",
@@ -4556,7 +4557,7 @@
     {
       "id": "filter-excludes-effective-date",
       "group": "filter-boundary",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "실시간 가격제한의 가격변동폭 별표 25",
         "language": "ko",
@@ -4575,7 +4576,7 @@
     {
       "id": "audit-e-esg-registration-decision",
       "group": "final-holdout-e-semantic",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "ESG 채권 정보플랫폼 등록 신청을 받으면 거래소는 언제 등록 여부를 정하나",
         "language": "ko",
@@ -4603,7 +4604,7 @@
     {
       "id": "audit-e-esg-registration-cancel",
       "group": "final-holdout-e-semantic",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "ESG 정보플랫폼에 올린 채권의 등록을 거래소가 취소하는 근거",
         "language": "ko",
@@ -4625,7 +4626,7 @@
     {
       "id": "audit-e-gold-trading-hours",
       "group": "final-holdout-e-fact",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "KRX 금 현물시장의 정규 매매시간은 몇 시부터 몇 시 반까지인가",
         "language": "ko",
@@ -4653,7 +4654,7 @@
     {
       "id": "audit-e-gold-redeposit",
       "group": "final-holdout-e-false-premise",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "금시장에서 반환받거나 인출한 금을 보관기관에 다시 맡길 수 있나",
         "language": "ko",
@@ -4685,7 +4686,7 @@
     {
       "id": "audit-e-emission-account-before-order",
       "group": "final-holdout-e-semantic",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "배출권 주문을 받기 전에 고객 전용계좌 계약을 맺고 계좌번호를 줘야 하나",
         "language": "ko",
@@ -4707,7 +4708,7 @@
     {
       "id": "audit-e-emission-customer-notice",
       "group": "final-holdout-e-semantic",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "배출권 주문이 체결되면 위탁자에게 거래 내용을 언제 알려야 하나",
         "language": "ko",
@@ -4735,7 +4736,7 @@
     {
       "id": "audit-e-dispute-acceptance-period",
       "group": "final-holdout-e-fact",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "분쟁조정 결정 통지를 받은 뒤 양쪽이 며칠 안에 받아들여야 조정이 성립하나",
         "language": "ko",
@@ -4763,7 +4764,7 @@
     {
       "id": "audit-e-dispute-record-retention",
       "group": "final-holdout-e-fact",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "거래소 분쟁조정 사건 기록은 접수일부터 몇 년 동안 보관하나",
         "language": "ko",
@@ -4791,7 +4792,7 @@
     {
       "id": "audit-e-gold-hospital-hours",
       "group": "final-holdout-e-hard-negative",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "KRX 금시장 매매시간으로 병원 진료시간을 정하는 규정",
         "language": "ko",
@@ -4808,7 +4809,7 @@
     {
       "id": "audit-e-esg-credit-score",
       "group": "final-holdout-e-hard-negative",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "ESG채권 정보플랫폼 등록자료로 개인 신용점수를 산정할 수 있나",
         "language": "ko",
@@ -4825,7 +4826,7 @@
     {
       "id": "audit-e-emission-car-registration",
       "group": "final-holdout-e-hard-negative",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "배출권전용계좌 번호로 자동차 소유권을 등록할 수 있나",
         "language": "ko",
@@ -4842,7 +4843,7 @@
     {
       "id": "audit-e-registration-cancel-ambiguous",
       "group": "final-holdout-e-ambiguous",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "등록취소",
         "language": "ko",
@@ -4860,7 +4861,7 @@
     {
       "id": "english-holdout-dispute-records",
       "group": "english-holdout-new",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "For how many years must KRX keep dispute mediation records?",
         "language": "en",
@@ -4888,7 +4889,7 @@
     {
       "id": "english-holdout-jcf-default-loss",
       "group": "english-holdout-new",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "When may the joint compensation fund be used after a member defaults on settlement?",
         "language": "en",
@@ -4916,7 +4917,7 @@
     {
       "id": "english-holdout-konex-short-sale",
       "group": "english-holdout-new",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "May a KONEX member place a quotation entrusted as an uncovered short sale?",
         "language": "en",
@@ -4944,7 +4945,7 @@
     {
       "id": "english-holdout-kosdaq-lp-deadline",
       "group": "english-holdout-new",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "How quickly must a KOSDAQ liquidity provider quote after the spread exceeds its limit?",
         "language": "en",
@@ -4972,7 +4973,7 @@
     {
       "id": "english-holdout-kospi-disclosure-leak",
       "group": "english-holdout-new",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "Must a KOSPI listed corporation prevent corporate information from leaking before disclosure?",
         "language": "en",
@@ -5000,7 +5001,7 @@
     {
       "id": "english-holdout-oversight-abnormal-trading",
       "group": "english-holdout-new",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "When must a member report suspected abnormal trading to the Market Oversight Commission?",
         "language": "en",
@@ -5028,7 +5029,7 @@
     {
       "id": "english-holdout-membership-financial-report",
       "group": "english-holdout-new",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "Within how many trading days must a member report possible failure to meet financial requirements?",
         "language": "en",
@@ -5056,7 +5057,7 @@
     {
       "id": "english-holdout-classx-price-limit",
       "group": "english-holdout-new",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "What multiplier sets the price change limit for class X beneficiary certificates?",
         "language": "en",
@@ -5084,7 +5085,7 @@
     {
       "id": "english-holdout-clearing-margin-use",
       "group": "english-holdout-new",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "Can a designated clearing member use non-clearing member margin for another member?",
         "language": "en",
@@ -5112,7 +5113,7 @@
     {
       "id": "english-holdout-kosdaq-listing-objection",
       "group": "english-holdout-new",
-      "split": "holdout",
+      "split": "validation",
       "input": {
         "query": "How many business days does the KOSDAQ Market Committee have to convene after objection documents are submitted?",
         "language": "en",

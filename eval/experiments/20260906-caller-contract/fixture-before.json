@@ -1,0 +1,1012 @@
+{
+  "schema_version": 1,
+  "fixture_version": "rag-v2-scope-reserved-20260906",
+  "name": "Final paired scope-source holdout",
+  "source": {
+    "url": "urn:krx-rule-mcp:scope-holdout:2026-09-06",
+    "sha256": "157715e717b5c041a1ff0efdc625268544f4ae675910fb21d76d511701b2a145",
+    "evaluation_date": "2026-09-06",
+    "original_cases": 38
+  },
+  "policies": {
+    "evaluation_use": "sealed-holdout",
+    "chunk_ids_in_expectations": false,
+    "scores_are_confidence": false,
+    "manual_review_excluded_from_automatic_evidence_metrics": true
+  },
+  "cases": [
+    {
+      "id": "scope-01",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "분쟁조정규정시행세칙에 따르면 사건 처리 중 회원 임직원의 위법·위규행위가 확인되었을 때 누가 누구에게 알릴 수 있나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204844636",
+            "article_id": "제21조",
+            "evidence": {
+              "must_contain_all": [
+                "위원장은",
+                "회원의 임원·직원의 위법·위규행위",
+                "피신청인에게 통지할 수 있다"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-02",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "일반 분쟁조정에서 긴급한 사정 때문에 예정된 기일을 바꾸려면 동의와 변경 시한은 어떻게 되나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204844636",
+            "article_id": "제15조",
+            "evidence": {
+              "must_contain_all": [
+                "당사자의 동의를 얻어",
+                "조정기일의 1일전까지"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-03",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "Under the dispute mediation enforcement rules, which annex forms are used for a mediation decision notice, a dismissal notice, and acceptance of the mediation decision?",
+        "language": "en",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204844636-en",
+            "article_id": "§17",
+            "evidence": {
+              "must_contain_all": [
+                "mediation decision notice",
+                "dismissal decision notice",
+                "letter of acceptance",
+                "Form 7, Form 8 and Form 9"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-04",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "주식양도 승인기준에서 정하지 않은 주식 양도승인 관련 사항은 누가 정하나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204846917",
+            "article_id": "제8조",
+            "evidence": {
+              "must_contain_all": [
+                "이 기준에 정하지 않은 사항",
+                "거래소가 정한다"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-05",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "거래소 주주의 주식 양도승인 기준은 거래소 주식이 이미 상장된 뒤의 양도에도 똑같이 적용하는 기준인가?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "contradicts",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204846917",
+            "article_id": "제1조",
+            "evidence": {
+              "must_contain_all": [
+                "거래소 주식의 상장 전에",
+                "보유주식을 양도하고자 하는 경우"
+              ],
+              "relation_must_contain_any": [
+                "거래소 주식의 상장 전에"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-06",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "KRX석유시장 운영규정에서 거래보증금의 원칙적인 예탁 시점과 수단, 일반 호가와 협의상대거래의 금액 기준은 무엇인가?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847392",
+            "article_id": "제33조",
+            "evidence": {
+              "must_contain_all": [
+                "호가를 제출할 때마다 또는 미리",
+                "호가수량단위당 40만원",
+                "협의상대거래의 경우에는 2천리터당 20만원",
+                "현금으로 예탁하여야 한다"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-07",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "석유시장에서는 상한가보다 높게 주문할 수 없더라도 하한가보다 낮은 가격의 호가는 허용되나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "contradicts",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847392",
+            "article_id": "제38조",
+            "evidence": {
+              "must_contain_all": [
+                "상한가",
+                "하한가",
+                "낮은 가격으로 하여서는 아니 된다"
+              ],
+              "relation_must_contain_any": [
+                "낮은 가격으로 하여서는 아니 된다"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-08",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "According to the English petroleum market operating rules, what kind of authentication certificate must a participant obtain, and how is it registered?",
+        "language": "en",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847392-en",
+            "article_id": "§17",
+            "evidence": {
+              "must_contain_all": [
+                "general certificate of individual or corporation",
+                "used for all e-trading",
+                "public certification institute",
+                "register the certificate with the Exchange",
+                "terminal device"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-09",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "석유제품현물전자상거래용 수입석유제품의 할당관세 세부추천요령은 피추천자의 업무 확인을 위해 이사장에게 어떤 자료 요구와 현장 검사 권한을 주나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847401",
+            "article_id": "제15조",
+            "evidence": {
+              "must_contain_all": [
+                "관련 자료제출을 요구",
+                "사무실·사업장",
+                "출입하여",
+                "장부·서류 또는 기타 물건을 검사"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-10",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "수입석유 할당관세 추천서의 유효기간은 어떻게 계산하고, 마지막 날이 휴일이거나 기간 연장을 신청할 때는 어떤 제한이 있나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847401",
+            "article_id": "제10조",
+            "evidence": {
+              "must_contain_all": [
+                "교부일로부터 20일",
+                "그 다음 첫 근무일",
+                "만료 전에 한국거래소 이사장에게 제출",
+                "할당관세 적용기간 만료일을 경과할 수 없다"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-11",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "For an imported petroleum quota-tariff recommendation, when does validity expire if its last day is a holiday, and what outer limit applies even after an extension?",
+        "language": "en",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847401-en",
+            "article_id": "§10",
+            "evidence": {
+              "must_contain_all": [
+                "first business day after the concerned holiday",
+                "including the expiry date of extended validity",
+                "shall not be later than the last day of quota tariff application"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-12",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "KRX금시장 시장감시 및 분쟁조정 규정상 조정신청을 취하하려면 반드시 서면 취하서를 내야 하나? 취하되면 사건과 상대방 통지는 어떻게 처리하나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "contradicts",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847714",
+            "article_id": "제38조",
+            "evidence": {
+              "must_contain_all": [
+                "제출이나 구술에 의한 방법",
+                "사건을 종결처리",
+                "피신청인에게 통지하여야 한다"
+              ],
+              "relation_must_contain_any": [
+                "제출이나 구술에 의한 방법"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-13",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "금시장 분쟁조정 신청이 접수되면 피신청인에게 무엇을 알리고, 그 사람의 의견서가 들어오면 신청인에게도 알려야 하나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847714",
+            "article_id": "제35조",
+            "evidence": {
+              "must_contain_all": [
+                "조정신청의 내용을 피신청인에게 통지",
+                "의견서와 관련 자료를 제출",
+                "그 내용을 신청인에게 통지"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-14",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "장외파생공동기금 적립에 따른 규제자본변수 산출 등에 관한 기준은 누구의 규제자본 산출을 돕기 위해 거래소가 무엇을 제공하도록 정한 것인가?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847787",
+            "article_id": "제1조",
+            "evidence": {
+              "must_contain_all": [
+                "청산회원인 은행",
+                "공동기금",
+                "익스포져에 대한 규제자본",
+                "중앙청산소인 한국거래소",
+                "산출·제공"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-15",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "장외파생 공동기금 규제자본변수는 어느 날을 기준으로 계산해 언제까지 청산회원에게 보내나? 감독당국이 요구하면 주기나 기준일도 달라질 수 있나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847787",
+            "article_id": "제2조",
+            "evidence": {
+              "must_contain_all": [
+                "매월 마지막 영업일",
+                "금융감독원이 요구하는 경우",
+                "산출주기 또는 기준일을 변경",
+                "7영업일 이내",
+                "청산회원에 제공"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-16",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "배출권 거래시장 시장감시 및 분쟁조정 규정에 따라 조정위원회는 사실조사나 자료 수집을 할 수 있나? 전문가 자문은 어떤 경우에 받을 수 있나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847819",
+            "article_id": "제41조",
+            "evidence": {
+              "must_contain_all": [
+                "사실조사 또는 관련 자료의 수집",
+                "전문적이고 기술적인 사항",
+                "전문가 등의 자문"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-17",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "배출권 분쟁조정은 공개가 원칙이며 관계자가 진행경과나 결과를 외부에 알려도 되나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "contradicts",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847819",
+            "article_id": "제49조",
+            "evidence": {
+              "must_contain_all": [
+                "비공개를 원칙",
+                "위원회 위원, 심의위원회 위원",
+                "조정의 내용, 진행경과 및 결과를 누설하여서는 아니 된다"
+              ],
+              "relation_must_contain_any": [
+                "누설하여서는 아니 된다"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-18",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "KRX금시장 참가계약서의 거래소 분쟁조정 신청 범위에 금지금 품질을 둘러싼 분쟁도 포함되나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "contradicts",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847987",
+            "article_id": "제12조",
+            "evidence": {
+              "must_contain_all": [
+                "위탁자, 다른 회원 또는 보관기관",
+                "금지금의 품질과 관련하여 발생한 분쟁은 제외한다"
+              ],
+              "relation_must_contain_any": [
+                "분쟁은 제외한다"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-19",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "금시장 회원은 고객 주문을 맡을 때 어떤 주의의무를 지며, 나중에 개정되는 규정과 세칙도 준수해야 하나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "204847987",
+            "article_id": "제9조",
+            "evidence": {
+              "must_contain_all": [
+                "향후 제·개정되는",
+                "성실하게 준수하여야 한다",
+                "선량한 관리자로서의 주의의무",
+                "투자자 보호"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-20",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "유가증권시장 불성실공시 신고 및 포상에 관한 기준에 없는 사항은 누가 정하는 바에 따르나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "210069181",
+            "article_id": "제8조",
+            "evidence": {
+              "must_contain_all": [
+                "이 기준에서 정하지 않은 사항",
+                "공시업무 담당부서의 장"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-21",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "유가증권시장 회사의 공시의무 위반을 신고하려면 어떤 신고서를 작성하고 어떤 전달 방법을 사용할 수 있나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "210069181",
+            "article_id": "제2조",
+            "evidence": {
+              "must_contain_all": [
+                "별지 제1호 서식",
+                "우편, 인편, 모사전송 또는 전자문서"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-22",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "코스닥시장 글로벌 기업의 지정 등에 관한 지침에서 신규상장신청인의 심사 기준일, 지정 통보 시점, 실제 지정일은 각각 언제인가?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "210102217",
+            "article_id": "제6조",
+            "evidence": {
+              "must_contain_all": [
+                "상장예비심사를 신청한 날",
+                "상장예비심사 승인을 통지하는 날",
+                "지정일은 해당 신청인의 신규상장일"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-23",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "코스닥 글로벌 기업은 재무실적이나 기술력만 인정되면 기업지배구조와 관계없이 지정할 수 있나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "contradicts",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "210102217",
+            "article_id": "제3조",
+            "evidence": {
+              "must_contain_all": [
+                "재무실적이나 기술력이 인정되고 기업지배구조가 우수한"
+              ],
+              "relation_must_contain_any": [
+                "기업지배구조가 우수한"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-24",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "코넥스시장 상장규정 시행세칙에서 별도 예외가 없는 기간은 초일을 포함하나? 일 단위와 주·월·연 단위의 계산 기준은 어떻게 다른가?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "210222787",
+            "article_id": "제29조",
+            "evidence": {
+              "must_contain_all": [
+                "기간의 초일은 산입하지 아니한다",
+                "기간을 일로 정할 때는 영업일",
+                "토요일",
+                "공휴일",
+                "근로자의 날을 제외",
+                "기간을 주, 월 또는 연으로 계산할 때는 역"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-25",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "코넥스 상장규정에서 요구하는 기술평가등급의 최소 수준은 무엇이고 그 등급은 어떤 평가를 통해 산정하나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "210222787",
+            "article_id": "제2조",
+            "evidence": {
+              "must_contain_all": [
+                "BB 이상",
+                "거래소가 따로 정하는 바",
+                "기술성 등의 우열 여부"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-26",
+      "group": "reserved-explicit",
+      "split": "holdout",
+      "input": {
+        "query": "코넥스시장 공시규정상 상장법인의 사업보고서는 어디에 언제까지 제출해야 하나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "210223621",
+            "article_id": "제11조",
+            "evidence": {
+              "must_contain_all": [
+                "법정제출기한내에 거래소에 제출"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-27",
+      "group": "reserved-paraphrase",
+      "split": "holdout",
+      "input": {
+        "query": "코넥스에서 전자문서 방식으로 제출하는 신고서와 공시서류는 어떤 범위까지 포함되나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "supported",
+        "claim_relation": "supports",
+        "target_policy": "any",
+        "targets": [
+          {
+            "document_id": "210223621",
+            "article_id": "제28조",
+            "evidence": {
+              "must_contain_all": [
+                "코넥스시장 상장규정 및 코넥스시장 업무규정",
+                "제43조에 따른 공시서류",
+                "전자문서의 방법으로 제출할 필요가 있다고 거래소가 인정"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope-negative-01",
+      "group": "reserved-unsupported",
+      "split": "holdout",
+      "input": {
+        "query": "분쟁조정규정시행세칙에서 해외대학 입학 지원자의 어학시험 합격 점수를 정해주나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": []
+      }
+    },
+    {
+      "id": "scope-negative-02",
+      "group": "reserved-unsupported",
+      "split": "holdout",
+      "input": {
+        "query": "거래소 주식양도 승인기준에 따라 반려묘의 예방접종 일정을 계산할 수 있나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": []
+      }
+    },
+    {
+      "id": "scope-negative-03",
+      "group": "reserved-unsupported",
+      "split": "holdout",
+      "input": {
+        "query": "KRX석유시장 운영규정의 거래보증금을 예탁하면 개인의 여권 발급도 함께 승인되나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": []
+      }
+    },
+    {
+      "id": "scope-negative-04",
+      "group": "reserved-unsupported",
+      "split": "holdout",
+      "input": {
+        "query": "수입석유 할당관세 추천요령에는 태양광 패널의 발전효율 시험 방법도 나와 있나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": []
+      }
+    },
+    {
+      "id": "scope-negative-05",
+      "group": "reserved-unsupported",
+      "split": "holdout",
+      "input": {
+        "query": "KRX금시장 참가계약서는 웨딩홀 예약 취소 수수료의 상한을 정하나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": []
+      }
+    },
+    {
+      "id": "scope-negative-06",
+      "group": "reserved-unsupported",
+      "split": "holdout",
+      "input": {
+        "query": "장외파생 공동기금의 규제자본변수로 아동의 하루 권장 영양소 섭취량을 산출할 수 있나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": []
+      }
+    },
+    {
+      "id": "scope-negative-07",
+      "group": "reserved-unsupported",
+      "split": "holdout",
+      "input": {
+        "query": "코넥스시장 공시규정에서 개인 아파트 임대차계약의 확정일자 신청 절차를 찾아줘.",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": []
+      }
+    },
+    {
+      "id": "scope-negative-08",
+      "group": "reserved-unsupported",
+      "split": "holdout",
+      "input": {
+        "query": "Do the petroleum quota-tariff recommendation guidelines define the orbital period of a communications satellite?",
+        "language": "en",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
+        "target_policy": "any",
+        "targets": []
+      }
+    },
+    {
+      "id": "scope-ambiguous-01",
+      "group": "reserved-ambiguous",
+      "split": "holdout",
+      "input": {
+        "query": "석유시장에서 거래하려는데 예탁할 거래보증금 금액을 정해줘.",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "ambiguous",
+        "claim_relation": "not_applicable",
+        "target_policy": "all",
+        "targets": [
+          {
+            "document_id": "204847392",
+            "article_id": "제33조",
+            "evidence": {
+              "must_contain_all": [
+                "호가수량단위당 40만원",
+                "협의상대거래의 경우에는 2천리터당 20만원"
+              ]
+            }
+          }
+        ],
+        "clarification_required": true
+      }
+    },
+    {
+      "id": "scope-ambiguous-02",
+      "group": "reserved-ambiguous",
+      "split": "holdout",
+      "input": {
+        "query": "수입석유 할당관세 추천서가 있는데 이 추천서의 정확한 만료 날짜를 알려줘.",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "ambiguous",
+        "claim_relation": "not_applicable",
+        "target_policy": "all",
+        "targets": [
+          {
+            "document_id": "204847401",
+            "article_id": "제10조",
+            "evidence": {
+              "must_contain_all": [
+                "교부일로부터 20일",
+                "공휴일",
+                "그 다음 첫 근무일"
+              ]
+            }
+          }
+        ],
+        "clarification_required": true
+      }
+    },
+    {
+      "id": "scope-ambiguous-03",
+      "group": "reserved-ambiguous",
+      "split": "holdout",
+      "input": {
+        "query": "코넥스 상장 관련 기간의 만료일을 계산해야 하는데 토요일과 공휴일도 기간에 포함해서 세면 되나?",
+        "language": "ko",
+        "document_type": "rule"
+      },
+      "expectation": {
+        "evidence_status": "ambiguous",
+        "claim_relation": "not_applicable",
+        "target_policy": "all",
+        "targets": [
+          {
+            "document_id": "210222787",
+            "article_id": "제29조",
+            "evidence": {
+              "must_contain_all": [
+                "기간을 일로 정할 때는 영업일",
+                "토요일",
+                "공휴일",
+                "기간을 주, 월 또는 연으로 계산할 때는 역"
+              ]
+            }
+          }
+        ],
+        "clarification_required": true
+      }
+    }
+  ]
+}

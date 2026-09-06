@@ -18,7 +18,7 @@ import (
 
 const (
 	indexSnapshotFormatVersion  uint16 = 6
-	IndexerVersion                     = "tokenizer-ko-2gram-3gram-script-html-alias-structured-anchor-v2-en-section-evidence-only-chunk1600-md-html-table-row-equation-pair-bm25-k1-1.4-b-0.75-chunk-rrf-v1"
+	IndexerVersion                     = "tokenizer-ko-2gram-3gram-script-html-alias-structured-anchor-v2-en-section-bounded-headings-evidence-only-chunk1600-md-html-table-row-equation-pair-bm25-k1-1.4-b-0.75-chunk-rrf-v1"
 	indexerVersion                     = IndexerVersion
 	vectorSnapshotFormatVersion uint16 = VectorSnapshotFormatVersion
 	VectorSnapshotFormatVersion uint16 = 3

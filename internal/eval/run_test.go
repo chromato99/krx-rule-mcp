@@ -17,14 +17,11 @@ func (fixtureClient) SearchRules(_ context.Context, input mcpserver.SearchRulesI
 	switch input.Query {
 	case "supported query":
 		return mcpserver.SearchRulesOutput{
-			Answerable: true,
-			Answerability: searchindex.AnswerabilityDecision{
-				Status:           searchindex.AnswerabilitySupported,
-				EvidenceChunkIDs: []string{"rule-1#0"},
-			},
-			Mode: "bm25",
+			ContractVersion: mcpserver.SearchContractVersion,
+			Retrieval:       mcpserver.RetrievalInfo{Status: mcpserver.RetrievalCandidatesFound, ReturnedResults: 1},
+			Mode:            "bm25",
 			Candidates: []searchindex.ChunkCandidate{{
-				ChunkID: "rule-1#0", DocumentID: "rule-1", ArticleID: "제1조", Text: "제1조 직접 근거",
+				ChunkID: "rule-1#0", DocumentID: "rule-1", Source: "body", ArticleID: "제1조", Text: "제1조 직접 근거",
 				BM25Rank: 2, VectorRank: 4, BaselineRank: 3, FinalRank: 1, RerankerRank: 1, Reranked: true,
 			}},
 			RerankerCandidateCount: 1,
@@ -40,13 +37,15 @@ func (fixtureClient) SearchRules(_ context.Context, input mcpserver.SearchRulesI
 		}, nil
 	case "insufficient query":
 		return mcpserver.SearchRulesOutput{
-			Answerability: searchindex.AnswerabilityDecision{Status: searchindex.AnswerabilityInsufficient},
-			Mode:          "bm25", Results: []mcpserver.SearchResultDTO{},
+			ContractVersion: mcpserver.SearchContractVersion,
+			Retrieval:       mcpserver.RetrievalInfo{Status: mcpserver.RetrievalNoCandidates},
+			Mode:            "bm25", Results: []mcpserver.SearchResultDTO{},
 		}, nil
 	default:
 		return mcpserver.SearchRulesOutput{
-			Answerability: searchindex.AnswerabilityDecision{Status: searchindex.AnswerabilityAmbiguous, Clarification: "대상을 지정하세요."},
-			Mode:          "bm25", Results: []mcpserver.SearchResultDTO{},
+			ContractVersion: mcpserver.SearchContractVersion,
+			Retrieval:       mcpserver.RetrievalInfo{Status: mcpserver.RetrievalNoCandidates},
+			Mode:            "bm25", Results: []mcpserver.SearchResultDTO{},
 		}, nil
 	}
 }
@@ -61,12 +60,9 @@ func (fixtureClient) GetContext(_ context.Context, input mcpserver.GetContextInp
 
 func (multiTargetClient) SearchRules(_ context.Context, _ mcpserver.SearchRulesInput) (mcpserver.SearchRulesOutput, error) {
 	return mcpserver.SearchRulesOutput{
-		Answerable: true,
-		Answerability: searchindex.AnswerabilityDecision{
-			Status:           searchindex.AnswerabilitySupported,
-			EvidenceChunkIDs: []string{"rule-1#0", "rule-2#0"},
-		},
-		Mode: "bm25",
+		ContractVersion: mcpserver.SearchContractVersion,
+		Retrieval:       mcpserver.RetrievalInfo{Status: mcpserver.RetrievalCandidatesFound, ReturnedResults: 2},
+		Mode:            "bm25",
 		Results: []mcpserver.SearchResultDTO{
 			{ID: "rule-1", EvidenceMatches: []mcpserver.EvidenceMatchDTO{{ChunkID: "rule-1#0", Source: "body", ArticleID: "제1조"}}},
 			{ID: "rule-2", EvidenceMatches: []mcpserver.EvidenceMatchDTO{{ChunkID: "rule-2#0", Source: "body", ArticleID: "제2조"}}},
@@ -79,13 +75,13 @@ func (multiTargetClient) GetContext(_ context.Context, input mcpserver.GetContex
 	case "rule-1#0":
 		return mcpserver.ContextOutput{
 			Document: mcpserver.DocumentDTO{ID: "rule-1"},
-			Chunks:   []mcpserver.ChunkDTO{{ID: input.ChunkID, DocumentID: "rule-1", ArticleID: "제1조", Text: "첫 번째 직접 근거"}},
+			Chunks:   []mcpserver.ChunkDTO{{ID: input.ChunkID, DocumentID: "rule-1", Source: "body", ArticleID: "제1조", Text: "첫 번째 직접 근거"}},
 			Content:  "첫 번째 직접 근거",
 		}, nil
 	case "rule-2#0":
 		return mcpserver.ContextOutput{
 			Document: mcpserver.DocumentDTO{ID: "rule-2"},
-			Chunks:   []mcpserver.ChunkDTO{{ID: input.ChunkID, DocumentID: "rule-2", ArticleID: "제2조", Text: "두 번째 직접 근거"}},
+			Chunks:   []mcpserver.ChunkDTO{{ID: input.ChunkID, DocumentID: "rule-2", Source: "body", ArticleID: "제2조", Text: "두 번째 직접 근거"}},
 			Content:  "두 번째 직접 근거",
 		}, nil
 	default:
@@ -93,7 +89,7 @@ func (multiTargetClient) GetContext(_ context.Context, input mcpserver.GetContex
 	}
 }
 
-func TestRunScoresRetrievalEvidenceRefusalAndClarification(t *testing.T) {
+func TestRunScoresRetrievalWithoutClaimingCallerAnswerQuality(t *testing.T) {
 	fixture := Fixture{
 		SchemaVersion:  1,
 		FixtureVersion: "rag-vtest",
@@ -143,8 +139,8 @@ func TestRunScoresRetrievalEvidenceRefusalAndClarification(t *testing.T) {
 	if report.Summary.CandidateEvidenceRecall64Rate != 1 || report.Summary.RerankerPoolHitRate != 1 || report.Summary.P95RerankerLatencyMillis != 5 || report.Summary.RerankerAttempted != 1 || report.Summary.RerankerAdopted != 1 {
 		t.Fatalf("candidate/reranker metrics = %#v", report.Summary)
 	}
-	if report.Summary.InsufficientRefusalRate != 1 || report.Summary.AmbiguousClarificationRate != 1 {
-		t.Fatalf("answerability metrics = %#v", report.Summary)
+	if report.Summary.EvidenceBundleHitAt5Rate != 1 || report.Summary.RetrievalContractFailures != 0 {
+		t.Fatalf("retrieval metrics = %#v", report.Summary)
 	}
 	if report.Summary.ContextConsistencyRate != 1 || report.Summary.AutomaticPassed != 120 {
 		t.Fatalf("contract metrics = %#v", report.Summary)
@@ -161,6 +157,21 @@ func TestRunScoresRetrievalEvidenceRefusalAndClarification(t *testing.T) {
 	subset, err := RunCasePrefix(context.Background(), fixture, "supported", fixtureClient{}, Provenance{})
 	if err != nil || subset.Summary.Cases != 1 || subset.Cases[0].ID != "supported" {
 		t.Fatalf("case-prefix report = %#v error=%v", subset, err)
+	}
+}
+
+func TestValidationCasesAppearInEverySummary(t *testing.T) {
+	item := Case{ID: "validation", Group: "semantic", Split: "validation", Input: CaseInput{Query: "supported query", Language: "ko"},
+		Expectation: Expectation{EvidenceStatus: "supported", ClaimRelation: "supports", TargetPolicy: "any", Targets: []Target{{DocumentID: "rule-1", ArticleID: "제1조", Evidence: &EvidenceExpectation{MustContainAll: []string{"직접", "근거"}}}}}}
+	fixture := Fixture{SchemaVersion: 1, FixtureVersion: "rag-vtest", Source: FixtureSource{SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, Cases: []Case{item}}
+	report, err := Run(context.Background(), fixture, fixtureClient{}, Provenance{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, summary := range []Summary{report.Summary, report.SplitSummaries["validation"], report.LanguageSummaries["ko"], report.LanguageSplitSummaries["ko"]["validation"]} {
+		if summary.Cases != 1 || summary.EvidenceEligible != 1 || summary.EvidenceBundleHitAt5 != 1 {
+			t.Fatalf("validation evidence disappeared from a summary: %#v", summary)
+		}
 	}
 }
 
@@ -371,20 +382,20 @@ func TestCandidateTraceAndFailureStagesExposeRetrievalLayer(t *testing.T) {
 
 	item := Case{Expectation: expectation}
 	stages := classifyFailureStages(item, CaseResult{
-		StatusCorrect: true, DocumentRank: 1, EvidenceEligible: true,
-		CandidateFusedRank: 2, EvidenceRank: 0,
+		RetrievalContractValid: true, ReturnedEvidenceValid: true, EvidenceBundleAt5Matched: true, DocumentRank: 1, EvidenceEligible: true,
+		CandidateFusedRank: 2, CandidateOwnerRank: 2, CandidateBundleMatched: true, EvidenceRank: 0,
 	})
 	if len(stages) != 1 || stages[0] != "evidence-selection" {
 		t.Fatalf("evidence-selection stages = %#v", stages)
 	}
 	stages = classifyFailureStages(item, CaseResult{
-		StatusCorrect: false, EvidenceEligible: true, CandidateFusedRank: 0,
+		RetrievalContractValid: true, ReturnedEvidenceValid: true, EvidenceEligible: true, CandidateFusedRank: 0,
 	})
-	if len(stages) != 2 || stages[0] != "candidate-generation" || stages[1] != "answerability" {
-		t.Fatalf("candidate/answerability stages = %#v", stages)
+	if len(stages) != 3 || stages[0] != "document-ranking" || stages[1] != "candidate-generation" || stages[2] != "returned-evidence" {
+		t.Fatalf("candidate/returned-evidence stages = %#v", stages)
 	}
 	stages = classifyFailureStages(item, CaseResult{
-		ObservedStatus: "supported", StatusCorrect: true, DocumentRank: 6,
+		RetrievalContractValid: true, ReturnedEvidenceValid: true, EvidenceBundleAt5Matched: true, DocumentRank: 6,
 	})
 	if len(stages) != 1 || stages[0] != "document-ranking" {
 		t.Fatalf("document-ranking stages = %#v", stages)

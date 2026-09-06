@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	mcpserver "github.com/chromato99/krx-rule-mcp/internal/mcp"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -68,12 +69,36 @@ func TestHTTPMCPManualSmoke(t *testing.T) {
 			t.Fatalf("English search returned non-English result: %#v", result)
 		}
 	}
+	grounded := callSearchRules(t, ctx, session, map[string]any{
+		"query": "위탁증거금의 사용제한 대용증권 외화", "language": "ko", "limit": 5,
+	})
+	if grounded.Retrieval.Status != mcpserver.RetrievalCandidatesFound || len(grounded.Results) == 0 {
+		t.Fatalf("grounded canary has no candidates: %#v", grounded)
+	}
+	verifySmokeReturnedContexts(t, ctx, session, grounded)
+	for _, limit := range []int{0, 1, 5, 50} {
+		args := map[string]any{"query": "KRX 회원의 운전면허 갱신 의무", "language": "ko"}
+		if limit != 0 {
+			args["limit"] = limit
+		}
+		out := callSearchRules(t, ctx, session, args)
+		if out.Retrieval.ReturnedResults != len(out.Results) || len(out.Results) > max(10, limit) {
+			t.Fatalf("unbounded default/limit=%d response: %#v", limit, out)
+		}
+	}
+	ambiguous := callSearchRules(t, ctx, session, map[string]any{"query": "장중에 증거금 추가 통지를 받으면 몇 시까지 채워야 하나", "language": "ko", "limit": 5})
+	if ambiguous.Retrieval.Status != mcpserver.RetrievalCandidatesFound || len(ambiguous.Results) == 0 {
+		t.Fatalf("missing candidates for caller scope review: %#v", ambiguous)
+	}
+	verifySmokeReturnedContexts(t, ctx, session, ambiguous)
 }
 
 type smokeSearchOutput struct {
-	Mode           string               `json:"mode"`
-	QueryExpansion *smokeQueryExpansion `json:"query_expansion"`
-	Results        []smokeSearchResult  `json:"results"`
+	ContractVersion string                  `json:"contract_version"`
+	Retrieval       mcpserver.RetrievalInfo `json:"retrieval"`
+	Mode            string                  `json:"mode"`
+	QueryExpansion  *smokeQueryExpansion    `json:"query_expansion"`
+	Results         []smokeSearchResult     `json:"results"`
 }
 
 type smokeQueryExpansion struct {
@@ -85,9 +110,52 @@ type smokeAppliedTerm struct {
 }
 
 type smokeSearchResult struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Language string `json:"language"`
+	ID              string `json:"id"`
+	Title           string `json:"title"`
+	Language        string `json:"language"`
+	EvidenceMatches []struct {
+		ChunkID      string `json:"chunk_id"`
+		ArticleID    string `json:"article_id"`
+		AttachmentID string `json:"attachment_id"`
+	} `json:"evidence_matches"`
+}
+
+func verifySmokeReturnedContexts(t *testing.T, ctx context.Context, session *mcpsdk.ClientSession, out smokeSearchOutput) {
+	t.Helper()
+	type owner struct{ doc, article, attachment string }
+	returned := map[string]owner{}
+	for _, result := range out.Results {
+		for _, evidence := range result.EvidenceMatches {
+			returned[evidence.ChunkID] = owner{result.ID, evidence.ArticleID, evidence.AttachmentID}
+		}
+	}
+	if len(returned) == 0 {
+		t.Fatal("no returned context IDs")
+	}
+	for id, want := range returned {
+		response, err := session.CallTool(ctx, &mcpsdk.CallToolParams{Name: "get_context", Arguments: map[string]any{"chunk_id": id, "before_chunks": 0, "after_chunks": 0, "max_chars": 50000}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.IsError {
+			t.Fatalf("get_context tool error: %#v", response.Content)
+		}
+		data, err := json.Marshal(response.StructuredContent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var contextOut mcpserver.ContextOutput
+		if err := json.Unmarshal(data, &contextOut); err != nil {
+			t.Fatal(err)
+		}
+		if contextOut.Truncated || contextOut.Document.ID != want.doc || len(contextOut.Chunks) != 1 {
+			t.Fatalf("context owner/window mismatch: %#v", contextOut)
+		}
+		chunk := contextOut.Chunks[0]
+		if chunk.ID != id || chunk.ArticleID != want.article || chunk.AttachmentID != want.attachment || strings.TrimSpace(chunk.Text) == "" {
+			t.Fatalf("returned context mismatch: %#v", chunk)
+		}
+	}
 }
 
 func callSearchRules(t *testing.T, ctx context.Context, session *mcpsdk.ClientSession, args map[string]any) smokeSearchOutput {
@@ -109,6 +177,24 @@ func callSearchRules(t *testing.T, ctx context.Context, session *mcpsdk.ClientSe
 	}
 	if out.Mode == "" {
 		t.Fatalf("search_rules(%v) returned empty mode: %#v", args, out)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if fields["answerable"] != nil || fields["answerability"] != nil || out.ContractVersion != mcpserver.SearchContractVersion {
+		t.Fatalf("unexpected answer-decision contract: %s", data)
+	}
+	limit, _ := args["limit"].(int)
+	if limit == 0 {
+		limit = 10
+	}
+	expectedStatus := mcpserver.RetrievalNoCandidates
+	if len(out.Results) > 0 {
+		expectedStatus = mcpserver.RetrievalCandidatesFound
+	}
+	if out.Retrieval.Status != expectedStatus || out.Retrieval.ReturnedResults != len(out.Results) || len(out.Results) > limit {
+		t.Fatalf("invalid bounded retrieval response: %s", data)
 	}
 	return out
 }

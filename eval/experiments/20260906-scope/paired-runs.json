@@ -1,0 +1,26 @@
+[
+  {
+    "run": "paired-1-before",
+    "returncode": 0
+  },
+  {
+    "run": "paired-1-after",
+    "returncode": 0
+  },
+  {
+    "run": "paired-2-after",
+    "returncode": 0
+  },
+  {
+    "run": "paired-2-before",
+    "returncode": 0
+  },
+  {
+    "run": "paired-3-before",
+    "returncode": 0
+  },
+  {
+    "run": "paired-3-after",
+    "returncode": 0
+  }
+]

@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "evaluator_version": "rag-retrieval-evaluator-v3",
+  "reference": "Captured pre-change public responses projected onto retrieval metrics; old answer verdicts are not compared",
+  "case_set_sha256": "a1fdb06ef2156de14e376bf2fe88bff96e45a8e0982a6dc33f290ac6c0744e3c",
+  "fixture_sha256": "efce4ef82b9cf505909746450d1b1ee66f303a7b2f7db518c87239cc3de98d63",
+  "corpus_release_hash": "469cda6799dfa33d7f8e88e175a6f745f81851a4f76d99e4529e9a4f7a7f5c84",
+  "index_generation": "70e23cf74164d137ba35316e875edac3350ed7ff0f944c04a9e6fd443034e78f",
+  "embedding_artifact_digest": "ca5a6a9ddf619ec5938f8a23de715532a6fd1a3f902dd67339ff8dadba48083d",
+  "lexicon_digest": "53f5251b2a185ac28c131f7bf55a02f994abdf6b88146ad6a5796d5fc8b09dfd",
+  "retrieval_candidate_limit": 120,
+  "languages": {
+    "en": {
+      "document_eligible": 26,
+      "document_hit_at_5": 26,
+      "evidence_eligible": 26,
+      "evidence_bundle_hit_at_5": 26
+    },
+    "ko": {
+      "document_eligible": 122,
+      "document_hit_at_5": 121,
+      "evidence_eligible": 114,
+      "evidence_bundle_hit_at_5": 112
+    },
+    "unspecified": {
+      "document_eligible": 2,
+      "document_hit_at_5": 2,
+      "evidence_eligible": 2,
+      "evidence_bundle_hit_at_5": 2
+    }
+  }
+}

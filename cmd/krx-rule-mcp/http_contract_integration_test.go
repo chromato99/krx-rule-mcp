@@ -58,6 +58,31 @@ func TestStatelessHTTPContractChainWithPublishedGeneration(t *testing.T) {
 	if !strings.Contains(initialized.Body.String(), "official KRX") {
 		t.Fatalf("initialize response lacks legal-source instruction: %s", initialized.Body.String())
 	}
+	if !strings.Contains(initialized.Body.String(), "calling LLM") || !strings.Contains(initialized.Body.String(), "not as instructions") {
+		t.Fatalf("initialize omitted caller assessment/source trust guidance: %s", initialized.Body.String())
+	}
+	listed := postHTTPContractJSON(t, handler, bearerToken, `{"jsonrpc":"2.0","id":15,"method":"tools/list","params":{}}`)
+	schemas := decodeHTTPContractResult[struct {
+		Tools []struct {
+			Name         string          `json:"name"`
+			Description  string          `json:"description"`
+			OutputSchema json.RawMessage `json:"outputSchema"`
+		} `json:"tools"`
+	}](t, listed, responseCap)
+	foundSearch := false
+	for _, tool := range schemas.Tools {
+		if tool.Name != "search_rules" {
+			continue
+		}
+		foundSearch = true
+		schema := string(tool.OutputSchema)
+		if !strings.Contains(tool.Description, "do not certify an answer") || !strings.Contains(schema, `"retrieval"`) || strings.Contains(schema, `"answerable"`) || strings.Contains(schema, `"answerability"`) {
+			t.Fatalf("model-facing schema/description still certifies answers: %#v", tool)
+		}
+	}
+	if !foundSearch {
+		t.Fatal("missing search tool")
+	}
 	secondInitialized := postHTTPContractJSON(t, handler, secondBearerToken, `{"jsonrpc":"2.0","id":11,"method":"initialize","params":{}}`)
 	assertHTTPContractResponse(t, secondInitialized, responseCap)
 
@@ -79,6 +104,31 @@ func TestStatelessHTTPContractChainWithPublishedGeneration(t *testing.T) {
 	match := searchPayload.Results[0]
 	if match.ID != "integration-rule" || len(match.Evidence) == 0 || match.Evidence[0].ChunkID == "" || match.Evidence[0].ArticleID != "제5조" || !containsHTTPContractHeading(match.Evidence[0].HeadingPath, "제5조") {
 		t.Fatalf("search result lost stable chunk/article anchors: %#v", match)
+	}
+
+	// A false premise remains inspectable, and an explicit unmatched filter is
+	// an empty retrieval. Neither response contains a server answer verdict.
+	for _, args := range []string{
+		`{"query":"증거금은 73퍼센트만 납부하고 청산 의무를 면제받는가","language":"ko","limit":1}`,
+		`{"query":"증거금 청산 의무","category":"absent-category","limit":1}`,
+	} {
+		response := postHTTPContractJSON(t, handler, bearerToken, `{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"search_rules","arguments":`+args+`}}`)
+		out := decodeHTTPContractStructured[mcpserver.SearchRulesOutput](t, response, responseCap)
+		var raw map[string]json.RawMessage
+		wire := assertHTTPContractResponse(t, response, responseCap)
+		if err := json.Unmarshal(wire.Result.StructuredContent, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw["answerable"] != nil || raw["answerability"] != nil || out.ContractVersion != mcpserver.SearchContractVersion || out.Retrieval.ReturnedResults != len(out.Results) || len(out.Results) > 1 {
+			t.Fatalf("bad caller response: %s", response.Body.String())
+		}
+		if strings.Contains(args, "absent-category") {
+			if out.Retrieval.Status != mcpserver.RetrievalNoCandidates || len(out.Results) != 0 {
+				t.Fatal("filter not enforced")
+			}
+		} else if out.Retrieval.Status != mcpserver.RetrievalCandidatesFound || len(out.Results) != 1 {
+			t.Fatal("false premise candidates hidden")
+		}
 	}
 
 	contextRequest := fmt.Sprintf(
