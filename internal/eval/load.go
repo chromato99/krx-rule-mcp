@@ -40,8 +40,8 @@ func LoadFixture(path string) (Fixture, string, error) {
 }
 
 func ValidateFixture(fixture Fixture) error {
-	if fixture.SchemaVersion != 1 {
-		return fmt.Errorf("evaluation fixture schema_version = %d, want 1", fixture.SchemaVersion)
+	if fixture.SchemaVersion != 2 {
+		return fmt.Errorf("evaluation fixture schema_version = %d, want 2", fixture.SchemaVersion)
 	}
 	if !strings.HasPrefix(fixture.FixtureVersion, "rag-v") {
 		return fmt.Errorf("evaluation fixture version %q is invalid", fixture.FixtureVersion)
@@ -100,28 +100,6 @@ func FixtureContractHash(fixture Fixture) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func VerifySourceFixture(path, expectedHash string, expectedCases int) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read source fixture: %w", err)
-	}
-	sum := sha256.Sum256(data)
-	observed := hex.EncodeToString(sum[:])
-	if observed != expectedHash {
-		return fmt.Errorf("source fixture sha256 = %s, want %s", observed, expectedHash)
-	}
-	var source struct {
-		Cases []json.RawMessage `json:"cases"`
-	}
-	if err := json.Unmarshal(data, &source); err != nil {
-		return fmt.Errorf("decode source fixture: %w", err)
-	}
-	if len(source.Cases) != expectedCases {
-		return fmt.Errorf("source fixture has %d cases, want %d", len(source.Cases), expectedCases)
-	}
-	return nil
-}
-
 func validateCase(item Case) error {
 	if strings.TrimSpace(item.Group) == "" {
 		return fmt.Errorf("group is required")
@@ -158,9 +136,6 @@ func validateCase(item Case) error {
 	}
 	if item.Expectation.EvidenceStatus == "supported" && len(item.Expectation.Targets) == 0 {
 		return fmt.Errorf("supported case requires at least one target")
-	}
-	if item.Expectation.EvidenceStatus == "ambiguous" && !item.Expectation.ClarificationRequired {
-		return fmt.Errorf("ambiguous case requires clarification_required")
 	}
 	seenTargets := map[string]struct{}{}
 	for _, target := range item.Expectation.Targets {

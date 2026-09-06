@@ -658,11 +658,9 @@ func validateReadinessEmbedding(embedder searchindex.Embedder, engine *searchind
 	if len(vectors) != 1 {
 		return fmt.Errorf("embedding canary returned %d vectors; expected 1", len(vectors))
 	}
-	if info, ok := embedder.(searchindex.EmbedderInfo); ok {
-		_, dimensions := info.EmbeddingInfo()
-		if dimensions > 0 && len(vectors[0]) != dimensions {
-			return fmt.Errorf("embedding canary dimensions=%d want=%d", len(vectors[0]), dimensions)
-		}
+	_, dimensions := embedder.EmbeddingInfo()
+	if dimensions > 0 && len(vectors[0]) != dimensions {
+		return fmt.Errorf("embedding canary dimensions=%d want=%d", len(vectors[0]), dimensions)
 	}
 	if engine == nil {
 		return fmt.Errorf("vector engine is nil")
@@ -771,11 +769,8 @@ func inspectArtifacts(repo *searchindex.Repository, domainLexiconDigest, runtime
 		}
 	}
 	if reranker != nil {
-		model, revision := "unknown", ""
+		model, revision := reranker.RerankingInfo()
 		batchSize := 0
-		if info, ok := reranker.(searchindex.RerankerInfo); ok {
-			model, revision = info.RerankingInfo()
-		}
 		if configured, ok := reranker.(*searchindex.TEIReranker); ok {
 			batchSize = configured.BatchSize
 		}

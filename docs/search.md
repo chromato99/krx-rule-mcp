@@ -357,4 +357,4 @@ signals are not confidence estimates or proof of every legal condition.
 The release descriptor v6 includes the retrieval policy and public search
 contract version (`retrieval-v1`). Retrieval reports distinguish internal
 candidate presence from accessible evidence in the actual top-5 results.
-See [the current change and measured limits](caller-llm-retrieval.md).
+See [the maintained evaluation contract](rag-quality-contract.md).

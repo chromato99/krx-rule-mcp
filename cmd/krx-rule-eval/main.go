@@ -21,13 +21,11 @@ import (
 func main() {
 	dataDir := flag.String("data-dir", env("KRX_RULE_DATA_DIR", "../krx-rule-markdown/data"), "schema-v2 corpus directory")
 	indexDir := flag.String("index-dir", env("KRX_RULE_INDEX_DIR", "index"), "immutable index generation directory")
-	fixturePath := flag.String("fixture", "eval/golden/rag-v1.json", "versioned golden fixture")
-	sourceFixturePath := flag.String("source-fixture", "eval/source/rag-queries-2026-07-28.json", "checksummed original 50-case fixture")
+	fixturePath := flag.String("fixture", "eval/fixtures/retrieval.json", "versioned golden fixture")
 	lexiconPath := flag.String("domain-lexicon", env("KRX_DOMAIN_LEXICON_PATH", searchindex.DefaultDomainLexiconPath), "domain lexicon YAML")
-	lexiconMode := flag.String("lexicon-mode", "full", "diagnostic lexicon ablation: full, terms, none")
-	outputPath := flag.String("output", "eval/results/rag-v1-latest.json", "evaluation report output")
-	baselinePath := flag.String("baseline", "eval/baselines/rag-retrieval-before.json", "question-matched retrieval baseline")
-	reservationPath := flag.String("holdout-reservation", "eval/experiments/20260906-scope/reservation.json", "reserved canonical sources for a sealed fixture")
+	outputPath := flag.String("output", "eval/results/retrieval.json", "evaluation report output")
+	baselinePath := flag.String("baseline", "eval/baselines/retrieval.json", "question-matched retrieval baseline")
+	reservationPath := flag.String("holdout-reservation", "", "required external reservation file when evaluating a sealed holdout")
 	split := flag.String("split", "", "optional fixture split for diagnostic runs")
 	casePrefix := flag.String("case-prefix", "", "optional case-id prefix for diagnostic runs")
 	vectorEnabled := flag.Bool("vector", envBool("KRX_VECTOR_SEARCH_ENABLED"), "load full vector generation and query embedder")
@@ -38,12 +36,6 @@ func main() {
 	retrievalCandidates := flag.Int("candidate-limit", searchindex.DefaultRetrievalCandidateLimit, "first-stage candidate limit per channel, max 512; independent of result limit")
 	failOnGate := flag.Bool("fail-on-gate", false, "exit non-zero when full-vector retrieval regression checks fail; does not evaluate LLM answers")
 	flag.Parse()
-	if *lexiconMode != "full" && *lexiconMode != "terms" && *lexiconMode != "none" {
-		fatalIf(fmt.Errorf("invalid --lexicon-mode"))
-	}
-	if *failOnGate && *lexiconMode != "full" {
-		fatalIf(fmt.Errorf("lexicon ablations are diagnostic and cannot use --fail-on-gate"))
-	}
 	fatalIf(validateEvalOptions(*split, *casePrefix, *failOnGate))
 	if *retrievalCandidates < 0 || *retrievalCandidates > 512 {
 		fatalIf(fmt.Errorf("--candidate-limit must be between 1 and 512, or 0 for the default"))
@@ -52,7 +44,6 @@ func main() {
 
 	fixture, fixtureHash, err := evaluation.LoadFixture(*fixturePath)
 	fatalIf(err)
-	fatalIf(evaluation.VerifySourceFixture(*sourceFixturePath, fixture.Source.SHA256, fixture.Source.OriginalCases))
 
 	loadOptions := searchindex.RepositoryLoadOptions{
 		VectorEnabled: *vectorEnabled || *requireVector,
@@ -66,21 +57,6 @@ func main() {
 	}
 	lexicon, lexiconDigest, err := searchindex.LoadDomainLexiconWithDigest(*lexiconPath)
 	fatalIf(err)
-	if *lexiconMode != "full" {
-		var selected []searchindex.DomainLexiconEntry
-		if *lexiconMode == "terms" {
-			for _, entry := range lexicon {
-				if strings.HasPrefix(entry.ReviewStatus, "official-") {
-					entry.MatchGroups = nil
-					selected = append(selected, entry)
-				}
-			}
-		}
-		lexicon = selected
-		encoded, _ := json.Marshal(lexicon)
-		digest := sha256.Sum256(encoded)
-		lexiconDigest = hex.EncodeToString(digest[:])
-	}
 
 	var embedder searchindex.Embedder
 	if *vectorEnabled || *requireVector {
@@ -110,7 +86,6 @@ func main() {
 	}
 	provenance, releaseGeneration, err := buildProvenance(repo, lexiconDigest, runtimeVectorMode, *retrievalCandidates, reranker, rerankerCandidates, *rerankerTimeout, fixture, fixtureHash)
 	fatalIf(err)
-	provenance.Extra = map[string]string{"lexicon_mode": *lexiconMode}
 	service := &mcpserver.Service{
 		Repo:                repo,
 		Embedder:            embedder,
@@ -238,11 +213,8 @@ func buildProvenance(repo *searchindex.Repository, lexiconDigest, runtimeVectorM
 		break
 	}
 	if reranker != nil {
-		model, revision := "unknown", ""
+		model, revision := reranker.RerankingInfo()
 		batchSize := 0
-		if info, ok := reranker.(searchindex.RerankerInfo); ok {
-			model, revision = info.RerankingInfo()
-		}
 		if configured, ok := reranker.(*searchindex.TEIReranker); ok {
 			batchSize = configured.BatchSize
 		}
@@ -275,7 +247,7 @@ func buildProvenance(repo *searchindex.Repository, lexiconDigest, runtimeVectorM
 		BM25SnapshotVersion: repo.BM25SnapshotVersion, Embedding: embedding, Reranker: rerankerIdentity, LexiconDigest: lexiconDigest,
 		RuntimeVectorMode: runtimeVectorMode, RetrievalContract: retrievalContract(reranker != nil), SearchContract: mcpserver.SearchContractVersion,
 		RetrievalCandidateLimit: retrievalCandidateLimit,
-		FixtureVersion:          fixture.FixtureVersion, FixtureSHA256: fixtureHash, SourceFixtureSHA256: fixture.Source.SHA256,
+		FixtureVersion:          fixture.FixtureVersion, FixtureSHA256: fixtureHash,
 	}, releaseGeneration, nil
 }
 

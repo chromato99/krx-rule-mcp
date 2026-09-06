@@ -21,7 +21,7 @@ def main():
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reports", type=Path, nargs="+")
-    parser.add_argument("--fixture", type=Path, default=root / "eval/golden/rag-v1.json")
+    parser.add_argument("--fixture", type=Path, default=root / "eval/fixtures/retrieval.json")
     parser.add_argument("--manifest", type=Path, default=root.parent / "krx-rule-markdown/data/manifest.json")
     args = parser.parse_args()
     fixture = json.loads(args.fixture.read_text())
@@ -32,8 +32,8 @@ def main():
     reports = []
     for path in args.reports:
         report = json.loads(path.read_text())
-        if report.get("schema_version") != 2 or report["provenance"].get("evaluator_version") != "rag-retrieval-evaluator-v3":
-            parser.error(f"{path}: requires retrieval evaluator v3 report; do not compare old answer metrics")
+        if report.get("schema_version") != 2 or report["provenance"].get("evaluator_version") != "rag-retrieval-evaluator-v4":
+            parser.error(f"{path}: requires retrieval evaluator v4 report; do not compare old answer metrics")
         if {c["id"] for c in report["cases"]} != set(targets):
             parser.error(f"{path}: case set differs from fixture")
         if reports:

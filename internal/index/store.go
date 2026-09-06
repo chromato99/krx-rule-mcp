@@ -437,7 +437,7 @@ func decodeVectorSnapshot(data []byte) (VectorSnapshot, error) {
 	if err != nil {
 		return VectorSnapshot{}, err
 	}
-	if snap.Version != vectorSnapshotFormatVersion {
+	if snap.Version != VectorSnapshotFormatVersion {
 		return VectorSnapshot{}, fmt.Errorf("read vector snapshot: unsupported snapshot version %d", snap.Version)
 	}
 	snap.GeneratedAt, err = readString(r)
@@ -552,20 +552,6 @@ func decodeVectorSnapshot(data []byte) (VectorSnapshot, error) {
 	return snap, nil
 }
 
-func LoadVectorMap(path string, docs []model.Document, attachments map[string]AttachmentDocument) (map[string][]float64, string, error) {
-	current, err := snapshotForValidation(docs, attachments)
-	if err != nil {
-		return nil, "", err
-	}
-	loaded, err := loadVectorArtifactForSnapshot(path, docs, attachments, current, false)
-	return loaded.Vectors, loaded.Reason, err
-}
-
-func loadVectorMapForSnapshot(path string, docs []model.Document, attachments map[string]AttachmentDocument, bm25 Snapshot, requireFull bool) (map[string][]float64, VectorSnapshot, string, error) {
-	loaded, err := loadVectorArtifactForSnapshot(path, docs, attachments, bm25, requireFull)
-	return loaded.Vectors, loaded.Snapshot, loaded.Reason, err
-}
-
 type loadedVectorArtifact struct {
 	Vectors        map[string][]float64
 	Snapshot       VectorSnapshot
@@ -634,10 +620,6 @@ func loadVectorArtifactForSnapshot(path string, docs []model.Document, attachmen
 		return result, nil
 	}
 	return result, nil
-}
-
-func vectorMetadataMatches(metadata VectorMetadata, snap VectorSnapshot) bool {
-	return vectorMetadataRejectReason(metadata, snap) == ""
 }
 
 func vectorMetadataRejectReason(metadata VectorMetadata, snap VectorSnapshot) string {
@@ -757,7 +739,7 @@ func engineFromSnapshot(docs []model.Document, snap Snapshot, vectors map[string
 }
 
 func snapshotMatches(snap Snapshot, docs []model.Document, attachments map[string]AttachmentDocument) bool {
-	if snap.Version != indexSnapshotFormatVersion || snap.IndexerVersion != indexerVersion {
+	if snap.Version != indexSnapshotFormatVersion || snap.IndexerVersion != IndexerVersion {
 		return false
 	}
 	// Freshness is fully determined by the canonical source/build hashes and
@@ -772,7 +754,7 @@ func snapshotMatches(snap Snapshot, docs []model.Document, attachments map[strin
 		return false
 	}
 	return snap.IndexSourceHash == indexSourceHash &&
-		snap.IndexBuildHash == buildHash(indexSourceHash, indexerVersion) &&
+		snap.IndexBuildHash == buildHash(indexSourceHash, IndexerVersion) &&
 		snapshotDocumentsEqual(snap.Documents, documents)
 }
 

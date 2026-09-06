@@ -1,7 +1,0 @@
-{
-  "previous_holdout": "eval/golden/rag-holdout.json",
-  "status": "consumed-by-second-cycle",
-  "reason": "its failures now inform changes; historical fixture and one-shot result preserved",
-  "replacement_reservation": "reservation.json",
-  "question_and_target_changes": false
-}

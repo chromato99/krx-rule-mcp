@@ -77,7 +77,7 @@ func TestActualFixtureTargetsAreGroundedInCorpus(t *testing.T) {
 	if os.Getenv("KRX_DATA_TEST") != "1" {
 		t.Skip("set KRX_DATA_TEST=1 to audit the golden fixture against the collected corpus")
 	}
-	fixture, _, err := LoadFixture(filepath.Join("..", "..", "eval", "golden", "rag-v1.json"))
+	fixture, _, err := LoadFixture(filepath.Join("..", "..", "eval", "fixtures", "retrieval.json"))
 	if err != nil {
 		t.Fatalf("LoadFixture: %v", err)
 	}

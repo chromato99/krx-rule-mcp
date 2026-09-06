@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chromato99/krx-rule-mcp/internal/corpus"
 	"github.com/chromato99/krx-rule-mcp/internal/model"
 )
 
@@ -67,30 +66,6 @@ func vectorSnapshotIDSetHash(snap VectorSnapshot) string {
 		ids = append(ids, vector.ChunkID)
 	}
 	return chunkIDSetHash(ids)
-}
-
-func snapshotForValidation(docs []model.Document, attachments map[string]AttachmentDocument) (Snapshot, error) {
-	documents, err := snapshotDocuments(docs, attachments)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	indexSourceHash, err := corpus.IndexSourceHash(docs, attachmentTextMap(attachments))
-	if err != nil {
-		return Snapshot{}, err
-	}
-	engine := BuildWithAttachments(docs, attachments, nil)
-	chunks := make([]SnapshotChunk, 0, len(engine.chunks))
-	for _, chunk := range engine.chunks {
-		chunks = append(chunks, SnapshotChunk{ID: chunk.ID})
-	}
-	return Snapshot{
-		Version:         indexSnapshotFormatVersion,
-		IndexerVersion:  indexerVersion,
-		IndexSourceHash: indexSourceHash,
-		IndexBuildHash:  buildHash(indexSourceHash, indexerVersion),
-		Documents:       documents,
-		Chunks:          chunks,
-	}, nil
 }
 
 func inferVectorScope(expectedIDs []string, vectors map[string][]float64) VectorScope {

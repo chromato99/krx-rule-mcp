@@ -1268,3 +1268,17 @@ func testDomainLexicon(t *testing.T) []searchindex.DomainLexiconEntry {
 	}
 	return entries
 }
+
+func (*preferPassageReranker) RerankingInfo() (string, string) {
+	return "test-reranker", "test-revision"
+}
+func (*recordingObserver) CountRerankerFallback(string)  {}
+func (deadlineEmbedder) EmbeddingInfo() (string, int)    { return "test", 2 }
+func (errorEmbedder) EmbeddingInfo() (string, int)       { return "test", 2 }
+func (*controlledEmbedder) EmbeddingInfo() (string, int) { return "test", 1 }
+func (e *stubEmbedder) EmbeddingInfo() (string, int) {
+	if len(e.vectors) == 0 {
+		return "test", 0
+	}
+	return "test", len(e.vectors[0])
+}

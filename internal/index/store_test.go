@@ -141,15 +141,19 @@ func TestVectorSnapshotIgnoresStaleCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load current corpus: %v", err)
 	}
-	vectors, reason, err := LoadVectorMap(vectorPath, loadedCorpus.Documents, attachmentDocuments(loadedCorpus.Documents, loadedCorpus.AttachmentTexts))
+	current, _, err := BuildSnapshot(root)
 	if err != nil {
-		t.Fatalf("load vector map: %v", err)
+		t.Fatal(err)
 	}
-	if reason != "index_source_hash_mismatch" && reason != "document_hash_mismatch" {
-		t.Fatalf("reason = %q, want index source or document mismatch", reason)
+	loaded, err := loadVectorArtifactForSnapshot(vectorPath, loadedCorpus.Documents, attachmentDocuments(loadedCorpus.Documents, loadedCorpus.AttachmentTexts), current, false)
+	if err != nil {
+		t.Fatalf("load vector artifact: %v", err)
 	}
-	if len(vectors) != 0 {
-		t.Fatalf("loaded stale vectors: %#v", vectors)
+	if loaded.Reason != "index_source_hash_mismatch" && loaded.Reason != "document_hash_mismatch" {
+		t.Fatalf("reason = %q, want index source or document mismatch", loaded.Reason)
+	}
+	if len(loaded.Vectors) != 0 {
+		t.Fatalf("loaded stale vectors: %#v", loaded.Vectors)
 	}
 }
 

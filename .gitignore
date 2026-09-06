@@ -33,3 +33,9 @@ index/.generation-build.lock
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Generated retrieval evaluation output and one-off experiments
+/eval/results/
+/eval/experiments/
+/eval/archives/
+*.pprof

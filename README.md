@@ -24,7 +24,7 @@
 
 이번 검색 평가와 저장소 기본 인덱스를 그대로 재현하려면 corpus의
 [`8b8d951`](https://github.com/chromato99/krx-rule-markdown/commit/8b8d951f2d722c922fbbbd49d2ea4f532edbdbdc) 커밋을 사용하세요.
-자세한 결과와 의존 관계는 [구조 전환 기록](docs/caller-llm-retrieval.md)에 있습니다.
+Corpus와 인덱스의 일치 조건은 [데이터 계약](docs/data-format.md)을 참고하세요.
 
 먼저 별도 프로젝트인 [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)에서 corpus를 생성합니다.
 
@@ -319,19 +319,17 @@ TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 
 사전은 KRX 법무포털 corpus, KRX 제도 설명 페이지, KRX ETF 용어사전, KRX Global 영문 페이지를 근거로 관리합니다. 자세한 출처와 운영 원칙은 [docs/domain-lexicon.md](docs/domain-lexicon.md)를 참고하세요.
 
-## RAG 품질 평가
+## 검색 품질 평가
 
-평가기는 실제 `search_rules → get_context` 경로에서 **반환된 근거의 접근성과 검색 품질**을 검사합니다. `rag-retrieval-evaluator-v3`는 LLM 답변 정답률이나 거절 정확도를 보고하지 않습니다.
+`krx-rule-eval`은 실제 `search_rules → get_context` 경로에서 검색 결과와 근거를 검사합니다. 유지하는 평가 자료는 다음 세 파일입니다.
 
-- `document_hit_at_5`: 필요한 문서가 실제 반환 결과의 상위 5개에 포함되는지 검사합니다.
-- `evidence_bundle_hit_at_5`: 상위 5개 결과의 주소 지정 가능한 근거에 필수 내용이 있는지 검사합니다. 같은 문서·조문·첨부 target의 여러 청크는 합칠 수 있지만, 다른 target에서 부족한 내용을 빌려오지는 않습니다.
-- 모든 반환 근거의 ID 중복·잘림·소유 문서/조문/첨부 불일치와 명시적 필터 누출을 검사합니다. 내부 120개 후보군의 recall은 별도 진단값입니다.
-- `insufficient`/`ambiguous`는 평가 질문의 라벨입니다. 그런 질문에 후보가 반환되어도 서버가 답변을 승인한 것으로 세지 않습니다. 답변·거절·재질문 품질은 호출 LLM의 별도 평가 대상입니다.
+- `eval/fixtures/retrieval.json`: 질의·필터·문서/조문/첨부 target을 포함한 210개 회귀 사례.
+- `eval/baselines/retrieval.json`: 동일 corpus/index/질의 계약의 언어별 검색 회귀 기준선.
+- `eval/schema/retrieval.schema.json`: 현재 평가 fixture의 schema v2.
 
-`eval/golden/rag-v1.json`의 210건은 regression 50건, development 114건, validation 46건입니다. 질문과 target을 유지하며 `case_set_sha256`으로 비교합니다. 다음 검사는 변경 전 응답을 새 검색 지표로 다시 측정한 `eval/baselines/rag-retrieval-before.json`과 언어별 문서/근거 포함 건수를 비교합니다. corpus/index/embedding/사전/후보 예산이 같아야 비교할 수 있습니다.
+문서 Hit@5와 상위 5개 문서의 근거 묶음 포함률, 모든 반환 청크의 소유 관계·잘림·필터 누출을 검사합니다. 범위 밖/모호한 질문에 검색 후보가 있다는 사실은 답변 승인으로 세지 않습니다. 최종 답변 정확성·거절·재질문은 호출 LLM의 별도 평가 대상입니다.
 
 ```bash
-KRX_RULE_SERVER_COMMIT=working-tree \
 KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
 go run ./cmd/krx-rule-eval \
   --data-dir ../krx-rule-markdown/data --index-dir index \
@@ -339,23 +337,13 @@ go run ./cmd/krx-rule-eval \
   --output /tmp/krx-retrieval-eval.json
 ```
 
-`--fail-on-gate`는 full-vector 무결성, 반환 계약, 필터, 문맥 일치와 고정 기준선 대비 검색 회귀만 검사합니다. 기존 `--gate-profile merge|release`와 `--reranker-all`은 제거했습니다. 검색 지표 통과를 LLM 제품의 출시 승인으로 해석하지 않습니다. `--split`/`--case-prefix`는 진단 전용이며 gate와 함께 사용하지 않습니다.
+`--fail-on-gate`는 full-vector 무결성, 반환 계약, 필터, 문맥 일치와 고정 기준선 대비 검색 회귀를 검사합니다. `--split`/`--case-prefix`는 진단 전용이며 gate와 함께 사용하지 않습니다. BM25 진단은 vector 플래그를 생략합니다.
 
-이전에 실행한 38건 역시 이제 소비된 검증 자료입니다. 재측정할 수 있지만 새로운 독립 holdout으로 취급하지 않습니다.
+별도 fixture는 `--fixture`로 지정합니다. 봉인된 holdout은 외부에서 준비한 canonical source 예약 파일을 `--holdout-reservation`으로 함께 지정해야 합니다. 이미 검토한 자료를 독립 평가로 재사용하지 않습니다. 평가 지표와 절차는 [품질 계약](docs/rag-quality-contract.md)에 정리합니다.
 
-```bash
-go run ./cmd/krx-rule-eval \
-  --data-dir ../krx-rule-markdown/data --index-dir index \
-  --fixture eval/golden/rag-holdout-scope-20260906.json \
-  --source-fixture eval/source/rag-holdout-scope-2026-09-06.json \
-  --holdout-reservation eval/experiments/20260906-scope/reservation.json \
-  --vector --require-vector \
-  --output /tmp/krx-retrieval-validation.json
-```
+`eval/compare.py <변경 전 보고서> <변경 후 보고서>`로 같은 질의/target과 인덱스를 사용한 결과를 비교합니다. 실행 결과는 `eval/results/`에 생성되며 Git에서 제외됩니다. 일회성 실험·샘플·아카이브는 프로젝트 소스에 포함하지 않습니다.
 
-후보 수는 `--candidate-limit` 또는 `KRX_RETRIEVAL_CANDIDATE_LIMIT`로 설정하며 기본값은 채널당 120개입니다. MCP 반환 `limit`과 분리되어 있습니다. 질문별 별칭이나 정답 수치를 추가해 평가 수치를 맞추지 않습니다. `.github/workflows/rag-release-eval.yml`은 고정 corpus commit을 받는 수동 검색 회귀 검사이며 자동 배포를 하지 않습니다.
-
-평가 책임과 비교 절차는 [품질 계약](docs/rag-quality-contract.md), 이번 변경은 [LLM 판단 구조 전환 결과](docs/caller-llm-retrieval.md)에 정리합니다. 이전 [2차 개선 기록](docs/rag-improvement-cycle-2.md)과 [평가 결과](docs/rag-quality-results.md)의 게이트 실패는 역사 기록으로 유지합니다.
+`.github/workflows/retrieval-eval.yml`은 정확한 corpus commit을 받아 고정 인덱스를 검증하는 수동 검색 회귀 검사입니다. 자동 배포를 수행하지 않습니다.
 
 ## 테스트
 

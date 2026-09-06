@@ -19,8 +19,6 @@ import (
 const (
 	indexSnapshotFormatVersion  uint16 = 6
 	IndexerVersion                     = "tokenizer-ko-2gram-3gram-script-html-alias-structured-anchor-v2-en-section-bounded-headings-evidence-only-chunk1600-md-html-table-row-equation-pair-bm25-k1-1.4-b-0.75-chunk-rrf-v1"
-	indexerVersion                     = IndexerVersion
-	vectorSnapshotFormatVersion uint16 = VectorSnapshotFormatVersion
 	VectorSnapshotFormatVersion uint16 = 3
 	VectorMetadataFormatVersion        = 4
 )
@@ -76,7 +74,7 @@ func buildSnapshot(dataRoot string, requireManifest bool) (Snapshot, []model.Doc
 	if err != nil {
 		return Snapshot{}, nil, err
 	}
-	indexBuildHash := buildHash(indexSourceHash, indexerVersion)
+	indexBuildHash := buildHash(indexSourceHash, IndexerVersion)
 	chunks := make([]SnapshotChunk, 0, len(engine.chunks))
 	for _, c := range engine.chunks {
 		chunks = append(chunks, SnapshotChunk{
@@ -96,7 +94,7 @@ func buildSnapshot(dataRoot string, requireManifest bool) (Snapshot, []model.Doc
 	}
 	return Snapshot{
 		Version:           indexSnapshotFormatVersion,
-		IndexerVersion:    indexerVersion,
+		IndexerVersion:    IndexerVersion,
 		GeneratedAt:       nowRFC3339(),
 		IndexSourceHash:   indexSourceHash,
 		IndexBuildHash:    indexBuildHash,
@@ -110,7 +108,7 @@ func buildSnapshot(dataRoot string, requireManifest bool) (Snapshot, []model.Doc
 
 func WriteSnapshot(path string, snap Snapshot) error {
 	snap.Version = indexSnapshotFormatVersion
-	snap.IndexerVersion = firstNonEmpty(snap.IndexerVersion, indexerVersion)
+	snap.IndexerVersion = firstNonEmpty(snap.IndexerVersion, IndexerVersion)
 	if err := validateSnapshotStructure(snap); err != nil {
 		return fmt.Errorf("write index snapshot: %w", err)
 	}
@@ -120,7 +118,7 @@ func WriteSnapshot(path string, snap Snapshot) error {
 	writeString(&payload, snap.IndexSourceHash)
 	writeString(&payload, snap.IndexBuildHash)
 	writeString(&payload, snap.CorpusReleaseHash)
-	writeString(&payload, firstNonEmpty(snap.IndexerVersion, indexerVersion))
+	writeString(&payload, firstNonEmpty(snap.IndexerVersion, IndexerVersion))
 	writeU32(&payload, uint32(len(snap.Documents)))
 	for _, doc := range snap.Documents {
 		writeString(&payload, doc.ID)
@@ -171,13 +169,9 @@ type VectorWriteOptions struct {
 	GenerationID   string
 }
 
-func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float64, model string, dimensions int, options ...VectorWriteOptions) error {
+func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float64, model string, dimensions int, option VectorWriteOptions) error {
 	if strings.TrimSpace(model) == "" {
 		return fmt.Errorf("embedding model is required")
-	}
-	option := VectorWriteOptions{}
-	if len(options) > 0 {
-		option = options[0]
 	}
 	expectedIDs := snapshotChunkIDs(snap.Chunks)
 	option = normalizeVectorWriteOptions(snap, vectors, model, dimensions, option)
@@ -189,7 +183,7 @@ func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float6
 	}
 	generatedAt := nowRFC3339()
 	var payload bytes.Buffer
-	writeU16(&payload, vectorSnapshotFormatVersion)
+	writeU16(&payload, VectorSnapshotFormatVersion)
 	writeString(&payload, generatedAt)
 	writeString(&payload, option.GenerationID)
 	writeString(&payload, snap.IndexSourceHash)

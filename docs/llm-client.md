@@ -5,15 +5,13 @@
 LLM이 판단합니다. 답변 생성용 모델이나 모델 API 키를 MCP 서버에 추가하지
 않아도 됩니다. 선택형 embedding/reranker는 검색용 설정입니다.
 
-## 응답 계약 변경
+## 검색 응답 계약
 
-`search_rules`의 `answerable`과 `answerability`는 제거했습니다. 클라이언트의
-`answerable == true` 분기를 삭제하고 반환 후보를 모델에 전달해야 합니다.
-이전 응답을 동시에 지원하는 모드는 두지 않습니다. Release descriptor도 v6으로
-바뀌므로 배포 시 `--print-release-generation`으로 새 값을 계산하고, 사용 중인
-`RULE_MCP_EXPECTED_RELEASE_GENERATION`을 그 값에 맞춰야 합니다.
+검색 결과는 `retrieval-v1` 계약을 사용합니다. 호스트는 반환 후보를 모델에 전달하고,
+모델이 원문 조회 결과로 답변 여부를 판단하게 합니다. 배포 시 기대 generation을
+고정한다면 `--print-release-generation`의 값을 설정합니다.
 
-새 응답에는 `contract_version: "retrieval-v1"`과 다음 정보가 있습니다.
+응답에는 `contract_version: "retrieval-v1"`과 다음 정보가 있습니다.
 
 ```json
 {"retrieval": {"status": "candidates_found", "returned_results": 2}}

@@ -6,7 +6,7 @@ import (
 	mcpserver "github.com/chromato99/krx-rule-mcp/internal/mcp"
 )
 
-const EvaluatorVersion = "rag-retrieval-evaluator-v3"
+const EvaluatorVersion = "rag-retrieval-evaluator-v4"
 
 type Fixture struct {
 	SchemaVersion  int             `json:"schema_version"`
@@ -62,14 +62,12 @@ func (in CaseInput) MCPInput() mcpserver.SearchRulesInput {
 }
 
 type Expectation struct {
-	EvidenceStatus        string                     `json:"evidence_status"`
-	ClaimRelation         string                     `json:"claim_relation"`
-	TargetPolicy          string                     `json:"target_policy"`
-	AtLeast               int                        `json:"at_least,omitempty"`
-	Targets               []Target                   `json:"targets"`
-	ClarificationRequired bool                       `json:"clarification_required,omitempty"`
-	AllowResults          *bool                      `json:"allow_results,omitempty"`
-	QueryExpansion        *QueryExpansionExpectation `json:"query_expansion,omitempty"`
+	EvidenceStatus string                     `json:"evidence_status"`
+	ClaimRelation  string                     `json:"claim_relation"`
+	TargetPolicy   string                     `json:"target_policy"`
+	AtLeast        int                        `json:"at_least,omitempty"`
+	Targets        []Target                   `json:"targets"`
+	QueryExpansion *QueryExpansionExpectation `json:"query_expansion,omitempty"`
 }
 
 type Target struct {
@@ -115,7 +113,6 @@ type Provenance struct {
 	FixtureSHA256           string             `json:"fixture_sha256"`
 	CaseSetSHA256           string             `json:"case_set_sha256"`
 	EvaluationUse           string             `json:"evaluation_use"`
-	SourceFixtureSHA256     string             `json:"source_fixture_sha256"`
 	Extra                   map[string]string  `json:"extra,omitempty"`
 }
 

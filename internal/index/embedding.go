@@ -16,9 +16,6 @@ import (
 
 type Embedder interface {
 	Embed(context.Context, []string) ([][]float64, error)
-}
-
-type EmbedderInfo interface {
 	EmbeddingInfo() (model string, dimensions int)
 }
 
@@ -262,10 +259,7 @@ func (e *OpenAIEmbedder) EmbeddingInfo() (string, int) {
 
 func EmbedSnapshotChunks(ctx context.Context, chunks []SnapshotChunk, embedder Embedder) (map[string][]float64, error) {
 	out := map[string][]float64{}
-	expectedDimensions := 0
-	if info, ok := embedder.(EmbedderInfo); ok {
-		_, expectedDimensions = info.EmbeddingInfo()
-	}
+	_, expectedDimensions := embedder.EmbeddingInfo()
 	const batchSize = 32
 	for start := 0; start < len(chunks); start += batchSize {
 		end := start + batchSize

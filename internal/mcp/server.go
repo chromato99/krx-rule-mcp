@@ -39,9 +39,6 @@ type Service struct {
 type Observer interface {
 	ObserveTool(name string, elapsed time.Duration)
 	CountEmbeddingFallback(reason string)
-}
-
-type rerankerFallbackObserver interface {
 	CountRerankerFallback(reason string)
 }
 
@@ -779,11 +776,9 @@ func validateQueryVector(embedder searchindex.Embedder, engine *searchindex.Engi
 	if len(vector) == 0 {
 		return "empty_query_vector"
 	}
-	if info, ok := embedder.(searchindex.EmbedderInfo); ok {
-		_, expectedDimensions := info.EmbeddingInfo()
-		if expectedDimensions > 0 && len(vector) != expectedDimensions {
-			return "query_vector_dimensions"
-		}
+	_, expectedDimensions := embedder.EmbeddingInfo()
+	if expectedDimensions > 0 && len(vector) != expectedDimensions {
+		return "query_vector_dimensions"
 	}
 	hasNonZeroFloat32 := false
 	for _, value := range vector {
@@ -1284,9 +1279,7 @@ func (s *Service) countRerankerFallback(reason string) {
 	if s == nil || s.Observer == nil {
 		return
 	}
-	if observer, ok := s.Observer.(rerankerFallbackObserver); ok {
-		observer.CountRerankerFallback(reason)
-	}
+	s.Observer.CountRerankerFallback(reason)
 }
 
 func (s *Service) documentDTO(doc model.Document) DocumentDTO {

@@ -91,7 +91,7 @@ func (multiTargetClient) GetContext(_ context.Context, input mcpserver.GetContex
 
 func TestRunScoresRetrievalWithoutClaimingCallerAnswerQuality(t *testing.T) {
 	fixture := Fixture{
-		SchemaVersion:  1,
+		SchemaVersion:  2,
 		FixtureVersion: "rag-vtest",
 		Source:         FixtureSource{SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", OriginalCases: 3},
 		Cases: []Case{
@@ -106,7 +106,7 @@ func TestRunScoresRetrievalWithoutClaimingCallerAnswerQuality(t *testing.T) {
 			},
 			{
 				ID: "ambiguous", Group: "ambiguous", Split: "regression",
-				Input: CaseInput{Query: "broad query", Limit: 5}, Expectation: Expectation{EvidenceStatus: "ambiguous", ClaimRelation: "not_applicable", TargetPolicy: "any", ClarificationRequired: true},
+				Input: CaseInput{Query: "broad query", Limit: 5}, Expectation: Expectation{EvidenceStatus: "ambiguous", ClaimRelation: "not_applicable", TargetPolicy: "any"},
 			},
 		},
 	}
@@ -163,7 +163,7 @@ func TestRunScoresRetrievalWithoutClaimingCallerAnswerQuality(t *testing.T) {
 func TestValidationCasesAppearInEverySummary(t *testing.T) {
 	item := Case{ID: "validation", Group: "semantic", Split: "validation", Input: CaseInput{Query: "supported query", Language: "ko"},
 		Expectation: Expectation{EvidenceStatus: "supported", ClaimRelation: "supports", TargetPolicy: "any", Targets: []Target{{DocumentID: "rule-1", ArticleID: "제1조", Evidence: &EvidenceExpectation{MustContainAll: []string{"직접", "근거"}}}}}}
-	fixture := Fixture{SchemaVersion: 1, FixtureVersion: "rag-vtest", Source: FixtureSource{SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, Cases: []Case{item}}
+	fixture := Fixture{SchemaVersion: 2, FixtureVersion: "rag-vtest", Source: FixtureSource{SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, Cases: []Case{item}}
 	report, err := Run(context.Background(), fixture, fixtureClient{}, Provenance{})
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +177,7 @@ func TestValidationCasesAppearInEverySummary(t *testing.T) {
 
 func TestValidateFixtureRejectsDuplicateIDs(t *testing.T) {
 	fixture := Fixture{
-		SchemaVersion:  1,
+		SchemaVersion:  2,
 		FixtureVersion: "rag-vtest",
 		Source:         FixtureSource{SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", OriginalCases: 2},
 		Cases: []Case{

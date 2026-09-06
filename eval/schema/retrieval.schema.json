@@ -1,0 +1,325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chromato99/krx-rule-mcp/eval/schema/retrieval.schema.json",
+  "title": "KRX Rule Retrieval Regression Fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fixture_version",
+    "name",
+    "source",
+    "policies",
+    "cases"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "fixture_version": {
+      "type": "string",
+      "pattern": "^rag-v[0-9]+$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "sha256",
+        "evaluation_date",
+        "original_cases"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "evaluation_date": {
+          "type": "string",
+          "format": "date"
+        },
+        "original_cases": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chunk_ids_in_expectations",
+        "scores_are_confidence",
+        "manual_review_excluded_from_automatic_evidence_metrics"
+      ],
+      "properties": {
+        "chunk_ids_in_expectations": {
+          "const": false
+        },
+        "scores_are_confidence": {
+          "const": false
+        },
+        "manual_review_excluded_from_automatic_evidence_metrics": {
+          "type": "boolean"
+        },
+        "evaluation_use": {
+          "type": "string",
+          "enum": [
+            "development",
+            "sealed-holdout"
+          ]
+        }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/case"
+      }
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "group",
+        "split",
+        "input",
+        "expectation"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1
+        },
+        "split": {
+          "enum": [
+            "regression",
+            "development",
+            "validation",
+            "holdout"
+          ]
+        },
+        "input": {
+          "$ref": "#/$defs/input"
+        },
+        "expectation": {
+          "$ref": "#/$defs/expectation"
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "enum": [
+            "ko",
+            "en"
+          ]
+        },
+        "document_type": {
+          "enum": [
+            "rule",
+            "notice"
+          ]
+        },
+        "category": {
+          "type": "string"
+        },
+        "effective_from": {
+          "type": "string",
+          "format": "date"
+        },
+        "effective_to": {
+          "type": "string",
+          "format": "date"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      }
+    },
+    "expectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_status",
+        "claim_relation",
+        "target_policy",
+        "targets"
+      ],
+      "properties": {
+        "evidence_status": {
+          "enum": [
+            "supported",
+            "insufficient",
+            "ambiguous",
+            "unknown"
+          ]
+        },
+        "claim_relation": {
+          "enum": [
+            "supports",
+            "contradicts",
+            "not_applicable"
+          ]
+        },
+        "target_policy": {
+          "enum": [
+            "any",
+            "all",
+            "at_least"
+          ]
+        },
+        "at_least": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/target"
+          }
+        },
+        "query_expansion": {
+          "$ref": "#/$defs/queryExpansion"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "target_policy": {
+                "const": "at_least"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "at_least"
+            ]
+          }
+        }
+      ]
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "document_id"
+      ],
+      "properties": {
+        "document_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "article_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attachment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "must_contain_all": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "must_contain_any": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "must_not_contain": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "relation_must_contain_any": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 1
+        },
+        "normalized_values": {
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "number"
+            ]
+          }
+        },
+        "manual_review": {
+          "type": "boolean"
+        }
+      }
+    },
+    "queryExpansion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required_entry_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required_terms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

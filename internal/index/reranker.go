@@ -25,9 +25,6 @@ const (
 // probabilities.
 type Reranker interface {
 	Rerank(context.Context, string, []string) ([]RerankScore, error)
-}
-
-type RerankerInfo interface {
 	RerankingInfo() (model, revision string)
 }
 

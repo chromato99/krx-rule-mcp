@@ -9,16 +9,16 @@ import (
 )
 
 func TestRepositoryBaselinePreservesQuestionContracts(t *testing.T) {
-	baseline, err := loadCodeBaseline(filepath.Join("..", "..", "eval", "baselines", "rag-retrieval-before.json"))
+	baseline, err := loadCodeBaseline(filepath.Join("..", "..", "eval", "baselines", "retrieval.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture, _, err := evaluation.LoadFixture(filepath.Join("..", "..", "eval", "golden", "rag-v1.json"))
+	fixture, _, err := evaluation.LoadFixture(filepath.Join("..", "..", "eval", "fixtures", "retrieval.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if evaluation.FixtureContractHash(fixture) != baseline.CaseSetSHA256 {
-		t.Fatal("question/target contracts changed without a new comparison baseline")
+		t.Fatalf("question/target contract hash: got=%s baseline=%s", evaluation.FixtureContractHash(fixture), baseline.CaseSetSHA256)
 	}
 	for _, item := range fixture.Cases {
 		if item.Split == "holdout" {
