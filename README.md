@@ -23,7 +23,7 @@
 ## Corpus 준비
 
 이번 검색 평가와 저장소 기본 인덱스를 그대로 재현하려면 corpus의
-[`8b8d951`](https://github.com/chromato99/krx-rule-markdown/commit/8b8d951f2d722c922fbbbd49d2ea4f532edbdbdc) 커밋을 사용하세요.
+[`9289a65`](https://github.com/chromato99/krx-rule-markdown/commit/9289a6541fd31a3eea66a2a698712a6cb5653e84) 커밋을 사용하세요.
 Corpus와 인덱스의 일치 조건은 [데이터 계약](docs/data-format.md)을 참고하세요.
 
 먼저 별도 프로젝트인 [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)에서 corpus를 생성합니다.
