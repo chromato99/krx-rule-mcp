@@ -19,8 +19,10 @@
 4. A completed content-addressed `generations/<id>/generation.json` records fixed artifact names, byte sizes and SHA-256 digests. Publication atomically replaces only the `current` pointer.
 5. `krx-rule-mcp` resolves `current` once, reads only that immutable directory, and compares the digest of the exact decoded bytes with the descriptor. It refuses to start without a valid matching BM25 artifact.
 6. When vector search is disabled, vector files are not opened. Optional mode falls back to BM25 with a bounded reason; required mode rejects missing, sample, partial, stale, malformed, or incompatible vector data.
-7. Legal chunking records owning `article_id` and `heading_path`, keeps cited articles distinct, and treats formula pairs and table rows as atomic semantic units.
-8. At runtime, a canonical release descriptor binds corpus release, index source/build hashes, fixed artifact digests, optional vector metadata, domain lexicon, active vector mode, and the server and TEI runtime image digests. Its SHA-256 is exposed as `release_generation`; HTTP readiness optionally requires an exact configured match and, in required-vector mode, a valid live canary embedding.
+7. Legal chunking records owning Korean and English `article_id` plus `heading_path`, keeps citations distinct, and treats formula pairs and table rows as atomic semantic units. BM25/vector retrieve bounded chunk candidates and fuse by chunk ID.
+8. The service groups documents and optionally reranks bounded Korean chunk candidates without changing document RRF ordering. Ranking scores describe candidate ordering, not answer confidence.
+9. `search_rules` returns bounded candidates under `retrieval-v1`. Semantic uncertainty does not hide candidates. Invalid inputs, incompatible indexes and required backend failures return tool errors. The calling LLM reads context, checks applicability and decides whether to answer, refine retrieval or request clarification.
+10. At runtime, a canonical release descriptor binds corpus release, index source/build hashes, fixed artifact digests, optional vector metadata and input format, first-stage candidate limit, domain lexicon, active vector mode, optional reranker model/revision/K/batch/mode, and runtime image digests. Its SHA-256 is exposed as `release_generation`; required services must pass live identity and canary checks.
 
 ## Packages
 
@@ -36,19 +38,23 @@
 The local deployment examples expect an operator-selected TEI image that exposes
 the compatible embeddings and health endpoints. The project does not choose,
 publish, or endorse a particular TEI image. The repository-provided vector
-snapshot records the model, revision, dimensions, and prefix settings that the
-selected runtime must match.
+snapshot records the model, revision, dimensions, prefix settings, and embedding
+input format that the selected runtime must match.
 
 Default settings:
 
 - model: `intfloat/multilingual-e5-small`
+- revision: `614241f622f53c4eeff9890bdc4f31cfecc418b3`
 - dimensions: `384`
 - document prefix: `passage: `
 - query prefix: `query: `
+- document input: `text-v1`
 
-Other OpenAI-compatible embedding models can be used, but vector indexing and serving must use identical model, dimension, and prefix settings. Prefix-free models should set both prefix environment variables to empty strings before rebuilding the vector snapshot.
+Each generation uses one selected embedding profile. The profile consists of model, optional revision, dimensions, query/document prefixes, and input format. The maintained artifact and deployment examples default to the E5 settings above, but runtime and release evaluation do not whitelist that model. A different OpenAI-compatible model is deployable after rebuilding a full generation with its own explicit dimensions and transformations; required-vector startup verifies that exact profile instead of inheriting E5 settings.
 
-Indexing failures are strict: if vector indexing is explicitly requested and the embeddings API fails, `krx-rule-index` exits non-zero. Runtime query embedding failures are non-fatal and search falls back to BM25 results.
+Release policy has separate concerns: vector integrity requires complete coverage and matching runtime/index provenance, while retrieval quality compares top-5 document/evidence availability by language against a fixed baseline. End-to-end answer quality belongs to a separate caller LLM evaluation. Raw vector scores are never compared across models or treated as confidence. The maintained generation uses raw chunk text with `text-v1`; `structured-v1` embeds fixed title/category/article/path/source fields and is a model-independent experimental representation until improvements generalize across representative profiles. A historical Qwen comparison did not justify replacing the default E5 artifact, but it is not an architectural ban on other models.
+
+Indexing failures are strict: if vector indexing is explicitly requested and the embeddings API fails, `krx-rule-index` exits non-zero. Runtime query embedding failure falls back to BM25 only under the optional vector policy; required-vector mode returns a tool error and fails its readiness canary.
 
 ## Language-Aware RAG
 

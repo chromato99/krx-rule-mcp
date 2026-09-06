@@ -2,7 +2,6 @@ package index
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/chromato99/krx-rule-mcp/internal/model"
@@ -13,18 +12,8 @@ func TestRealDataVectorSearchEvaluation(t *testing.T) {
 		t.Skip("set KRX_VECTOR_DATA_TEST=1 to run collected-data vector search evaluation")
 	}
 
-	indexPath := os.Getenv("KRX_INDEX_PATH")
-	if indexPath == "" {
-		indexPath = DefaultBM25Path(dataTestIndexDir())
-	}
-	vectorPath := os.Getenv("KRX_VECTOR_INDEX_PATH")
-	if vectorPath == "" {
-		vectorPath = DefaultVectorPath(dataTestIndexDir())
-	}
-	indexPath = resolveDataTestPath(indexPath)
-	vectorPath = resolveDataTestPath(vectorPath)
 	dataRoot := dataTestRoot()
-	repo, err := LoadRepository(dataRoot, indexPath, vectorPath)
+	repo, err := LoadRepositoryGeneration(dataRoot, dataTestIndexDir(), RepositoryLoadOptions{VectorEnabled: true, RequireVector: true})
 	if err != nil {
 		t.Fatalf("load vector repository: %v", err)
 	}
@@ -35,9 +24,6 @@ func TestRealDataVectorSearchEvaluation(t *testing.T) {
 	}
 	storedVectors := 0
 	for _, c := range chunks {
-		if len(c.Vector) > 0 && len(c.Vector) != 384 {
-			t.Fatalf("chunk %s vector dimension = %d, want 384", c.ID, len(c.Vector))
-		}
 		if len(c.Vector) > 0 {
 			storedVectors++
 		}
@@ -56,13 +42,19 @@ func TestRealDataVectorSearchEvaluation(t *testing.T) {
 	if !enabled || embedder == nil {
 		t.Fatal("embedding env is not enabled")
 	}
+	_, dimensions := embedder.EmbeddingInfo()
+	for _, c := range chunks {
+		if len(c.Vector) > 0 && len(c.Vector) != dimensions {
+			t.Fatalf("chunk %s vector dimension = %d, want %d", c.ID, len(c.Vector), dimensions)
+		}
+	}
 	query, id, attachmentID := retrievableAttachmentQuery(t, repo, model.DocumentTypeNotice)
 	vectors, err := embedder.Embed(t.Context(), []string{query})
 	if err != nil {
 		t.Fatalf("embed query: %v", err)
 	}
-	if len(vectors) != 1 || len(vectors[0]) != 384 {
-		t.Fatalf("query vector shape = %d/%d, want 1/384", len(vectors), len(vectors[0]))
+	if len(vectors) != 1 || len(vectors[0]) != dimensions {
+		t.Fatalf("query vector shape = %d/%d, want 1/%d", len(vectors), len(vectors[0]), dimensions)
 	}
 
 	results := repo.Engine.Search(SearchOptions{
@@ -81,18 +73,4 @@ func TestRealDataVectorSearchEvaluation(t *testing.T) {
 		}
 	}
 	t.Fatalf("missing RRF result %s in %#v", id, results)
-}
-
-func resolveDataTestPath(path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	if _, err := os.Stat(path); err == nil {
-		return path
-	}
-	repoRelative := filepath.Join("..", "..", path)
-	if _, err := os.Stat(repoRelative); err == nil {
-		return repoRelative
-	}
-	return path
 }

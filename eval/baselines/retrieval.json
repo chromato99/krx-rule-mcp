@@ -1,0 +1,32 @@
+{
+  "schema_version": 2,
+  "evaluator_version": "rag-retrieval-evaluator-v4",
+  "reference": "Fixed retrieval regression floor for the maintained question/target contract; measurement history is in PR #7.",
+  "case_set_sha256": "6a2f3ca7145aadde5fd6953fe116f8ae4e034c3903a082e42d5c1db17e5cb47a",
+  "fixture_sha256": "4e536e689a586bd6bcd692e1295caea66adc996bda004efbd77d879c7c560e16",
+  "corpus_release_hash": "469cda6799dfa33d7f8e88e175a6f745f81851a4f76d99e4529e9a4f7a7f5c84",
+  "index_generation": "85209a137d9e8818b33757201dc230a2f06022b82efcfcbed27c820dc74610e9",
+  "embedding_artifact_digest": "d0ec46320545b32de17695e50ee8d7089f6be8fa0f079090c84a8ed10c0346e4",
+  "lexicon_digest": "53f5251b2a185ac28c131f7bf55a02f994abdf6b88146ad6a5796d5fc8b09dfd",
+  "retrieval_candidate_limit": 120,
+  "languages": {
+    "en": {
+      "document_eligible": 26,
+      "document_hit_at_5": 26,
+      "evidence_eligible": 26,
+      "evidence_bundle_hit_at_5": 26
+    },
+    "ko": {
+      "document_eligible": 122,
+      "document_hit_at_5": 121,
+      "evidence_eligible": 114,
+      "evidence_bundle_hit_at_5": 112
+    },
+    "unspecified": {
+      "document_eligible": 2,
+      "document_hit_at_5": 2,
+      "evidence_eligible": 2,
+      "evidence_bundle_hit_at_5": 2
+    }
+  }
+}

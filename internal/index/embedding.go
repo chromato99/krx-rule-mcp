@@ -10,14 +10,88 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/chromato99/krx-rule-mcp/internal/model"
 )
 
 type Embedder interface {
 	Embed(context.Context, []string) ([][]float64, error)
+	EmbeddingInfo() (model string, dimensions int)
 }
 
-type EmbedderInfo interface {
-	EmbeddingInfo() (model string, dimensions int)
+type EmbeddingInputFormat string
+
+const (
+	EmbeddingInputTextV1           EmbeddingInputFormat = "text-v1"
+	EmbeddingInputStructuredV1     EmbeddingInputFormat = "structured-v1"
+	DefaultEmbeddingInputFormat                         = EmbeddingInputTextV1
+	DefaultEmbeddingModel                               = "intfloat/multilingual-e5-small"
+	DefaultEmbeddingModelRevision                       = "614241f622f53c4eeff9890bdc4f31cfecc418b3"
+	DefaultEmbeddingDimensions                          = 384
+	DefaultEmbeddingQueryPrefix                         = "query: "
+	DefaultEmbeddingDocumentPrefix                      = "passage: "
+)
+
+func ParseEmbeddingInputFormat(value string) (EmbeddingInputFormat, error) {
+	format := EmbeddingInputFormat(strings.TrimSpace(value))
+	if format == "" {
+		return DefaultEmbeddingInputFormat, nil
+	}
+	switch format {
+	case EmbeddingInputTextV1, EmbeddingInputStructuredV1:
+		return format, nil
+	default:
+		return "", fmt.Errorf("unsupported embedding input format %q", value)
+	}
+}
+
+// PrepareEmbeddingChunks builds the text sent to the document embedder without
+// changing the canonical chunk text stored in the BM25/vector snapshots.
+func PrepareEmbeddingChunks(chunks []SnapshotChunk, documents []model.Document, format EmbeddingInputFormat) ([]SnapshotChunk, error) {
+	if format == EmbeddingInputTextV1 {
+		return chunks, nil
+	}
+	if format != EmbeddingInputStructuredV1 {
+		return nil, fmt.Errorf("unsupported embedding input format %q", format)
+	}
+	byID := make(map[string]model.Document, len(documents))
+	for _, document := range documents {
+		byID[document.ID] = document
+	}
+	prepared := make([]SnapshotChunk, len(chunks))
+	for index, chunk := range chunks {
+		document, ok := byID[chunk.DocID]
+		if !ok {
+			return nil, fmt.Errorf("embedding chunk %q references unknown document %q", chunk.ID, chunk.DocID)
+		}
+		prepared[index] = chunk
+		prepared[index].Text = structuredEmbeddingText(document, chunk)
+	}
+	return prepared, nil
+}
+
+func structuredEmbeddingText(document model.Document, chunk SnapshotChunk) string {
+	fields := make([]string, 0, 8)
+	fields = append(fields, "document: "+document.Title)
+	if document.Category != "" {
+		fields = append(fields, "category: "+document.Category)
+	}
+	if document.Language != "" {
+		fields = append(fields, "language: "+document.Language)
+	}
+	source := chunk.Source
+	if chunk.AttachmentTitle != "" {
+		source += " / " + chunk.AttachmentTitle
+	}
+	fields = append(fields, "source: "+source)
+	if chunk.ArticleID != "" {
+		fields = append(fields, "article: "+chunk.ArticleID)
+	}
+	if len(chunk.HeadingPath) > 0 {
+		fields = append(fields, "path: "+strings.Join(chunk.HeadingPath, " > "))
+	}
+	fields = append(fields, "text:\n"+chunk.Text)
+	return strings.Join(fields, "\n")
 }
 
 type OpenAIEmbedder struct {
@@ -43,7 +117,7 @@ func NewQueryEmbedderFromEnv() (*OpenAIEmbedder, error) {
 	if err != nil {
 		return nil, err
 	}
-	embedder.InputPrefix = envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: ")
+	embedder.InputPrefix = EmbeddingQueryPrefixFromEnv(embedder.Model)
 	return embedder, nil
 }
 
@@ -52,27 +126,63 @@ func NewDocumentEmbedderFromEnv() (*OpenAIEmbedder, error) {
 	if err != nil {
 		return nil, err
 	}
-	embedder.InputPrefix = envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: ")
+	embedder.InputPrefix = EmbeddingDocumentPrefixFromEnv(embedder.Model)
 	return embedder, nil
 }
 
 func newOpenAIEmbedderFromEnv() (*OpenAIEmbedder, error) {
-	dims := 384
-	if raw := os.Getenv("KRX_EMBEDDING_DIMENSIONS"); raw != "" {
+	modelName := envDefault("KRX_EMBEDDING_MODEL", DefaultEmbeddingModel)
+	dims := 0
+	if modelName == DefaultEmbeddingModel {
+		dims = DefaultEmbeddingDimensions
+	}
+	if raw := strings.TrimSpace(os.Getenv("KRX_EMBEDDING_DIMENSIONS")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 {
 			return nil, fmt.Errorf("KRX_EMBEDDING_DIMENSIONS must be a positive integer")
 		}
 		dims = parsed
 	}
+	if dims == 0 {
+		return nil, fmt.Errorf("KRX_EMBEDDING_DIMENSIONS is required for non-default embedding model %q", modelName)
+	}
+	modelRevision := ""
+	if modelName == DefaultEmbeddingModel {
+		modelRevision = DefaultEmbeddingModelRevision
+	}
+	if configured, ok := os.LookupEnv("KRX_EMBEDDING_MODEL_REVISION"); ok {
+		modelRevision = strings.TrimSpace(configured)
+	}
 	return &OpenAIEmbedder{
 		BaseURL:       strings.TrimRight(envDefault("KRX_EMBEDDING_BASE_URL", "http://127.0.0.1:18081/v1"), "/"),
 		APIKey:        envDefault("OPENAI_API_KEY", "local"),
-		Model:         envDefault("KRX_EMBEDDING_MODEL", "intfloat/multilingual-e5-small"),
-		ModelRevision: strings.TrimSpace(os.Getenv("KRX_EMBEDDING_MODEL_REVISION")),
+		Model:         modelName,
+		ModelRevision: modelRevision,
 		Dimensions:    dims,
-		Client:        &http.Client{Timeout: 45 * time.Second},
+		Client:        &http.Client{Timeout: 10 * time.Minute},
 	}, nil
+}
+
+// EmbeddingQueryPrefixFromEnv returns the configured query transformation for
+// the selected model. E5 prefixes are defaults for the maintained E5 profile,
+// not global defaults for every OpenAI-compatible embedding model.
+func EmbeddingQueryPrefixFromEnv(modelName string) string {
+	fallback := ""
+	if modelName == DefaultEmbeddingModel {
+		fallback = DefaultEmbeddingQueryPrefix
+	}
+	return envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", fallback)
+}
+
+// EmbeddingDocumentPrefixFromEnv returns the configured document
+// transformation for the selected model without leaking E5 conventions into
+// another embedding profile.
+func EmbeddingDocumentPrefixFromEnv(modelName string) string {
+	fallback := ""
+	if modelName == DefaultEmbeddingModel {
+		fallback = DefaultEmbeddingDocumentPrefix
+	}
+	return envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", fallback)
 }
 
 func (e *OpenAIEmbedder) Embed(ctx context.Context, input []string) ([][]float64, error) {
@@ -149,10 +259,7 @@ func (e *OpenAIEmbedder) EmbeddingInfo() (string, int) {
 
 func EmbedSnapshotChunks(ctx context.Context, chunks []SnapshotChunk, embedder Embedder) (map[string][]float64, error) {
 	out := map[string][]float64{}
-	expectedDimensions := 0
-	if info, ok := embedder.(EmbedderInfo); ok {
-		_, expectedDimensions = info.EmbeddingInfo()
-	}
+	_, expectedDimensions := embedder.EmbeddingInfo()
 	const batchSize = 32
 	for start := 0; start < len(chunks); start += batchSize {
 		end := start + batchSize
@@ -230,5 +337,5 @@ func (e *OpenAIEmbedder) client() *http.Client {
 	if e.Client != nil {
 		return e.Client
 	}
-	return &http.Client{Timeout: 45 * time.Second}
+	return &http.Client{Timeout: 10 * time.Minute}
 }

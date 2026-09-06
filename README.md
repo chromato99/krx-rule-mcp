@@ -1,6 +1,6 @@
 # KRX Rule MCP
 
-한국거래소 법무포털 규정 corpus를 AI 클라이언트가 빠르게 검색하고 참조할 수 있게 하는 Go 기반 MCP 서버입니다.
+한국거래소 법무포털 규정 corpus를 AI 클라이언트가 빠르게 검색하고 참조할 수 있게 하는 Go 기반 MCP 서버입니다. 서버는 검색 후보와 원문을 제공하고, MCP를 호출하는 LLM이 근거를 읽어 답변·추가 검색·재질문 여부를 판단합니다. 사용 흐름과 응답 변경 사항은 [LLM 클라이언트 안내](docs/llm-client.md)를 참고하세요.
 
 이 저장소는 수집기를 포함하지 않습니다. [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)이 만든 schema-v2 `data/` release를 검증한 뒤 BM25/vector index generation을 생성하고, stdio 또는 Streamable HTTP MCP 서버로 제공합니다. 소스 checkout의 `index/current`는 현재 관리 중인 corpus와 맞춘 immutable generation을 가리킵니다.
 
@@ -12,7 +12,8 @@
 - **BM25 기본 검색**: producer의 `release_hash`와 `index_source_hash`가 맞는 `KRXIDX2` snapshot을 로드해 한국어 2-gram/3-gram 기반 검색을 수행합니다.
 - **KRX 도메인 사전 검색 보강**: `config/domain-lexicon.yaml`을 로드해 `동적상하한가 -> 실시간가격제한제도/가격변동폭/별표25` 같은 보수적 query expansion을 적용합니다.
 - **선택형 vector 검색**: OpenAI 호환 embeddings API로 만든 `KRXVEC2` snapshot을 로드하고 BM25 + vector 결과를 RRF로 병합합니다.
-- **RAG 문맥 재조회**: 검색 결과의 `matched_chunk_id` 또는 `attachment_matches[].chunk_id`로 `get_context`를 호출해 해당 chunk 주변 문맥만 다시 가져올 수 있습니다.
+- **선택형 한국어 evidence reranker**: 활성화한 경우 한국어 질의의 상위 20개 chunk를 재정렬합니다. 문서 RRF 순위는 유지하며, 재정렬 점수로 답변 가능 여부를 판정하지 않습니다.
+- **RAG 문맥 재조회**: 검색 결과의 `evidence_matches[].chunk_id`로 `get_context`를 호출해 해당 chunk 주변 문맥만 다시 가져올 수 있습니다.
 - **원자적 index generation**: BM25와 선택적 vector/metadata를 `generations/<content-id>/`에 완성·검증한 뒤 `current` 포인터 하나만 원자 교체합니다. 중단된 build는 활성 generation을 바꾸지 않습니다.
 - **구조 anchor**: 조문 소유 관계, 항·호·목, heading path를 chunk에 저장하고 인용된 조문을 owning article로 오인하지 않습니다. 수식 원본/LaTeX pair와 table row는 분리하지 않습니다.
 - **TEI sidecar 운영 예시**: Docker Compose 예시는 운영자가 선택한 호환 TEI 이미지를 embeddings sidecar로 함께 띄웁니다.
@@ -20,6 +21,10 @@
 - **배포 generation 검증**: corpus/index/vector/도메인 사전/runtime mode/server image를 묶은 canonical release descriptor의 SHA-256을 응답·로그·metrics에 기록하고 `/readyz`에서 기대값과 비교합니다.
 
 ## Corpus 준비
+
+이번 검색 평가와 저장소 기본 인덱스를 그대로 재현하려면 corpus의
+[`9289a65`](https://github.com/chromato99/krx-rule-markdown/commit/9289a6541fd31a3eea66a2a698712a6cb5653e84) 커밋을 사용하세요.
+Corpus와 인덱스의 일치 조건은 [데이터 계약](docs/data-format.md)을 참고하세요.
 
 먼저 별도 프로젝트인 [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)에서 corpus를 생성합니다.
 
@@ -67,12 +72,16 @@ index/
 
 Vector를 포함한 generation은 현재 관리 중인 `krx-rule-markdown/data` corpus와 다음 embedding 설정으로 생성합니다.
 
+`text-v1` 재생성에서는 검증된 기존 generation과 model/revision/dimensions/prefix가 같을 때 정확히 동일한 청크 텍스트의 벡터를 재사용합니다. 이동한 chunk ID나 바뀐 문서 metadata를 근거로 재사용하지 않으며, 변경된 텍스트는 다시 embedding합니다. Revision이 없거나 profile이 다르면 전체를 생성하고, `--force`는 재사용하지 않습니다. 새 artifact의 전체 coverage와 hash 검증이 끝난 뒤에만 `current`를 교체합니다.
+
 | 항목 | 값 |
 | --- | --- |
 | model | `intfloat/multilingual-e5-small` |
+| revision | `614241f622f53c4eeff9890bdc4f31cfecc418b3` |
 | dimensions | `384` |
 | document prefix | `passage: ` |
 | query prefix | `query: ` |
+| document input | `text-v1` (chunk text) |
 
 같은 corpus와 같은 embedding 설정을 사용한다면 먼저 최신성만 확인하세요.
 
@@ -81,11 +90,11 @@ KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
   --index-dir ./index \
-  --vector-index ./index/vectors.krxvec \
+  --vector \
   --check
 ```
 
-새 checkout의 기본 generation이 현재 corpus와 맞지 않거나 corpus를 재생성했다면 서버를 올리기 전에 `krx-rule-index`를 실행하세요. Schema-v2 manifest, strict release profile, frontmatter parity, corpus hash가 먼저 검증됩니다. BM25가 없거나 맞지 않으면 서버는 기동을 실패합니다. Vector는 같은 generation 안에서 corpus/build hash, model, dimensions, prefix, chunk-id coverage와 metadata digest가 모두 맞을 때만 채택됩니다.
+새 checkout의 기본 generation이 현재 corpus와 맞지 않거나 corpus를 재생성했다면 서버를 올리기 전에 `krx-rule-index`를 실행하세요. Schema-v2 manifest, strict release profile, frontmatter parity, corpus hash가 먼저 검증됩니다. BM25가 없거나 맞지 않으면 서버는 기동을 실패합니다. Vector는 같은 generation 안에서 corpus/build hash, model, dimensions, prefix, embedding input format, chunk-id coverage와 metadata digest가 모두 맞을 때만 채택됩니다.
 
 ```bash
 go run ./cmd/krx-rule-index \
@@ -95,7 +104,7 @@ go run ./cmd/krx-rule-index \
 
 이미 최신이면 활성 generation id를 출력하고 종료합니다. 강제로 새 generation을 만들려면 `--force`, 쓰기 없이 활성 descriptor와 모든 artifact digest까지 확인하려면 `--check`를 사용합니다. 저장소 기본 index를 갱신할 때는 `--index-dir ./index`로 생성한 `current`와 해당 `generations/<id>/`를 함께 커밋합니다.
 
-Vector index는 선택입니다. 기본 예시는 기본 제공 index와 같은 `intfloat/multilingual-e5-small`, 384차원, E5 prefix를 사용합니다.
+Vector index는 선택입니다. 아래 재현 예시는 기본 제공 generation과 같은 multilingual E5 small, 384차원, E5 prefix, `text-v1` 입력을 사용합니다.
 
 ```bash
 docker compose up -d krx-rule-embeddings
@@ -105,34 +114,16 @@ KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
 KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small \
 KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
 KRX_EMBEDDING_DIMENSIONS=384 \
+KRX_EMBEDDING_INPUT_FORMAT=text-v1 \
 go run ./cmd/krx-rule-index \
   --data-dir "$KRX_RULE_DATA_DIR" \
   --index-dir "$KRX_RULE_INDEX_DIR" \
-  --vector-index "$KRX_RULE_INDEX_DIR/vectors.krxvec"
+  --vector
 ```
 
-`--vector-index`는 기존 CLI 호환을 위한 “vector 포함” 선택자입니다. 실제 BM25, vector, metadata는 지정한 index 디렉터리의 같은 immutable generation 안에 기록되며 root의 개별 파일을 차례로 덮어쓰지 않습니다.
+기본 E5 profile에서 `KRX_EMBEDDING_QUERY_PREFIX`는 `query: `, `KRX_EMBEDDING_DOCUMENT_PREFIX`는 `passage: `이며 `KRX_EMBEDDING_INPUT_FORMAT`은 `text-v1`입니다. 바이너리를 직접 실행할 때 다른 모델을 선택하면 E5 revision과 prefix를 상속하지 않으며 `KRX_EMBEDDING_DIMENSIONS`를 반드시 지정해야 합니다. Compose는 완전한 E5 profile을 기본 환경으로 주입하므로 다른 모델을 사용할 때는 model, revision, dimensions, query/document prefix와 input format을 한 묶음으로 모두 설정하세요. Prefix가 필요 없는 모델은 해당 환경변수를 명시적으로 빈 값으로 설정합니다. 외부 API를 직접 사용할 때 revision은 비울 수 있지만, Compose의 TEI sidecar에는 모델이 지원하는 revision을 지정해야 합니다. `structured-v1`은 청크 본문 앞에 문서 제목·카테고리·조문·heading path·source를 고정 순서의 field로 넣고, `text-v1`은 본문만 넣습니다.
 
-`KRX_EMBEDDING_QUERY_PREFIX` 기본값은 `query: `, `KRX_EMBEDDING_DOCUMENT_PREFIX` 기본값은 `passage: `입니다. Vector freshness는 corpus hash, model과 revision, dimensions, query/document prefix가 모두 같을 때만 최신으로 봅니다.
-
-다른 embedding 모델을 쓰려면 index 생성과 서버 실행에 같은 embedding 설정을 사용해야 합니다. 예를 들어 OpenAI 호환 외부 API로 `text-embedding-3-small`을 쓰는 경우:
-
-```bash
-export KRX_EMBEDDING_BASE_URL=https://api.openai.com/v1
-export OPENAI_API_KEY=...
-export KRX_EMBEDDING_MODEL=text-embedding-3-small
-export KRX_EMBEDDING_DIMENSIONS=1536
-export KRX_EMBEDDING_QUERY_PREFIX=""
-export KRX_EMBEDDING_DOCUMENT_PREFIX=""
-
-go run ./cmd/krx-rule-index \
-  --data-dir "$KRX_RULE_DATA_DIR" \
-  --index-dir "$KRX_RULE_INDEX_DIR" \
-  --vector-index "$KRX_RULE_INDEX_DIR/vectors.krxvec" \
-  --force
-```
-
-TEI sidecar 자체 모델을 바꾸려면 `RULE_MCP_TEI_MODEL_ID`와 `KRX_EMBEDDING_MODEL`을 같은 모델 id로 맞추고, 해당 모델의 출력 차원으로 `KRX_EMBEDDING_DIMENSIONS`를 설정한 뒤 sidecar를 재시작하고 vector index를 다시 생성하세요. E5 계열이 아닌 모델은 모델 권장 방식에 맞춰 query/document prefix를 바꾸거나 빈 문자열로 둘 수 있습니다. Prefix도 vector metadata에 기록되므로, index 생성 때와 서버 실행 때 값이 다르면 vector snapshot은 거부됩니다.
+각 generation은 한 embedding profile만 사용합니다. 모델 종류를 제한하지 않지만 corpus hash, model, revision, dimensions, query/document prefix, input format과 chunk coverage가 index 생성 시점과 runtime에서 모두 일치해야 합니다. Release evaluator는 특정 모델명을 승인 조건으로 사용하지 않고 full-vector 무결성과 동일한 한국어 중심 품질 gate를 검사합니다. 저장소의 `index/current`는 현재 검증된 기본 E5 profile의 reference artifact입니다.
 
 ## 언어별 검색
 
@@ -146,11 +137,11 @@ TEI sidecar 자체 모델을 바꾸려면 `RULE_MCP_TEI_MODEL_ID`와 `KRX_EMBEDD
 {"query": "상장 심사", "language": "ko", "limit": 5}
 ```
 
-영문 규정은 `id`가 `{한국어 규정 id}-en` 형태이고, `source_id`에 원 한국어 규정 id가 들어갑니다. 언어를 지정하지 않으면 한국어와 영문 corpus를 함께 검색합니다.
+영문 규정은 `id`가 `{한국어 규정 id}-en` 형태이고, `source_id`에 원 한국어 규정 id가 들어갑니다. 언어를 지정하지 않으면 한국어와 영문 corpus를 함께 검색합니다. 이 프로젝트의 품질 기준과 선택형 reranker는 한국어가 우선이므로 한국어 RAG 클라이언트는 `language: "ko"`를 명시해야 합니다.
 
 ## RAG 문맥 조회
 
-`search_rules`는 문서 metadata, snippet, `matched_chunk_id`, `matched_chunk_index`, owning `article_id`, `heading_path`를 반환합니다. 첨부가 매칭된 경우 `attachment_matches`에도 같은 anchor와 chunk id/index가 들어갑니다. 두 index 필드는 0부터 시작하며 값이 0이어도 응답에서 생략되지 않습니다. 조문 범위를 추측한 휴리스틱 값은 공개 API에 내보내지 않습니다. 도메인 사전 확장어는 원 질의보다 낮은 BM25 가중치로 반영됩니다. 점수는 결과 정렬용 신호이며 정답 확률이 아닙니다.
+`search_rules`는 문서 metadata와 최대 세 개의 `evidence_matches`를 반환합니다. 각 evidence에는 chunk id/index, source, owning `article_id`, `heading_path`, snippet과 채널별 점수가 들어갑니다. 첨부가 매칭된 경우 `attachment_matches`에도 attachment metadata와 chunk anchor가 들어갑니다. index는 0부터 시작하며 값이 0이어도 응답에서 생략되지 않습니다. 도메인 사전 확장어는 원 질의보다 낮은 BM25 가중치로 반영됩니다. 점수는 결과 정렬용 신호이며 정답 확률이 아닙니다.
 
 KRX 도메인 사전이 적용된 경우 `query_expansion`도 함께 반환됩니다. 이 필드에는 원 query, 확장 query, 적용된 사전 항목, confidence, review status, source URL이 들어가며, RAG 클라이언트는 어떤 공식 용어로 recall이 보강됐는지 확인할 수 있습니다. 사전은 검색 보강용이며 최종 답변의 법적 근거는 반드시 `get_context`, `get_rule`, `get_attachment`에서 가져온 규정 본문이어야 합니다.
 
@@ -239,7 +230,7 @@ go run ./cmd/krx-rule-mcp \
   --domain-lexicon config/domain-lexicon.yaml
 ```
 
-`TOKEN` 값은 클라이언트에 한 번 전달하고 registry나 로그에는 저장하지 않습니다. Registry에는 토큰 문자열의 SHA-256만 기록되며 `id`는 운영용 식별자입니다. 파일은 1 MiB, 1,024개 token으로 제한되고 unknown field, 중복 id/hash, 잘못된 digest, 누락된 `enabled`, 활성 token이 없는 구성을 거부합니다. `RULE_MCP_BEARER_TOKEN`과 `--token`은 제거되었으며 사용하면 migration 오류 또는 unknown flag 오류가 발생합니다.
+`TOKEN` 값은 클라이언트에 한 번 전달하고 registry나 로그에는 저장하지 않습니다. Registry에는 토큰 문자열의 SHA-256만 기록되며 `id`는 운영용 식별자입니다. 파일은 1 MiB, 1,024개 token으로 제한되고 unknown field, 중복 id/hash, 잘못된 digest, 누락된 `enabled`, 활성 token이 없는 구성을 거부합니다.
 
 HTTP의 기본 인증 모드는 `required`입니다. 신뢰된 내부망에서만 인증을 끄려면 `RULE_MCP_AUTH_MODE=disabled` 또는 `--auth-mode disabled`를 명시합니다. 이 경우 token 파일은 읽지 않지만 Origin, 크기, 동시성, deadline, rate limit은 계속 적용됩니다. HTTP transport는 stateless이므로 어느 replica로 요청이 전달되어도 서버측 session affinity가 필요하지 않습니다.
 
@@ -264,7 +255,9 @@ go run ./cmd/krx-rule-mcp \
 
 출력된 `release_generation`을 `RULE_MCP_EXPECTED_RELEASE_GENERATION`에 설정하면 `/readyz`는 실제 canonical descriptor와 일치하는 Pod만 ready로 처리합니다. Descriptor에는 corpus/index source·build hash, BM25 artifact digest, 채택된 vector와 metadata digest, 도메인 사전 digest, runtime vector mode, server image digest와 TEI runtime image digest가 포함됩니다. 따라서 server 또는 TEI image만 교체해도 별도의 release generation이 생성됩니다.
 
-Vector 검색을 쓰려면 index 생성 때 `--vector-index`로 vector 포함 generation을 publish하고, 서버에 `KRX_VECTOR_SEARCH_ENABLED=true`를 지정합니다. 서버 실행에는 별도 vector 경로를 주지 않습니다. 비활성화하면 generation에 vector가 있어도 파일을 읽지 않습니다. `KRX_VECTOR_SEARCH_POLICY=optional`은 잘못된 vector/embedding 설정에서 BM25로 fallback합니다. 운영에서 vector가 필수이면 `KRX_VECTOR_SEARCH_POLICY=required` 또는 `--require-vector`를 사용합니다. 이 정책은 full coverage와 embedding 설정이 없으면 기동을 실패시키고, runtime embedding 오류·timeout·잘못된 vector 응답은 BM25 결과가 아닌 MCP tool error로 반환합니다. HTTP `/readyz`도 실제 canary embedding이 유효해야 200을 반환합니다.
+Vector 검색을 쓰려면 index 생성 때 `--vector`로 vector 포함 generation을 publish하고, 서버에 `KRX_VECTOR_SEARCH_ENABLED=true`를 지정합니다. 서버 실행에는 별도 vector 경로를 주지 않습니다. 비활성화하면 generation에 vector가 있어도 파일을 읽지 않습니다. `KRX_VECTOR_SEARCH_POLICY=optional`은 잘못된 vector/embedding 설정에서 BM25로 fallback합니다. 운영에서 vector가 필수이면 `KRX_VECTOR_SEARCH_POLICY=required` 또는 `--require-vector`를 사용합니다. 이 정책은 full coverage와 embedding 설정이 없으면 기동을 실패시키고, runtime embedding 오류·timeout·잘못된 vector 응답은 BM25 결과가 아닌 MCP tool error로 반환합니다. HTTP `/readyz`도 실제 canary embedding이 유효해야 200을 반환합니다.
+
+한국어 reranker는 기본적으로 꺼져 있습니다. 활성화하면 한국어 질의의 제한된 상위 후보를 재정렬하며, 이전의 `supported` 판정에 따른 실행·채택 조건은 사용하지 않습니다. 문서 순위는 유지하고 문서 내부 evidence 순서를 조정합니다. `KRX_RERANKER_POLICY=required`의 모델 검증·기동·readiness 조건은 유지합니다. 서버에 답변 생성용 LLM을 추가할 필요는 없습니다.
 
 ## Docker Compose
 
@@ -276,6 +269,16 @@ required-vector 정책으로 띄우는 운영 런타임입니다. TEI `/health`�
 Corpus sync는 compose 서비스가 아니라
 [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)의
 단발성 작업으로 수행합니다.
+
+선택형 reranker는 별도의 `reranker` profile입니다. CPU 기준으로 고정된 `dragonkue/bge-reranker-v2-m3-ko` revision, F16, 4-passage batch, 2,048-token batch 한도를 예시로 제공하지만 자동 활성화하지 않습니다.
+
+```bash
+docker compose --profile reranker up -d krx-rule-reranker
+KRX_RERANKER_ENABLED=true \
+KRX_RERANKER_POLICY=required \
+KRX_REQUIRE_RERANKER=true \
+docker compose up -d krx-rule-mcp
+```
 
 ```bash
 cp .env.compose.example .env
@@ -299,8 +302,9 @@ curl http://localhost:8080/healthz
 - `OPENAI_API_KEY=local`
 - `KRX_EMBEDDING_QUERY_PREFIX=query: `
 - `KRX_EMBEDDING_DOCUMENT_PREFIX=passage: `
+- `KRX_EMBEDDING_INPUT_FORMAT=text-v1`
 
-외부 OpenAI 호환 embeddings API나 다른 TEI 모델을 쓰려면 vector 포함 generation을 새 설정으로 재생성하고, 서버 실행 환경에도 같은 `KRX_EMBEDDING_*` 값을 지정하세요. Vector metadata에는 corpus/index hash, model/revision, dimensions, query/document prefix, scope와 chunk-id coverage가 기록되며 하나라도 다르면 vector 검색은 비활성화되거나 required 정책에서 기동을 실패합니다.
+위 값은 저장소 제공 reference artifact의 기본 profile이며 프로젝트의 유일한 허용 모델이 아닙니다. 다른 TEI 모델이나 외부 OpenAI 호환 embeddings API도 사용할 수 있지만 해당 모델의 dimensions, revision, prefix와 input format으로 vector generation을 다시 만들어야 합니다. 비기본 모델은 E5 revision/prefix를 자동 상속하지 않습니다. Vector metadata에는 corpus/index hash, model/revision, dimensions, query/document prefix, embedding input format, scope와 chunk-id coverage가 기록되며 하나라도 runtime 설정과 다르면 vector 검색은 비활성화되거나 required 정책에서 기동을 실패합니다.
 
 TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 아키텍처에서 동작하고 이 Compose의 CLI·HTTP 계약과 호환되는 이미지를
@@ -314,6 +318,32 @@ TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 기본 사전 파일은 [config/domain-lexicon.yaml](config/domain-lexicon.yaml)입니다. 서버는 시작할 때 이 YAML을 읽고, 파싱/검증에 실패하면 설정 오류로 종료합니다. 다른 파일을 쓰려면 `--domain-lexicon` 또는 `KRX_DOMAIN_LEXICON_PATH`를 지정하세요.
 
 사전은 KRX 법무포털 corpus, KRX 제도 설명 페이지, KRX ETF 용어사전, KRX Global 영문 페이지를 근거로 관리합니다. 자세한 출처와 운영 원칙은 [docs/domain-lexicon.md](docs/domain-lexicon.md)를 참고하세요.
+
+## 검색 품질 평가
+
+`krx-rule-eval`은 실제 `search_rules → get_context` 경로에서 검색 결과와 근거를 검사합니다. 유지하는 평가 자료는 다음 세 파일입니다.
+
+- `eval/fixtures/retrieval.json`: 질의·필터·문서/조문/첨부 target을 포함한 210개 회귀 사례.
+- `eval/baselines/retrieval.json`: 동일 corpus/index/질의 계약의 언어별 검색 회귀 기준선.
+- `eval/schema/retrieval.schema.json`: 현재 평가 fixture의 schema v2.
+
+문서 Hit@5와 상위 5개 문서의 근거 묶음 포함률, 모든 반환 청크의 소유 관계·잘림·필터 누출을 검사합니다. 범위 밖/모호한 질문에 검색 후보가 있다는 사실은 답변 승인으로 세지 않습니다. 최종 답변 정확성·거절·재질문은 호출 LLM의 별도 평가 대상입니다.
+
+```bash
+KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
+go run ./cmd/krx-rule-eval \
+  --data-dir ../krx-rule-markdown/data --index-dir index \
+  --vector --require-vector --fail-on-gate \
+  --output /tmp/krx-retrieval-eval.json
+```
+
+`--fail-on-gate`는 full-vector 무결성, 반환 계약, 필터, 문맥 일치와 고정 기준선 대비 검색 회귀를 검사합니다. `--split`/`--case-prefix`는 진단 전용이며 gate와 함께 사용하지 않습니다. BM25 진단은 vector 플래그를 생략합니다.
+
+별도 fixture는 `--fixture`로 지정합니다. 봉인된 holdout은 외부에서 준비한 canonical source 예약 파일을 `--holdout-reservation`으로 함께 지정해야 합니다. 이미 검토한 자료를 독립 평가로 재사용하지 않습니다. 평가 지표와 절차는 [품질 계약](docs/rag-quality-contract.md)에 정리합니다.
+
+`eval/compare.py <변경 전 보고서> <변경 후 보고서>`로 같은 질의/target과 인덱스를 사용한 결과를 비교합니다. 실행 결과는 `eval/results/`에 생성되며 Git에서 제외됩니다. 일회성 실험·샘플·아카이브는 프로젝트 소스에 포함하지 않습니다.
+
+`.github/workflows/retrieval-eval.yml`은 정확한 corpus commit을 받아 고정 인덱스를 검증하는 수동 검색 회귀 검사입니다. 자동 배포를 수행하지 않습니다.
 
 ## 테스트
 

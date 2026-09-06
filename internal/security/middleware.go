@@ -16,22 +16,27 @@ type Metrics struct {
 	ToolCalls           map[string]int64
 	ToolDurationSeconds map[string]float64
 	EmbeddingFallbacks  map[string]int64
+	RerankerFallbacks   map[string]int64
 	runtimeInfo         RuntimeInfo
 }
 
 type RuntimeInfo struct {
-	ReleaseGeneration    string
-	CorpusDigest         string
-	IndexDigest          string
-	VectorDigest         string
-	VectorMetadataDigest string
-	DomainLexiconDigest  string
-	RuntimeVectorMode    string
-	ServerImageDigest    string
-	VectorCoverage       float64
-	AuthMode             string
-	AuthRegistryDigest   string
-	ActiveBearerTokens   int
+	ReleaseGeneration       string
+	CorpusDigest            string
+	IndexDigest             string
+	VectorDigest            string
+	VectorMetadataDigest    string
+	DomainLexiconDigest     string
+	RuntimeVectorMode       string
+	RetrievalCandidateLimit int
+	RerankerModel           string
+	RerankerRevision        string
+	RerankerImageDigest     string
+	ServerImageDigest       string
+	VectorCoverage          float64
+	AuthMode                string
+	AuthRegistryDigest      string
+	ActiveBearerTokens      int
 }
 
 func NewMetrics() *Metrics {
@@ -40,6 +45,7 @@ func NewMetrics() *Metrics {
 		ToolCalls:           map[string]int64{},
 		ToolDurationSeconds: map[string]float64{},
 		EmbeddingFallbacks:  map[string]int64{},
+		RerankerFallbacks:   map[string]int64{},
 	}
 }
 
@@ -68,6 +74,12 @@ func (m *Metrics) CountEmbeddingFallback(reason string) {
 	m.EmbeddingFallbacks[reason]++
 }
 
+func (m *Metrics) CountRerankerFallback(reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.RerankerFallbacks[reason]++
+}
+
 func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -82,9 +94,12 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	for reason, count := range m.EmbeddingFallbacks {
 		_, _ = fmt.Fprintf(w, "krx_rule_mcp_embedding_fallback_total{reason=\"%s\"} %s\n", prometheusLabel(reason), itoa64(count))
 	}
+	for reason, count := range m.RerankerFallbacks {
+		_, _ = fmt.Fprintf(w, "krx_rule_mcp_reranker_fallback_total{reason=\"%s\"} %s\n", prometheusLabel(reason), itoa64(count))
+	}
 	if m.runtimeInfo.ReleaseGeneration != "" {
 		_, _ = fmt.Fprintf(w,
-			"krx_rule_mcp_release_info{release_generation=\"%s\",corpus_digest=\"%s\",index_digest=\"%s\",vector_digest=\"%s\",vector_metadata_digest=\"%s\",domain_lexicon_digest=\"%s\",runtime_vector_mode=\"%s\",server_image_digest=\"%s\"} 1\n",
+			"krx_rule_mcp_release_info{release_generation=\"%s\",corpus_digest=\"%s\",index_digest=\"%s\",vector_digest=\"%s\",vector_metadata_digest=\"%s\",domain_lexicon_digest=\"%s\",runtime_vector_mode=\"%s\",retrieval_candidate_limit=\"%d\",reranker_model=\"%s\",reranker_revision=\"%s\",reranker_image_digest=\"%s\",server_image_digest=\"%s\"} 1\n",
 			prometheusLabel(m.runtimeInfo.ReleaseGeneration),
 			prometheusLabel(m.runtimeInfo.CorpusDigest),
 			prometheusLabel(m.runtimeInfo.IndexDigest),
@@ -92,6 +107,10 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 			prometheusLabel(m.runtimeInfo.VectorMetadataDigest),
 			prometheusLabel(m.runtimeInfo.DomainLexiconDigest),
 			prometheusLabel(m.runtimeInfo.RuntimeVectorMode),
+			m.runtimeInfo.RetrievalCandidateLimit,
+			prometheusLabel(m.runtimeInfo.RerankerModel),
+			prometheusLabel(m.runtimeInfo.RerankerRevision),
+			prometheusLabel(m.runtimeInfo.RerankerImageDigest),
 			prometheusLabel(m.runtimeInfo.ServerImageDigest),
 		)
 		_, _ = fmt.Fprintf(w, "krx_rule_mcp_vector_coverage_ratio %g\n", m.runtimeInfo.VectorCoverage)

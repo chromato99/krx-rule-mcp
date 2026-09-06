@@ -10,6 +10,10 @@ entries:
       - dynamic price limit
       - realtime price limit
       - real-time price limit
+    match_groups:
+      - [파생상품, 선물, futures, derivatives]
+      - [실시간, realtime, real-time]
+      - [상하한가, 가격제한, price limit]
     expansions:
       - 실시간 가격제한
       - 실시간 상한가
@@ -19,6 +23,14 @@ entries:
       - 가격제한폭
       - 파생상품시장 업무규정 시행세칙
       - 별표25
+      - real-time upper and lower price limits of quotations
+      - quotation price fluctuation limit
+    evidence_terms:
+      - 실시간 가격제한
+      - 실시간상한가
+      - 실시간하한가
+      - 가격변동폭
+      - real-time price limit
     source_urls:
       - https://regulation.krx.co.kr/contents/RGL/03/03050600/RGL03050600.jsp
       - https://rule.krx.co.kr/out/index.do
@@ -40,6 +52,9 @@ entries:
       - 기준가격
       - 상한가
       - 하한가
+      - 실시간 가격제한의 가격변동폭
+      - real-time price limit of quotations
+      - real-time upper and lower price limits of quotations
     source_urls:
       - https://regulation.krx.co.kr/contents/RGL/03/03020201/RGL03020201.jsp
       - https://regulation.krx.co.kr/contents/RGL/03/03050600/RGL03050600.jsp
@@ -227,6 +242,9 @@ entries:
       - premium/discount
       - 시장가격 순자산가치 차이
       - 시장가격과 순자산가치
+    match_groups:
+      - [ETF, 상장지수펀드, 상장지수집합투자기구, NAV, 순자산가치, 자산가치]
+      - [괴리, 차이, 벌어, 어긋, 수렴]
     expansions:
       - ETF
       - 상장지수펀드
@@ -235,11 +253,17 @@ entries:
       - 시장가격
       - 순자산가치
       - 상장규정
+      - 유동성공급호가 제출의무
+      - 종가와 순자산가치의 괴리
+    evidence_terms:
+      - 괴리율
+      - 순자산가치
+      - 유동성공급호가
     source_urls:
       - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500.jsp
       - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
     confidence: high
-    review_status: official-glossary
+    review_status: curated-corpus
 
   - id: etf_tracking_error
     canonical: 추적오차율
@@ -256,3 +280,256 @@ entries:
       - https://open.krx.co.kr/contents/OPN/01/01030500/OPN01030500T1.jsp
     confidence: high
     review_status: official-glossary
+
+  - id: listing_prior_consultation
+    canonical: 사전협의 의무
+    aliases:
+      - 사전 협의
+      - 먼저 상의
+      - prior consultation
+      - 사전 햡의
+      - 상장예심
+    match_groups:
+      - [상장, 신규상장, 상장예비심사, 입성, listing]
+      - [협의, 상의, 조율, 조정, 문의, 물어, 맞추, coordination, consultation]
+    expansions:
+      - 사전협의
+      - 사전협의 의무
+      - 상장예비심사
+    evidence_terms:
+      - 사전협의
+      - 사전협의 의무
+      - 미리 거래소와 협의
+      - prior consultation
+      - prior coordination
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: customer_margin_use_restriction
+    canonical: 위탁증거금 사용제한
+    aliases:
+      - use customer margin
+      - 고객 담보금
+      - posted margin
+      - restriction on use of customer margins
+    match_groups:
+      - [고객, 위탁자, client, customer]
+      - [위탁증거금, 증거금, 담보, 대용증권, 외화증권, 외화, margin, collateral]
+      - [사용, 이용, 전용, 쓰, 쓸, 써, 납부, 지급, spend, repurpose, diversion, divert]
+    expansions:
+      - 위탁증거금
+      - 사용제한
+      - 다른 목적
+      - restrictions on use of customer margins
+      - use of customer margins for another purpose
+      - 위탁자로부터 예탁받은 현금 대용증권 외화 외화증권
+      - 해당 위탁자의 거래와 관련한 결제
+      - 정하는 방법 이외에는 사용하지 못한다
+    evidence_terms:
+      - 위탁증거금 사용제한
+      - 이외에는 사용하지 못한다
+      - 사용하여서는 아니된다
+      - restrictions on use of customer margins
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: final_settlement_recalculation
+    canonical: 최종결제가격 재산출
+    aliases:
+      - 다시 계산
+      - 재계산
+      - recalculate final settlement
+    expansions:
+      - 최종결제가격
+      - 재산출
+      - 정정
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: intraday_member_margin_deadline
+    canonical: 일중청산증거금 예탁시한
+    aliases:
+      - intraday clearing margin due
+      - intraday member margin deadline
+    match_groups:
+      - [장중, 일중, intraday]
+      - [청산증거금, 청산담보, 청산회원, member margin]
+      - [시각, 시간, 시한, 시까지, 마감, 언제, deadline, due]
+    expansions:
+      - 일중청산증거금
+      - 예탁시한
+      - deposit of intraday member margins
+      - deposit deadline of intraday member margin
+    evidence_terms:
+      - 일중청산증거금의 예탁시한
+      - deposit deadline of intraday member margin
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: intraday_client_margin_deadline
+    canonical: 일중청산위탁증거금 예탁시한
+    aliases:
+      - intraday client margin due
+      - intraday customer clearing margin deadline
+    match_groups:
+      - [장중, 일중, intraday]
+      - [위탁, 고객, client, customer, 받아, 징수, collect]
+      - [증거금, 담보, margin]
+      - [시각, 시간, 시한, 시까지, 마감, 언제, deadline, due]
+    expansions:
+      - 일중청산위탁증거금
+      - 예탁시한
+      - deposit of intraday client margins
+      - deposit deadline for intraday client margin
+    evidence_terms:
+      - 일중청산위탁증거금의 예탁시한
+      - deposit deadline for intraday client margin
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: trade_reporting_lei
+    canonical: LEI의 사용의무
+    aliases:
+      - LEI
+      - 법인식별기호
+      - 국제 법인식별기호
+    expansions:
+      - LEI의 사용의무
+      - 거래당사자에 관한 식별정보
+      - 거래상대방에 관한 식별정보
+      - 법인식별기호
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: trade_reporting_uti
+    canonical: UTI의 사용의무
+    aliases:
+      - UTI
+      - 거래고유식별기호
+      - 고유 식별코드
+      - 거래보고 식별코드
+      - 거래 식별기호
+    match_groups:
+      - [거래별, 건별, 거래마다, 보고마다, 보고 건, per report, each reportable transaction]
+      - [고유번호, 식별, identifier, unique]
+    expansions:
+      - UTI의 사용의무
+      - 거래정보를 보고할 때
+      - 보고대상거래 건별
+      - UTI use obligation
+      - use of UTI
+    evidence_terms:
+      - 거래고유식별기호
+      - UTI use obligation
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: fair_disclosure_indirect_provision
+    canonical: 공정공시 대상정보의 우회제공 금지
+    aliases:
+      - 우회해서 제공
+      - 우회 제공
+      - 간접 제공
+      - 간접 공정공시
+      - 간접 전달 금지
+    expansions:
+      - 공정공시 대상정보
+      - 우회제공 금지
+      - 정보제공대상자를 통한 제공
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: margin_reduction_variables
+    canonical: 증거금 감면액 산출변수
+    aliases:
+      - 상품군 가격상관율
+      - 상대적규모비율
+      - 상대적 규모비율
+      - 증거금 감면액 계산
+    expansions:
+      - 증거금 감면액
+      - 상품군별 가격상관율
+      - 상대적 규모비율
+      - 증거금 감면액 산출변수
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: market_maker_short_evaluation_period
+    canonical: 시장조성일수 5일 미만 평가제외
+    aliases:
+      - 닷새보다 적
+      - 5일보다 적
+    match_groups:
+      - [시장조성, 의무이행]
+      - [미만, 적, 나흘, 닷새, 5일]
+    expansions:
+      - 시장조성일수가 5일 미만
+      - 평가대상에서 제외
+      - 기간의무이행률
+      - 의무충족일수
+    evidence_terms:
+      - 시장조성일수
+      - 평가대상에서 제외
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: market_maker_score_cap
+    canonical: 상품별 평가항목 점수
+    aliases:
+      - 거래실적 평가점수
+    match_groups:
+      - [상품별, 거래실적]
+      - [점수, 평가점수, 평가항목]
+      - [min, 최솟값, 작은, 10]
+    expansions:
+      - 상품별 평가항목 점수
+      - min 10
+      - 거래실적 평가기준
+    evidence_terms:
+      - 상품별 평가항목 점수
+      - 거래실적 평가기준
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus
+
+  - id: short_sale_uptick_rule
+    canonical: 차입공매도호가의 가격제한
+    aliases:
+      - 업틱룰
+      - 공매도 가격제한
+    match_groups:
+      - [공매도, 차입공매도, short sale]
+      - [가격, 호가, price]
+      - [하락, 아래, 제한, uptick]
+    expansions:
+      - 차입공매도호가의 가격제한
+      - 업틱룰 예외
+      - 공매도 제도 개정예고
+    evidence_terms:
+      - 차입공매도호가
+      - 업틱룰 예외
+    source_urls:
+      - https://rule.krx.co.kr/out/index.do
+    confidence: high
+    review_status: curated-corpus

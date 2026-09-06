@@ -15,35 +15,30 @@ import (
 
 func main() {
 	var (
-		dataDir     = flag.String("data-dir", envDataDir(), "KRX rule Markdown corpus directory")
-		indexDir    = flag.String("index-dir", envIndexDir(), "search index snapshot directory")
-		indexPath   = flag.String("index", "", "BM25/core index snapshot path")
-		vectorPath  = flag.String("vector-index", "", "optional vector snapshot path")
-		vectorLimit = flag.Int("vector-limit", 0, "optional maximum number of chunks to embed")
-		sampleQuery = flag.String("vector-sample-query", "", "optional | separated sample queries for vector smoke indexing")
-		samplePer   = flag.Int("vector-sample-per-query", 16, "chunks per sample query")
-		force       = flag.Bool("force", false, "rebuild snapshots even when they are current")
-		check       = flag.Bool("check", false, "check index freshness without writing files")
-		requireFull = flag.Bool("require-full-vector", false, "require a full-coverage vector snapshot when checking")
+		dataDir        = flag.String("data-dir", envDataDir(), "KRX rule Markdown corpus directory")
+		indexDir       = flag.String("index-dir", envIndexDir(), "search index snapshot directory")
+		buildVector    = flag.Bool("vector", false, "build and publish a vector artifact with the BM25 artifact")
+		vectorLimit    = flag.Int("vector-limit", 0, "optional maximum number of chunks to embed")
+		sampleQuery    = flag.String("vector-sample-query", "", "optional | separated sample queries for vector smoke indexing")
+		samplePer      = flag.Int("vector-sample-per-query", 16, "chunks per sample query")
+		embeddingInput = flag.String("embedding-input", envDefault("KRX_EMBEDDING_INPUT_FORMAT", string(searchindex.DefaultEmbeddingInputFormat)), "document embedding input: text-v1 or structured-v1")
+		force          = flag.Bool("force", false, "rebuild snapshots even when they are current")
+		check          = flag.Bool("check", false, "check index freshness without writing files")
+		requireFull    = flag.Bool("require-full-vector", false, "require a full-coverage vector snapshot when checking")
 	)
 	flag.Parse()
 
-	if *indexPath == "" {
-		*indexPath = envDefault("KRX_INDEX_PATH", searchindex.DefaultBM25Path(*indexDir))
+	vectorRequested := *buildVector
+	inputFormat := searchindex.DefaultEmbeddingInputFormat
+	if vectorRequested {
+		parsedInputFormat, parseErr := searchindex.ParseEmbeddingInputFormat(*embeddingInput)
+		if parseErr != nil {
+			fatal(parseErr)
+		}
+		inputFormat = parsedInputFormat
 	}
-	if filepath.Base(filepath.Clean(*indexPath)) != searchindex.BM25SnapshotFile {
-		fatal(fmt.Errorf("--index must name %s when generation publishing is enabled", searchindex.BM25SnapshotFile))
-	}
-	// Preserve the legacy --index flag as an index-directory selector. Files are
-	// always published below generations/<content-id>; the root path is never
-	// replaced independently of its vector companion.
-	*indexDir = filepath.Dir(filepath.Clean(*indexPath))
-	if strings.TrimSpace(*vectorPath) == "" {
-		*vectorPath = strings.TrimSpace(os.Getenv("KRX_VECTOR_INDEX_PATH"))
-	}
-	vectorRequested := strings.TrimSpace(*vectorPath) != ""
 	if *requireFull && !vectorRequested {
-		fatal(fmt.Errorf("--require-full-vector requires --vector-index"))
+		fatal(fmt.Errorf("--require-full-vector requires --vector"))
 	}
 
 	var buildLock *searchindex.GenerationBuildLock
@@ -82,7 +77,7 @@ func main() {
 		vectorCurrent = false
 		if indexCurrent && currentDescriptor.Vector != nil {
 			currentVectorPath = filepath.Join(currentDir, searchindex.VectorSnapshotFile)
-			vectorCurrent = vectorFreshWithPolicy(currentVectorPath, snap, embedder, *requireFull)
+			vectorCurrent = vectorFreshWithPolicy(currentVectorPath, snap, embedder, inputFormat, *requireFull)
 		}
 	}
 
@@ -110,9 +105,34 @@ func main() {
 		if len(selected) == 0 {
 			fatal(fmt.Errorf("vector selection produced no chunks"))
 		}
-		vectors, err := searchindex.EmbedSnapshotChunks(context.Background(), selected, embedder)
+		embeddingChunks, err := searchindex.PrepareEmbeddingChunks(selected, docs, inputFormat)
 		if err != nil {
 			fatal(err)
+		}
+		vectors := map[string][]float64{}
+		missing := embeddingChunks
+		// A text-v1 input is independent of document metadata and chunk IDs.
+		// Reuse only exact text under a verified, identical, revision-pinned
+		// profile. --force always recomputes vectors.
+		if !*force && currentErr == nil && currentDescriptor.Vector != nil &&
+			inputFormat == searchindex.EmbeddingInputTextV1 && embedder.ModelRevision != "" {
+			previous, loadErr := searchindex.LoadSnapshot(currentIndexPath)
+			previousVectorPath := filepath.Join(currentDir, searchindex.VectorSnapshotFile)
+			if loadErr == nil && vectorFreshWithPolicy(previousVectorPath, previous, embedder, inputFormat, true) {
+				oldVectors, loadErr := searchindex.LoadVectorSnapshot(previousVectorPath)
+				if loadErr != nil {
+					fatal(loadErr)
+				}
+				vectors, missing = reuseExactTextVectors(previous, oldVectors, embeddingChunks)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "embedding chunks=%d reused=%d new=%d\n", len(embeddingChunks), len(vectors), len(missing))
+		generated, err := searchindex.EmbedSnapshotChunks(context.Background(), missing, embedder)
+		if err != nil {
+			fatal(err)
+		}
+		for id, vector := range generated {
+			vectors[id] = vector
 		}
 		model, dimensions := embedder.EmbeddingInfo()
 		if dimensions == 0 && len(vectors) > 0 {
@@ -132,8 +152,9 @@ func main() {
 		build.VectorOptions = searchindex.VectorWriteOptions{
 			Scope:          scope,
 			ModelRevision:  embedder.ModelRevision,
-			QueryPrefix:    envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: "),
-			DocumentPrefix: envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: "),
+			QueryPrefix:    searchindex.EmbeddingQueryPrefixFromEnv(embedder.Model),
+			DocumentPrefix: searchindex.EmbeddingDocumentPrefixFromEnv(embedder.Model),
+			InputFormat:    inputFormat,
 		}
 	}
 	published, err := buildLock.Publish(build)
@@ -145,6 +166,29 @@ func main() {
 		fmt.Printf(" vectors=%d model=%s", published.Vector.Vectors, published.Vector.Model)
 	}
 	fmt.Println()
+}
+
+func reuseExactTextVectors(previous searchindex.Snapshot, old searchindex.VectorSnapshot, chunks []searchindex.SnapshotChunk) (map[string][]float64, []searchindex.SnapshotChunk) {
+	byID := make(map[string][]float64, len(old.Vectors))
+	for _, item := range old.Vectors {
+		byID[item.ChunkID] = item.Vector
+	}
+	byText := make(map[string][]float64, len(previous.Chunks))
+	for _, chunk := range previous.Chunks {
+		if vector, ok := byID[chunk.ID]; ok {
+			byText[chunk.Text] = vector
+		}
+	}
+	reused := map[string][]float64{}
+	var missing []searchindex.SnapshotChunk
+	for _, chunk := range chunks {
+		if vector, ok := byText[chunk.Text]; ok {
+			reused[chunk.ID] = vector
+		} else {
+			missing = append(missing, chunk)
+		}
+	}
+	return reused, missing
 }
 
 func bm25Current(path string, snap searchindex.Snapshot) bool {
@@ -160,18 +204,18 @@ func bm25Current(path string, snap searchindex.Snapshot) bool {
 }
 
 func vectorFresh(path string, snap searchindex.Snapshot, embedder *searchindex.OpenAIEmbedder) bool {
-	return vectorFreshWithPolicy(path, snap, embedder, false)
+	return vectorFreshWithPolicy(path, snap, embedder, searchindex.DefaultEmbeddingInputFormat, false)
 }
 
-func vectorFreshWithPolicy(path string, snap searchindex.Snapshot, embedder *searchindex.OpenAIEmbedder, requireFull bool) bool {
+func vectorFreshWithPolicy(path string, snap searchindex.Snapshot, embedder *searchindex.OpenAIEmbedder, inputFormat searchindex.EmbeddingInputFormat, requireFull bool) bool {
 	vector, err := searchindex.LoadVectorSnapshot(path)
 	if err != nil {
 		return false
 	}
 	if vector.Version != searchindex.VectorSnapshotFormatVersion || vector.IndexSourceHash != snap.IndexSourceHash || vector.IndexBuildHash != snap.IndexBuildHash || vector.CorpusReleaseHash != snap.CorpusReleaseHash ||
 		vector.Model != embedder.Model || vector.ModelRevision != embedder.ModelRevision || vector.Dimensions != embedder.Dimensions ||
-		vector.QueryPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: ") ||
-		vector.DocumentPrefix != envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: ") {
+		vector.QueryPrefix != searchindex.EmbeddingQueryPrefixFromEnv(embedder.Model) ||
+		vector.DocumentPrefix != searchindex.EmbeddingDocumentPrefixFromEnv(embedder.Model) {
 		return false
 	}
 	expectedIDs := make([]string, 0, len(snap.Chunks))
@@ -193,6 +237,7 @@ func vectorFreshWithPolicy(path string, snap searchindex.Snapshot, embedder *sea
 		ModelRevision:  vector.ModelRevision,
 		QueryPrefix:    vector.QueryPrefix,
 		DocumentPrefix: vector.DocumentPrefix,
+		InputFormat:    inputFormat,
 		GenerationID:   vector.GenerationID,
 	})
 	metadata, err := searchindex.LoadVectorMetadata(searchindex.VectorMetadataPath(path))
@@ -200,6 +245,7 @@ func vectorFreshWithPolicy(path string, snap searchindex.Snapshot, embedder *sea
 		return false
 	}
 	return metadata.Version == searchindex.VectorMetadataFormatVersion &&
+		metadata.InputFormat == inputFormat &&
 		metadata.GenerationID == vector.GenerationID &&
 		metadata.IndexSourceHash == snap.IndexSourceHash &&
 		metadata.IndexBuildHash == snap.IndexBuildHash &&
@@ -212,8 +258,8 @@ func vectorFreshWithPolicy(path string, snap searchindex.Snapshot, embedder *sea
 		metadata.StoredVectorCount == len(vector.Vectors) &&
 		metadata.ChunkIDSetHash == vector.ChunkIDSetHash &&
 		metadata.StoredChunkIDSetHash == expectedMetadata.StoredChunkIDSetHash &&
-		metadata.DocumentPrefix == envDefaultPreserveSpace("KRX_EMBEDDING_DOCUMENT_PREFIX", "passage: ") &&
-		metadata.QueryPrefix == envDefaultPreserveSpace("KRX_EMBEDDING_QUERY_PREFIX", "query: ")
+		metadata.DocumentPrefix == searchindex.EmbeddingDocumentPrefixFromEnv(embedder.Model) &&
+		metadata.QueryPrefix == searchindex.EmbeddingQueryPrefixFromEnv(embedder.Model)
 }
 
 func selectVectorChunks(chunks []searchindex.SnapshotChunk, queries []string, perQuery, limit int) []searchindex.SnapshotChunk {
@@ -285,30 +331,16 @@ func splitQueries(raw string) []string {
 }
 
 func envDataDir() string {
-	if value := strings.TrimSpace(os.Getenv("KRX_RULE_DATA_DIR")); value != "" {
-		return value
-	}
-	return envDefault("KRX_DATA_DIR", "data")
+	return envDefault("KRX_RULE_DATA_DIR", "data")
 }
 
 func envIndexDir() string {
-	if value := strings.TrimSpace(os.Getenv("KRX_RULE_INDEX_DIR")); value != "" {
-		return value
-	}
-	return envDefault("KRX_INDEX_DIR", searchindex.DefaultIndexDir)
+	return envDefault("KRX_RULE_INDEX_DIR", searchindex.DefaultIndexDir)
 }
 
 func envDefault(key, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func envDefaultPreserveSpace(key, fallback string) string {
-	value, ok := os.LookupEnv(key)
-	if !ok {
 		return fallback
 	}
 	return value

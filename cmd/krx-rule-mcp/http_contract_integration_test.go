@@ -23,9 +23,7 @@ import (
 
 func TestStatelessHTTPContractChainWithPublishedGeneration(t *testing.T) {
 	dataRoot, indexDir := writeHTTPContractRelease(t)
-	repo, err := searchindex.LoadRepositoryGeneration(dataRoot, indexDir, searchindex.RepositoryLoadOptions{
-		RequireCorpusManifest: true,
-	})
+	repo, err := searchindex.LoadRepositoryGeneration(dataRoot, indexDir, searchindex.RepositoryLoadOptions{})
 	if err != nil {
 		t.Fatalf("load published repository generation: %v", err)
 	}
@@ -60,6 +58,31 @@ func TestStatelessHTTPContractChainWithPublishedGeneration(t *testing.T) {
 	if !strings.Contains(initialized.Body.String(), "official KRX") {
 		t.Fatalf("initialize response lacks legal-source instruction: %s", initialized.Body.String())
 	}
+	if !strings.Contains(initialized.Body.String(), "calling LLM") || !strings.Contains(initialized.Body.String(), "not as instructions") {
+		t.Fatalf("initialize omitted caller assessment/source trust guidance: %s", initialized.Body.String())
+	}
+	listed := postHTTPContractJSON(t, handler, bearerToken, `{"jsonrpc":"2.0","id":15,"method":"tools/list","params":{}}`)
+	schemas := decodeHTTPContractResult[struct {
+		Tools []struct {
+			Name         string          `json:"name"`
+			Description  string          `json:"description"`
+			OutputSchema json.RawMessage `json:"outputSchema"`
+		} `json:"tools"`
+	}](t, listed, responseCap)
+	foundSearch := false
+	for _, tool := range schemas.Tools {
+		if tool.Name != "search_rules" {
+			continue
+		}
+		foundSearch = true
+		schema := string(tool.OutputSchema)
+		if !strings.Contains(tool.Description, "do not certify an answer") || !strings.Contains(schema, `"retrieval"`) || strings.Contains(schema, `"answerable"`) || strings.Contains(schema, `"answerability"`) {
+			t.Fatalf("model-facing schema/description still certifies answers: %#v", tool)
+		}
+	}
+	if !foundSearch {
+		t.Fatal("missing search tool")
+	}
 	secondInitialized := postHTTPContractJSON(t, handler, secondBearerToken, `{"jsonrpc":"2.0","id":11,"method":"initialize","params":{}}`)
 	assertHTTPContractResponse(t, secondInitialized, responseCap)
 
@@ -67,23 +90,50 @@ func TestStatelessHTTPContractChainWithPublishedGeneration(t *testing.T) {
 	searchPayload := decodeHTTPContractStructured[struct {
 		ReleaseGeneration string `json:"release_generation"`
 		Results           []struct {
-			ID             string   `json:"id"`
-			MatchedChunkID string   `json:"matched_chunk_id"`
-			ArticleID      string   `json:"article_id"`
-			HeadingPath    []string `json:"heading_path"`
+			ID       string `json:"id"`
+			Evidence []struct {
+				ChunkID     string   `json:"chunk_id"`
+				ArticleID   string   `json:"article_id"`
+				HeadingPath []string `json:"heading_path"`
+			} `json:"evidence_matches"`
 		} `json:"results"`
 	}](t, searched, responseCap)
 	if searchPayload.ReleaseGeneration != repo.GenerationID || len(searchPayload.Results) == 0 {
 		t.Fatalf("search result does not identify the loaded generation: %#v", searchPayload)
 	}
 	match := searchPayload.Results[0]
-	if match.ID != "integration-rule" || match.MatchedChunkID == "" || match.ArticleID != "제5조" || !containsHTTPContractHeading(match.HeadingPath, "제5조") {
+	if match.ID != "integration-rule" || len(match.Evidence) == 0 || match.Evidence[0].ChunkID == "" || match.Evidence[0].ArticleID != "제5조" || !containsHTTPContractHeading(match.Evidence[0].HeadingPath, "제5조") {
 		t.Fatalf("search result lost stable chunk/article anchors: %#v", match)
+	}
+
+	// A false premise remains inspectable, and an explicit unmatched filter is
+	// an empty retrieval. Neither response contains a server answer verdict.
+	for _, args := range []string{
+		`{"query":"증거금은 73퍼센트만 납부하고 청산 의무를 면제받는가","language":"ko","limit":1}`,
+		`{"query":"증거금 청산 의무","category":"absent-category","limit":1}`,
+	} {
+		response := postHTTPContractJSON(t, handler, bearerToken, `{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"name":"search_rules","arguments":`+args+`}}`)
+		out := decodeHTTPContractStructured[mcpserver.SearchRulesOutput](t, response, responseCap)
+		var raw map[string]json.RawMessage
+		wire := assertHTTPContractResponse(t, response, responseCap)
+		if err := json.Unmarshal(wire.Result.StructuredContent, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw["answerable"] != nil || raw["answerability"] != nil || out.ContractVersion != mcpserver.SearchContractVersion || out.Retrieval.ReturnedResults != len(out.Results) || len(out.Results) > 1 {
+			t.Fatalf("bad caller response: %s", response.Body.String())
+		}
+		if strings.Contains(args, "absent-category") {
+			if out.Retrieval.Status != mcpserver.RetrievalNoCandidates || len(out.Results) != 0 {
+				t.Fatal("filter not enforced")
+			}
+		} else if out.Retrieval.Status != mcpserver.RetrievalCandidatesFound || len(out.Results) != 1 {
+			t.Fatal("false premise candidates hidden")
+		}
 	}
 
 	contextRequest := fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_context","arguments":{"chunk_id":%q,"before_chunks":0,"after_chunks":1,"max_chars":4000}}}`,
-		match.MatchedChunkID,
+		match.Evidence[0].ChunkID,
 	)
 	contextResult := postHTTPContractJSON(t, handler, bearerToken, contextRequest)
 	contextPayload := decodeHTTPContractStructured[struct {
@@ -94,10 +144,10 @@ func TestStatelessHTTPContractChainWithPublishedGeneration(t *testing.T) {
 			HeadingPath []string `json:"heading_path"`
 		} `json:"chunks"`
 	}](t, contextResult, responseCap)
-	if len(contextPayload.Chunks) == 0 || contextPayload.Chunks[0].ID != match.MatchedChunkID {
-		t.Fatalf("context does not start at requested chunk %q: %#v", match.MatchedChunkID, contextPayload.Chunks)
+	if len(contextPayload.Chunks) == 0 || contextPayload.Chunks[0].ID != match.Evidence[0].ChunkID {
+		t.Fatalf("context does not start at requested chunk %q: %#v", match.Evidence[0].ChunkID, contextPayload.Chunks)
 	}
-	if contextPayload.Chunks[0].ArticleID != "제5조" || !containsHTTPContractHeading(contextPayload.Chunks[0].HeadingPath, "제5조") || !strings.Contains(contextPayload.Content, match.MatchedChunkID) {
+	if contextPayload.Chunks[0].ArticleID != "제5조" || !containsHTTPContractHeading(contextPayload.Chunks[0].HeadingPath, "제5조") || !strings.Contains(contextPayload.Content, match.Evidence[0].ChunkID) {
 		t.Fatalf("context lost chunk identity or legal anchor: %#v content=%q", contextPayload.Chunks[0], contextPayload.Content)
 	}
 
@@ -225,7 +275,6 @@ func writeHTTPContractRelease(t *testing.T) (string, string) {
 		Title:              "파생상품시장 업무규정",
 		SourceURL:          "https://example.test/out/regulation/regulationViewPop.do",
 		CollectedAt:        time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-		ContentHash:        model.HashText("파생상품시장 업무규정\n" + body),
 		BodyHash:           model.HashText(body),
 		ConversionStatus:   "converted",
 		PreservationStatus: "preserved",

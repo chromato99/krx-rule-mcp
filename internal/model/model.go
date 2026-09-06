@@ -48,8 +48,8 @@ type Asset struct {
 	QualityCodes       []string `json:"quality_codes,omitempty" yaml:"quality_codes,omitempty"`
 	Error              string   `json:"error,omitempty" yaml:"error,omitempty"`
 
-	// ReferencePath is the verified owner-content-relative legacy Markdown
-	// target. It is populated by the corpus loader and never serialized.
+	// ReferencePath is the verified owner-content-relative Markdown target. It
+	// is populated by the corpus loader and never serialized.
 	ReferencePath string `json:"-" yaml:"-"`
 }
 
@@ -63,18 +63,15 @@ type Attachment struct {
 	Folder                 string           `json:"folder,omitempty" yaml:"folder,omitempty"`
 	RawPath                string           `json:"raw_path,omitempty" yaml:"raw_path,omitempty"`
 	TextPath               string           `json:"text_path,omitempty" yaml:"text_path,omitempty"`
-	ContentHash            string           `json:"content_hash,omitempty" yaml:"content_hash,omitempty"`
 	RawFileHash            string           `json:"raw_file_hash,omitempty" yaml:"raw_file_hash,omitempty"`
 	ConvertedTextHash      string           `json:"converted_text_hash,omitempty" yaml:"converted_text_hash,omitempty"`
-	ConversionStatus       string           `json:"conversion_status,omitempty" yaml:"conversion_status,omitempty"`
+	ConversionStatus       AttachmentStatus `json:"conversion_status,omitempty" yaml:"conversion_status,omitempty"`
 	PreservationStatus     string           `json:"preservation_status,omitempty" yaml:"preservation_status,omitempty"`
 	Searchable             *bool            `json:"searchable,omitempty" yaml:"searchable,omitempty"`
-	Status                 AttachmentStatus `json:"status" yaml:"status"`
 	Error                  string           `json:"error,omitempty" yaml:"error,omitempty"`
 	Size                   int64            `json:"size,omitempty" yaml:"size,omitempty"`
 	QualityStatus          string           `json:"quality_status,omitempty" yaml:"quality_status,omitempty"`
 	QualityScore           int              `json:"quality_score,omitempty" yaml:"quality_score,omitempty"`
-	QualityFlags           string           `json:"quality_flags,omitempty" yaml:"quality_flags,omitempty"`
 	QualityCodes           []string         `json:"quality_codes,omitempty" yaml:"quality_codes,omitempty"`
 	Assets                 []Asset          `json:"assets,omitempty" yaml:"assets,omitempty"`
 	ConvertedTextChars     int64            `json:"converted_text_chars,omitempty" yaml:"converted_text_chars,omitempty"`
@@ -120,7 +117,6 @@ type Document struct {
 	EffectiveDate      string                  `json:"effective_date,omitempty" yaml:"effective_date,omitempty"`
 	PublishedDate      string                  `json:"published_date,omitempty" yaml:"published_date,omitempty"`
 	CollectedAt        time.Time               `json:"collected_at" yaml:"collected_at"`
-	ContentHash        string                  `json:"content_hash" yaml:"content_hash"`
 	BodyHash           string                  `json:"body_hash,omitempty" yaml:"body_hash,omitempty"`
 	ConversionStatus   string                  `json:"conversion_status,omitempty" yaml:"conversion_status,omitempty"`
 	PreservationStatus string                  `json:"preservation_status,omitempty" yaml:"preservation_status,omitempty"`
@@ -132,7 +128,6 @@ type Document struct {
 	FileName           string                  `json:"file_name,omitempty" yaml:"file_name,omitempty"`
 	RawPath            string                  `json:"raw_path,omitempty" yaml:"raw_path,omitempty"`
 	TextPath           string                  `json:"text_path,omitempty" yaml:"text_path,omitempty"`
-	FileHash           string                  `json:"file_content_hash,omitempty" yaml:"file_content_hash,omitempty"`
 	RawFileHash        string                  `json:"raw_file_hash,omitempty" yaml:"raw_file_hash,omitempty"`
 	Assets             []Asset                 `json:"assets,omitempty" yaml:"assets,omitempty"`
 	Attachments        []Attachment            `json:"attachments,omitempty" yaml:"attachments,omitempty"`
@@ -196,27 +191,12 @@ func CanonicalText(text string) string {
 	return strings.TrimSpace(text)
 }
 
-// EffectiveBodyHash prefers the v2 body_hash field and falls back to the
-// legacy content_hash field.
-func (d Document) EffectiveBodyHash() string {
-	if value := strings.TrimSpace(d.BodyHash); value != "" {
-		return value
-	}
-	return strings.TrimSpace(d.ContentHash)
-}
-
 func (d Document) IsSearchable() bool {
-	if d.Searchable != nil {
-		return *d.Searchable
-	}
-	return true
+	return d.Searchable != nil && *d.Searchable
 }
 
 func (d Document) EffectiveConversionStatus() string {
-	if value := strings.TrimSpace(d.ConversionStatus); value != "" {
-		return value
-	}
-	return string(AttachmentConverted)
+	return strings.TrimSpace(d.ConversionStatus)
 }
 
 func (d Document) EffectiveQualityCodes() []string {
@@ -237,32 +217,10 @@ func (d Document) EffectiveQualityCodes() []string {
 	return out
 }
 
-// EffectiveRawFileHash prefers the v2 raw_file_hash field and falls back to
-// the legacy document-level file_content_hash field.
-func (d Document) EffectiveRawFileHash() string {
-	if value := strings.TrimSpace(d.RawFileHash); value != "" {
-		return value
-	}
-	return strings.TrimSpace(d.FileHash)
-}
-
-// EffectiveRawFileHash prefers the v2 raw_file_hash field and falls back to
-// the legacy attachment content_hash field.
-func (a Attachment) EffectiveRawFileHash() string {
-	if value := strings.TrimSpace(a.RawFileHash); value != "" {
-		return value
-	}
-	return strings.TrimSpace(a.ContentHash)
-}
-
-// EffectiveQualityCodes prefers the v2 list and falls back to the legacy
-// comma-separated quality_flags value. The canonical result is sorted and
-// duplicate-free so it is safe to include in a digest.
+// EffectiveQualityCodes returns a sorted, duplicate-free representation safe
+// to include in a digest.
 func (a Attachment) EffectiveQualityCodes() []string {
 	values := append([]string(nil), a.QualityCodes...)
-	if len(values) == 0 && strings.TrimSpace(a.QualityFlags) != "" {
-		values = strings.Split(a.QualityFlags, ",")
-	}
 	seen := make(map[string]struct{}, len(values))
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -280,20 +238,12 @@ func (a Attachment) EffectiveQualityCodes() []string {
 	return out
 }
 
-// IsSearchable returns the explicit v2 searchable value when present. Legacy
-// converted attachments remain searchable by default.
 func (a Attachment) IsSearchable() bool {
-	if a.Searchable != nil {
-		return *a.Searchable
-	}
-	return a.EffectiveConversionStatus() == AttachmentConverted
+	return a.Searchable != nil && *a.Searchable
 }
 
 func (a Attachment) EffectiveConversionStatus() AttachmentStatus {
-	if value := strings.TrimSpace(a.ConversionStatus); value != "" {
-		return AttachmentStatus(value)
-	}
-	return a.Status
+	return AttachmentStatus(strings.TrimSpace(string(a.ConversionStatus)))
 }
 
 func Slug(text string) string {

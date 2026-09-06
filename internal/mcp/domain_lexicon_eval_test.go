@@ -19,8 +19,7 @@ func TestRealDataDomainLexiconProbe(t *testing.T) {
 	if dataRoot == "" {
 		dataRoot = filepath.Join("..", "..", "data")
 	}
-	indexPath := realDataIndexPath()
-	repo, err := searchindex.LoadRepository(dataRoot, indexPath)
+	repo, err := searchindex.LoadRepositoryGeneration(dataRoot, realDataIndexDir(), searchindex.RepositoryLoadOptions{})
 	if err != nil {
 		t.Fatalf("load repository: %v", err)
 	}
@@ -32,6 +31,7 @@ func TestRealDataDomainLexiconProbe(t *testing.T) {
 		documentType  string
 		wantExpansion string
 		wantTitle     string
+		wantEvidence  []string
 	}{
 		{
 			name:          "curated realtime price limit alias",
@@ -61,7 +61,8 @@ func TestRealDataDomainLexiconProbe(t *testing.T) {
 			query:         "listing review preliminary",
 			documentType:  "rule",
 			wantExpansion: "listing_review",
-			wantTitle:     "Listing Regulation",
+			wantTitle:     "상장규정",
+			wantEvidence:  []string{"상장예비심사", "예비심사", "preliminary", "review"},
 		},
 		{
 			name:          "disclosure english",
@@ -82,7 +83,8 @@ func TestRealDataDomainLexiconProbe(t *testing.T) {
 			query:         "clearing settlement 최종결제가격",
 			documentType:  "rule",
 			wantExpansion: "clearing_settlement",
-			wantTitle:     "청산",
+			wantTitle:     "파생상품시장 업무규정",
+			wantEvidence:  []string{"최종결제가격"},
 		},
 		{
 			name:          "etf liquidity provider",
@@ -117,7 +119,31 @@ func TestRealDataDomainLexiconProbe(t *testing.T) {
 				t.Fatalf("missing expansion %q: %#v", tc.wantExpansion, out.QueryExpansion)
 			}
 			if !resultsContainTitle(out.Results, tc.wantTitle) {
-				t.Fatalf("missing result title containing %q: %#v", tc.wantTitle, out.Results)
+				t.Fatalf("missing result title containing %q: %s", tc.wantTitle, resultTitles(out.Results))
+			}
+			if len(tc.wantEvidence) > 0 {
+				found := false
+				for _, result := range out.Results {
+					if !strings.Contains(result.Title, tc.wantTitle) {
+						continue
+					}
+					for _, match := range result.EvidenceMatches {
+						zero := 0
+						source, err := service.GetContext(context.Background(), GetContextInput{ChunkID: match.ChunkID, BeforeChunks: &zero, AfterChunks: &zero, MaxChars: 50000})
+						if err != nil {
+							t.Fatal(err)
+						}
+						if source.Document.ID != result.ID || source.Truncated {
+							t.Fatal("invalid source context")
+						}
+						for _, term := range tc.wantEvidence {
+							found = found || strings.Contains(strings.ToLower(source.Content), term)
+						}
+					}
+				}
+				if !found {
+					t.Fatalf("matching source lacks substantive evidence terms %v", tc.wantEvidence)
+				}
 			}
 		})
 	}
@@ -163,29 +189,9 @@ func resultsContainTitle(results []SearchResultDTO, value string) bool {
 	return false
 }
 
-func realDataIndexPath() string {
-	if value := strings.TrimSpace(os.Getenv("KRX_INDEX_PATH")); value != "" {
-		return resolveRealDataPath(value)
-	}
+func realDataIndexDir() string {
 	if value := strings.TrimSpace(os.Getenv("KRX_RULE_INDEX_DIR")); value != "" {
-		return searchindex.DefaultBM25Path(value)
+		return value
 	}
-	if value := strings.TrimSpace(os.Getenv("KRX_INDEX_DIR")); value != "" {
-		return searchindex.DefaultBM25Path(value)
-	}
-	return resolveRealDataPath(filepath.Join("..", "..", searchindex.DefaultIndexDir, searchindex.BM25SnapshotFile))
-}
-
-func resolveRealDataPath(path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	if _, err := os.Stat(path); err == nil {
-		return path
-	}
-	repoRelative := filepath.Join("..", "..", path)
-	if _, err := os.Stat(repoRelative); err == nil {
-		return repoRelative
-	}
-	return path
+	return filepath.Join("..", "..", searchindex.DefaultIndexDir)
 }

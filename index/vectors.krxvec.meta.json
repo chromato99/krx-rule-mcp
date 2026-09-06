@@ -1,9 +1,0 @@
-{
-  "version": 1,
-  "generated_at": "2026-07-09T03:54:25.135096933Z",
-  "corpus_hash": "1faeddd53f5e3ee8fba3b8c33799ecc18852b8363dec63c920443a5853df3fbe",
-  "model": "intfloat/multilingual-e5-small",
-  "dimensions": 384,
-  "query_prefix": "query: ",
-  "document_prefix": "passage: "
-}

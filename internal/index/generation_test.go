@@ -61,6 +61,13 @@ func TestGenerationPublishAndReadCurrent(t *testing.T) {
 	if current != first || filepath.Base(dir) != first.GenerationID {
 		t.Fatalf("current = %#v, %q; want %#v", current, dir, first)
 	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("published directory mode = %o, want 755 for non-root readers", info.Mode().Perm())
+	}
 	loaded, digest, err := LoadSnapshotWithDigest(filepath.Join(dir, BM25SnapshotFile))
 	if err != nil {
 		t.Fatal(err)
@@ -204,10 +211,8 @@ func TestGenerationPublishesValidatedVectorCompanion(t *testing.T) {
 		VectorModel:      "test-model",
 		VectorDimensions: 2,
 		VectorOptions: VectorWriteOptions{
-			Scope:          VectorScopeFull,
-			ModelRevision:  "test-revision",
-			QueryPrefix:    "query: ",
-			DocumentPrefix: "passage: ",
+			Scope:         VectorScopeFull,
+			ModelRevision: "test-revision",
 		},
 	})
 	if err != nil {
@@ -272,10 +277,8 @@ func TestLoadRepositoryGenerationUsesManifestAndFixedArtifactDigests(t *testing.
 		VectorModel:      "test-model",
 		VectorDimensions: 2,
 		VectorOptions: VectorWriteOptions{
-			Scope:          VectorScopeFull,
-			ModelRevision:  "test-revision",
-			QueryPrefix:    "query: ",
-			DocumentPrefix: "passage: ",
+			Scope:         VectorScopeFull,
+			ModelRevision: "test-revision",
 		},
 	})
 	if err != nil {
@@ -397,7 +400,6 @@ func generationTestDocument() model.Document {
 		Title:        "세대 게시 검증 규정",
 		SourceURL:    "https://example.test/generation-rule",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "render-helper-replaces-this",
 		DocumentType: model.DocumentTypeRule,
 		Body:         "제1조(세대 게시) 원자적 세대 게시의 검증 기준을 정한다.",
 	}

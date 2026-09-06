@@ -6,9 +6,106 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/chromato99/krx-rule-mcp/internal/model"
 )
+
+func TestPrepareEmbeddingChunksSeparatesStructuredInputFromCanonicalText(t *testing.T) {
+	chunks := []SnapshotChunk{{
+		ID: "rule-en#1", DocID: "rule-en", Source: "body", ArticleID: "§818",
+		HeadingPath: []string{"CHAPTER I", "§818. Settlement Quantity"}, Text: "The quantity is multiplied.",
+	}}
+	documents := []model.Document{{
+		ID: "rule-en", Title: "Derivatives Market Business Regulation",
+		Category: "Derivatives", Language: model.LanguageEnglish,
+	}}
+	prepared, err := PrepareEmbeddingChunks(chunks, documents, EmbeddingInputStructuredV1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"document: Derivatives Market Business Regulation",
+		"category: Derivatives",
+		"article: §818",
+		"path: CHAPTER I > §818. Settlement Quantity",
+		"text:\nThe quantity is multiplied.",
+	} {
+		if !strings.Contains(prepared[0].Text, want) {
+			t.Fatalf("structured embedding text missing %q: %q", want, prepared[0].Text)
+		}
+	}
+	if chunks[0].Text != "The quantity is multiplied." {
+		t.Fatalf("canonical chunk text was mutated: %q", chunks[0].Text)
+	}
+	textOnly, err := PrepareEmbeddingChunks(chunks, documents, EmbeddingInputTextV1)
+	if err != nil || textOnly[0].Text != chunks[0].Text {
+		t.Fatalf("text-v1 changed canonical input: %#v, %v", textOnly, err)
+	}
+}
+
+func TestDefaultEmbeddingInputMatchesMaintainedGeneration(t *testing.T) {
+	format, err := ParseEmbeddingInputFormat("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != EmbeddingInputTextV1 {
+		t.Fatalf("default format = %q, want %q", format, EmbeddingInputTextV1)
+	}
+}
+
+func TestDefaultEmbeddingProfileUsesE5Defaults(t *testing.T) {
+	t.Setenv("KRX_EMBEDDING_MODEL", DefaultEmbeddingModel)
+	unsetEnvForTest(t, "KRX_EMBEDDING_MODEL_REVISION")
+	unsetEnvForTest(t, "KRX_EMBEDDING_DIMENSIONS")
+	unsetEnvForTest(t, "KRX_EMBEDDING_QUERY_PREFIX")
+	unsetEnvForTest(t, "KRX_EMBEDDING_DOCUMENT_PREFIX")
+
+	query, err := NewQueryEmbedderFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := NewDocumentEmbedderFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query.ModelRevision != DefaultEmbeddingModelRevision || query.Dimensions != DefaultEmbeddingDimensions || query.InputPrefix != DefaultEmbeddingQueryPrefix {
+		t.Fatalf("query defaults = %#v", query)
+	}
+	if document.InputPrefix != DefaultEmbeddingDocumentPrefix {
+		t.Fatalf("document prefix = %q", document.InputPrefix)
+	}
+}
+
+func TestNonDefaultEmbeddingProfileDoesNotInheritE5Defaults(t *testing.T) {
+	t.Setenv("KRX_EMBEDDING_MODEL", "vendor/multilingual-embedding")
+	t.Setenv("KRX_EMBEDDING_DIMENSIONS", "768")
+	unsetEnvForTest(t, "KRX_EMBEDDING_MODEL_REVISION")
+	unsetEnvForTest(t, "KRX_EMBEDDING_QUERY_PREFIX")
+	unsetEnvForTest(t, "KRX_EMBEDDING_DOCUMENT_PREFIX")
+
+	query, err := NewQueryEmbedderFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := NewDocumentEmbedderFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query.ModelRevision != "" || query.InputPrefix != "" || document.InputPrefix != "" {
+		t.Fatalf("non-default profile inherited E5 settings: query=%#v document=%#v", query, document)
+	}
+}
+
+func TestNonDefaultEmbeddingProfileRequiresDimensions(t *testing.T) {
+	t.Setenv("KRX_EMBEDDING_MODEL", "vendor/multilingual-embedding")
+	t.Setenv("KRX_EMBEDDING_DIMENSIONS", "")
+	if _, err := NewQueryEmbedderFromEnv(); err == nil || !strings.Contains(err.Error(), "required for non-default") {
+		t.Fatalf("NewQueryEmbedderFromEnv() error = %v", err)
+	}
+}
 
 func TestOpenAIEmbedderAppliesInputPrefix(t *testing.T) {
 	var captured struct {
@@ -34,7 +131,7 @@ func TestOpenAIEmbedderAppliesInputPrefix(t *testing.T) {
 	embedder := &OpenAIEmbedder{
 		BaseURL:     "http://embedding.test/v1",
 		APIKey:      "local",
-		Model:       "intfloat/multilingual-e5-small",
+		Model:       "test-embedding-model",
 		Dimensions:  2,
 		InputPrefix: "query: ",
 		Client:      client,
@@ -46,7 +143,7 @@ func TestOpenAIEmbedderAppliesInputPrefix(t *testing.T) {
 	if len(vectors) != 1 || len(vectors[0]) != 2 {
 		t.Fatalf("vectors = %#v", vectors)
 	}
-	if captured.Model != "intfloat/multilingual-e5-small" {
+	if captured.Model != "test-embedding-model" {
 		t.Fatalf("model = %q", captured.Model)
 	}
 	if captured.Dimensions != 2 {
@@ -129,11 +226,10 @@ func TestVectorMetadataRoundTrip(t *testing.T) {
 	want := VectorMetadata{
 		IndexSourceHash: "source",
 		IndexBuildHash:  "build",
-		CorpusHash:      "source",
-		Model:           "intfloat/multilingual-e5-small",
-		Dimensions:      384,
-		QueryPrefix:     "query: ",
-		DocumentPrefix:  "passage: ",
+		Model:           "test-embedding-model",
+		Dimensions:      1024,
+		QueryPrefix:     DefaultEmbeddingQueryPrefix,
+		DocumentPrefix:  DefaultEmbeddingDocumentPrefix,
 		Scope:           VectorScopeSample,
 	}
 	if err := WriteVectorMetadata(path, want); err != nil {
@@ -170,4 +266,19 @@ func (e staticEmbedder) Embed(context.Context, []string) ([][]float64, error) {
 
 func (e staticEmbedder) EmbeddingInfo() (string, int) {
 	return "test", e.dimensions
+}
+
+func unsetEnvForTest(t *testing.T, key string) {
+	t.Helper()
+	value, exists := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if exists {
+			_ = os.Setenv(key, value)
+		} else {
+			_ = os.Unsetenv(key)
+		}
+	})
 }

@@ -45,7 +45,7 @@ func TestFixedRetrievalBenchmark(t *testing.T) {
 			Body: "**제1조(목적)** 증거금 관리의 일반 원칙을 정한다.",
 			Attachments: []model.Attachment{{
 				ID: "margin-annex-4", Title: "별표 4 증거금 감면액 산출변수", FileName: "별표4.hwp",
-				Status: model.AttachmentConverted, Searchable: &searchable,
+				ConversionStatus: model.AttachmentConverted, Searchable: &searchable,
 			}},
 		},
 	}
@@ -55,7 +55,7 @@ func TestFixedRetrievalBenchmark(t *testing.T) {
 			Text:       "## 별표 4\n\n### 증거금 감면액\n\n감면계수 알파고유값은 위험상쇄비율을 사용하여 산출한다.",
 		},
 	}
-	engine := BuildWithAttachments(documents, attachments, nil)
+	engine := buildTestEngine(documents, attachments, nil)
 
 	cases := []struct {
 		name             string

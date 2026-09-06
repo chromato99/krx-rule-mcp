@@ -8,10 +8,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chromato99/krx-rule-mcp/internal/corpus"
 	searchindex "github.com/chromato99/krx-rule-mcp/internal/index"
 	"github.com/chromato99/krx-rule-mcp/internal/model"
 	"gopkg.in/yaml.v3"
 )
+
+func TestVectorReuseKeysExactTextRatherThanChunkID(t *testing.T) {
+	previous := searchindex.Snapshot{Chunks: []searchindex.SnapshotChunk{{ID: "old", Text: "same passage"}, {ID: "changed", Text: "old passage"}}}
+	vectors := searchindex.VectorSnapshot{Vectors: []searchindex.SnapshotVector{{ChunkID: "old", Vector: []float64{1, 0}}, {ChunkID: "changed", Vector: []float64{0, 1}}}}
+	chunks := []searchindex.SnapshotChunk{{ID: "moved", Text: "same passage"}, {ID: "changed", Text: "new passage"}, {ID: "whitespace", Text: "same  passage"}}
+	reused, missing := reuseExactTextVectors(previous, vectors, chunks)
+	if len(reused) != 1 || reused["moved"][0] != 1 || len(missing) != 2 || missing[0].ID != "changed" || missing[1].ID != "whitespace" {
+		t.Fatalf("reused=%v missing=%v", reused, missing)
+	}
+}
 
 func TestSelectVectorChunksSamplesByQuery(t *testing.T) {
 	chunks := []searchindex.SnapshotChunk{
@@ -32,7 +43,7 @@ func TestSplitQueries(t *testing.T) {
 	}
 }
 
-func TestBM25CurrentUsesCorpusHash(t *testing.T) {
+func TestBM25CurrentUsesIndexIdentity(t *testing.T) {
 	root := writeCommandTestCorpus(t)
 	snap, _, err := searchindex.BuildSnapshot(root)
 	if err != nil {
@@ -75,16 +86,15 @@ func TestBM25CurrentDetectsConvertedAttachmentTextChange(t *testing.T) {
 		Title:        "상장규정",
 		SourceURL:    "https://example.test/rule",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "hash-rule-1",
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장 심사",
 		Attachments: []model.Attachment{{
-			ID:          "att-1",
-			Title:       "별표",
-			FileName:    "별표.hwp",
-			Status:      model.AttachmentConverted,
-			TextPath:    attachmentTextPath,
-			ContentHash: "raw-hash",
+			ID:                "att-1",
+			Title:             "별표",
+			FileName:          "별표.hwp",
+			ConversionStatus:  model.AttachmentConverted,
+			TextPath:          attachmentTextPath,
+			ConvertedTextHash: model.HashText("old formula"),
 		}},
 	}
 	writeMainTestDocument(t, root, doc)
@@ -106,6 +116,8 @@ func TestBM25CurrentDetectsConvertedAttachmentTextChange(t *testing.T) {
 	if err := os.WriteFile(fullTextPath, []byte("new formula with hwp equation"), 0o644); err != nil {
 		t.Fatalf("rewrite attachment text: %v", err)
 	}
+	doc.Attachments[0].ConvertedTextHash = model.HashText("new formula with hwp equation")
+	writeMainTestDocument(t, root, doc)
 	updated, _, err := searchindex.BuildSnapshot(root)
 	if err != nil {
 		t.Fatalf("rebuild snapshot: %v", err)
@@ -125,8 +137,8 @@ func TestVectorFreshIncludesPrefixMetadata(t *testing.T) {
 	vectors := map[string][]float64{"rule-1#0": {1, 0}}
 	options := searchindex.VectorWriteOptions{
 		Scope:          searchindex.VectorScopeFull,
-		QueryPrefix:    "query: ",
-		DocumentPrefix: "passage: ",
+		QueryPrefix:    "",
+		DocumentPrefix: "",
 	}
 	if err := searchindex.WriteVectorSnapshot(path, snap, vectors, "test-model", 2, options); err != nil {
 		t.Fatalf("write vector snapshot: %v", err)
@@ -144,16 +156,6 @@ func TestVectorFreshIncludesPrefixMetadata(t *testing.T) {
 	}
 }
 
-func TestEnvDefaultPreserveSpaceAllowsExplicitEmpty(t *testing.T) {
-	t.Setenv("KRX_TEST_PREFIX", "")
-	if got := envDefaultPreserveSpace("KRX_TEST_PREFIX", "passage: "); got != "" {
-		t.Fatalf("prefix = %q, want empty", got)
-	}
-	if got := envDefaultPreserveSpace("KRX_TEST_PREFIX_UNSET", "passage: "); got != "passage: " {
-		t.Fatalf("fallback prefix = %q", got)
-	}
-}
-
 func writeCommandTestCorpus(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -162,7 +164,6 @@ func writeCommandTestCorpus(t *testing.T) string {
 		Title:        "상장규정",
 		SourceURL:    "https://example.test/rule",
 		CollectedAt:  time.Now().UTC(),
-		ContentHash:  "hash-rule-1",
 		DocumentType: model.DocumentTypeRule,
 		Body:         "상장 심사와 공시 의무",
 	}
@@ -192,8 +193,17 @@ func renderMainTestMarkdown(t *testing.T, doc model.Document) []byte {
 	meta.Body = ""
 	meta.Path = ""
 	meta.Language = model.NormalizeLanguage(meta.Language)
+	meta.SchemaVersion = corpus.IndexSourceSchemaVersion
 	meta.BodyHash = model.HashText(doc.Body)
-	meta.ContentHash = model.HashText(doc.Title + "\n" + doc.Body)
+	meta.ConversionStatus = string(model.AttachmentConverted)
+	meta.PreservationStatus = "preserved"
+	meta.Searchable = testBoolPointer(true)
+	meta.QualityStatus = "ok"
+	for index := range meta.Attachments {
+		meta.Attachments[index].PreservationStatus = "preserved"
+		meta.Attachments[index].Searchable = testBoolPointer(true)
+		meta.Attachments[index].QualityStatus = "ok"
+	}
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
 	enc := yaml.NewEncoder(&buf)
@@ -209,3 +219,5 @@ func renderMainTestMarkdown(t *testing.T, doc model.Document) []byte {
 	buf.WriteString("\n")
 	return buf.Bytes()
 }
+
+func testBoolPointer(value bool) *bool { return &value }

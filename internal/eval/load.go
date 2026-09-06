@@ -1,0 +1,156 @@
+package evaluation
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+var (
+	caseIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+	hashPattern   = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
+
+func LoadFixture(path string) (Fixture, string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return Fixture{}, "", fmt.Errorf("open evaluation fixture: %w", err)
+	}
+	defer file.Close()
+	hasher := sha256.New()
+	decoder := json.NewDecoder(io.TeeReader(file, hasher))
+	decoder.DisallowUnknownFields()
+	var fixture Fixture
+	if err := decoder.Decode(&fixture); err != nil {
+		return Fixture{}, "", fmt.Errorf("decode evaluation fixture: %w", err)
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return Fixture{}, "", fmt.Errorf("decode evaluation fixture: trailing JSON value")
+	}
+	if err := ValidateFixture(fixture); err != nil {
+		return Fixture{}, "", err
+	}
+	return fixture, hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+func ValidateFixture(fixture Fixture) error {
+	if fixture.SchemaVersion != 2 {
+		return fmt.Errorf("evaluation fixture schema_version = %d, want 2", fixture.SchemaVersion)
+	}
+	if !strings.HasPrefix(fixture.FixtureVersion, "rag-v") {
+		return fmt.Errorf("evaluation fixture version %q is invalid", fixture.FixtureVersion)
+	}
+	if len(fixture.Cases) == 0 {
+		return fmt.Errorf("evaluation fixture has no cases")
+	}
+	switch fixture.Policies.EvaluationUse {
+	case "", "development", "sealed-holdout":
+	default:
+		return fmt.Errorf("invalid evaluation_use %q", fixture.Policies.EvaluationUse)
+	}
+	if fixture.Policies.ChunkIDsInExpectations {
+		return fmt.Errorf("evaluation fixture must not pin release-specific chunk ids")
+	}
+	if fixture.Policies.ScoresAreConfidence {
+		return fmt.Errorf("evaluation fixture must not treat ranking scores as confidence")
+	}
+	if !hashPattern.MatchString(fixture.Source.SHA256) {
+		return fmt.Errorf("evaluation source sha256 %q is invalid", fixture.Source.SHA256)
+	}
+	seen := map[string]struct{}{}
+	for index, item := range fixture.Cases {
+		if !caseIDPattern.MatchString(item.ID) {
+			return fmt.Errorf("evaluation case %d has invalid id %q", index, item.ID)
+		}
+		if _, duplicate := seen[item.ID]; duplicate {
+			return fmt.Errorf("evaluation case id %q is duplicated", item.ID)
+		}
+		seen[item.ID] = struct{}{}
+		if fixture.Policies.EvaluationUse == "sealed-holdout" && item.Split != "holdout" {
+			return fmt.Errorf("sealed holdout contains non-holdout case %q", item.ID)
+		}
+		if err := validateCase(item); err != nil {
+			return fmt.Errorf("evaluation case %q: %w", item.ID, err)
+		}
+	}
+	return nil
+}
+
+// Split/group labels may change when a holdout is consumed; the question and
+// target contracts must stay identical for a before/after quality comparison.
+func FixtureContractHash(fixture Fixture) string {
+	type contract struct {
+		ID          string      `json:"id"`
+		Input       CaseInput   `json:"input"`
+		Expectation Expectation `json:"expectation"`
+	}
+	contracts := make([]contract, 0, len(fixture.Cases))
+	for _, item := range fixture.Cases {
+		contracts = append(contracts, contract{item.ID, item.Input, item.Expectation})
+	}
+	sort.Slice(contracts, func(i, j int) bool { return contracts[i].ID < contracts[j].ID })
+	data, _ := json.Marshal(contracts)
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+func validateCase(item Case) error {
+	if strings.TrimSpace(item.Group) == "" {
+		return fmt.Errorf("group is required")
+	}
+	switch item.Split {
+	case "regression", "development", "validation", "holdout":
+	default:
+		return fmt.Errorf("unsupported split %q", item.Split)
+	}
+	if strings.TrimSpace(item.Input.Query) == "" {
+		return fmt.Errorf("input.query is required")
+	}
+	if item.Input.Limit < 0 || item.Input.Limit > 50 {
+		return fmt.Errorf("input.limit must be between 1 and 50, or 0 for default")
+	}
+	switch item.Expectation.EvidenceStatus {
+	case "supported", "insufficient", "ambiguous", "unknown":
+	default:
+		return fmt.Errorf("unsupported evidence_status %q", item.Expectation.EvidenceStatus)
+	}
+	switch item.Expectation.ClaimRelation {
+	case "supports", "contradicts", "not_applicable":
+	default:
+		return fmt.Errorf("unsupported claim_relation %q", item.Expectation.ClaimRelation)
+	}
+	switch item.Expectation.TargetPolicy {
+	case "any", "all":
+	case "at_least":
+		if item.Expectation.AtLeast <= 0 || item.Expectation.AtLeast > len(item.Expectation.Targets) {
+			return fmt.Errorf("at_least must be between 1 and target count")
+		}
+	default:
+		return fmt.Errorf("unsupported target_policy %q", item.Expectation.TargetPolicy)
+	}
+	if item.Expectation.EvidenceStatus == "supported" && len(item.Expectation.Targets) == 0 {
+		return fmt.Errorf("supported case requires at least one target")
+	}
+	seenTargets := map[string]struct{}{}
+	for _, target := range item.Expectation.Targets {
+		if strings.TrimSpace(target.DocumentID) == "" {
+			return fmt.Errorf("target.document_id is required")
+		}
+		targetKey := strings.Join([]string{target.DocumentID, target.ArticleID, target.AttachmentID}, "\x00")
+		if _, duplicate := seenTargets[targetKey]; duplicate {
+			return fmt.Errorf("duplicate target tuple for document %q", target.DocumentID)
+		}
+		seenTargets[targetKey] = struct{}{}
+		if item.Expectation.ClaimRelation == "contradicts" &&
+			(target.Evidence == nil || len(target.Evidence.RelationMustContainAny) == 0) {
+			return fmt.Errorf("contradicts target requires relation_must_contain_any evidence")
+		}
+	}
+	return nil
+}

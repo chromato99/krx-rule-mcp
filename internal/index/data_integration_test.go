@@ -17,7 +17,7 @@ func TestRealDataSearchEvaluation(t *testing.T) {
 	}
 
 	dataRoot := dataTestRoot()
-	repo, err := LoadRepository(dataRoot, dataTestBM25Path())
+	repo, err := LoadRepositoryGeneration(dataRoot, dataTestIndexDir(), RepositoryLoadOptions{})
 	if err != nil {
 		t.Fatalf("load repository: %v", err)
 	}
@@ -86,18 +86,8 @@ func dataTestRoot() string {
 	return filepath.Join("..", "..", "data")
 }
 
-func dataTestBM25Path() string {
-	if value := strings.TrimSpace(os.Getenv("KRX_INDEX_PATH")); value != "" {
-		return resolveDataTestPath(value)
-	}
-	return resolveDataTestPath(DefaultBM25Path(dataTestIndexDir()))
-}
-
 func dataTestIndexDir() string {
 	if value := strings.TrimSpace(os.Getenv("KRX_RULE_INDEX_DIR")); value != "" {
-		return value
-	}
-	if value := strings.TrimSpace(os.Getenv("KRX_INDEX_DIR")); value != "" {
 		return value
 	}
 	return filepath.Join("..", "..", DefaultIndexDir)
@@ -162,7 +152,7 @@ func retrievableAttachmentQuery(t *testing.T, repo *Repository, documentType mod
 			continue
 		}
 		for _, attachment := range doc.Attachments {
-			if attachment.Status != model.AttachmentConverted {
+			if attachment.EffectiveConversionStatus() != model.AttachmentConverted {
 				continue
 			}
 			attachmentDoc, ok := repo.Attachments[attachment.ID]

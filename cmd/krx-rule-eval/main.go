@@ -1,0 +1,372 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime/debug"
+	"strings"
+	"time"
+
+	evaluation "github.com/chromato99/krx-rule-mcp/internal/eval"
+	searchindex "github.com/chromato99/krx-rule-mcp/internal/index"
+	mcpserver "github.com/chromato99/krx-rule-mcp/internal/mcp"
+)
+
+func main() {
+	dataDir := flag.String("data-dir", env("KRX_RULE_DATA_DIR", "../krx-rule-markdown/data"), "schema-v2 corpus directory")
+	indexDir := flag.String("index-dir", env("KRX_RULE_INDEX_DIR", "index"), "immutable index generation directory")
+	fixturePath := flag.String("fixture", "eval/fixtures/retrieval.json", "versioned golden fixture")
+	lexiconPath := flag.String("domain-lexicon", env("KRX_DOMAIN_LEXICON_PATH", searchindex.DefaultDomainLexiconPath), "domain lexicon YAML")
+	outputPath := flag.String("output", "eval/results/retrieval.json", "evaluation report output")
+	baselinePath := flag.String("baseline", "eval/baselines/retrieval.json", "question-matched retrieval baseline")
+	reservationPath := flag.String("holdout-reservation", "", "required external reservation file when evaluating a sealed holdout")
+	split := flag.String("split", "", "optional fixture split for diagnostic runs")
+	casePrefix := flag.String("case-prefix", "", "optional case-id prefix for diagnostic runs")
+	vectorEnabled := flag.Bool("vector", envBool("KRX_VECTOR_SEARCH_ENABLED"), "load full vector generation and query embedder")
+	requireVector := flag.Bool("require-vector", false, "fail unless full vector generation and query embedder are available")
+	rerankerEnabled := flag.Bool("reranker", envBool("KRX_RERANKER_ENABLED"), "rerank bounded Korean chunk candidates through TEI")
+	requireReranker := flag.Bool("require-reranker", false, "fail unless the configured reranker is available for Korean queries")
+	rerankerTimeout := flag.Duration("reranker-timeout", 30*time.Minute, "per-query reranker deadline")
+	retrievalCandidates := flag.Int("candidate-limit", searchindex.DefaultRetrievalCandidateLimit, "first-stage candidate limit per channel, max 512; independent of result limit")
+	failOnGate := flag.Bool("fail-on-gate", false, "exit non-zero when full-vector retrieval regression checks fail; does not evaluate LLM answers")
+	flag.Parse()
+	fatalIf(validateEvalOptions(*split, *casePrefix, *failOnGate))
+	if *retrievalCandidates < 0 || *retrievalCandidates > 512 {
+		fatalIf(fmt.Errorf("--candidate-limit must be between 1 and 512, or 0 for the default"))
+	}
+	*retrievalCandidates = searchindex.EffectiveCandidateLimit(*retrievalCandidates)
+
+	fixture, fixtureHash, err := evaluation.LoadFixture(*fixturePath)
+	fatalIf(err)
+
+	loadOptions := searchindex.RepositoryLoadOptions{
+		VectorEnabled: *vectorEnabled || *requireVector,
+		RequireVector: *requireVector,
+	}
+	repo, err := searchindex.LoadRepositoryGeneration(*dataDir, *indexDir, loadOptions)
+	fatalIf(err)
+	fatalIf(evaluation.ValidateFixtureGrounding(fixture, repo))
+	if fixture.Policies.EvaluationUse == "sealed-holdout" {
+		fatalIf(validateHoldoutReservation(fixture, repo, *reservationPath))
+	}
+	lexicon, lexiconDigest, err := searchindex.LoadDomainLexiconWithDigest(*lexiconPath)
+	fatalIf(err)
+
+	var embedder searchindex.Embedder
+	if *vectorEnabled || *requireVector {
+		configured, err := searchindex.NewQueryEmbedderFromEnv()
+		fatalIf(err)
+		if !repo.Engine.HasVectors() {
+			fatalIf(fmt.Errorf("vector evaluation requested but no compatible vectors were loaded"))
+		}
+		embedder = configured
+	}
+	var reranker searchindex.Reranker
+	rerankerCandidates := 0
+	if *rerankerEnabled || *requireReranker {
+		configured, err := searchindex.NewTEIRerankerFromEnv()
+		fatalIf(err)
+		verifyCtx, cancel := context.WithTimeout(context.Background(), *rerankerTimeout)
+		verifyErr := configured.VerifyReranker(verifyCtx)
+		cancel()
+		fatalIf(verifyErr)
+		reranker = configured
+		rerankerCandidates, err = searchindex.RerankerCandidateLimitFromEnv()
+		fatalIf(err)
+	}
+	runtimeVectorMode := "bm25"
+	if embedder != nil {
+		runtimeVectorMode = "bm25+vector"
+	}
+	provenance, releaseGeneration, err := buildProvenance(repo, lexiconDigest, runtimeVectorMode, *retrievalCandidates, reranker, rerankerCandidates, *rerankerTimeout, fixture, fixtureHash)
+	fatalIf(err)
+	service := &mcpserver.Service{
+		Repo:                repo,
+		Embedder:            embedder,
+		VectorRequired:      *requireVector,
+		Reranker:            reranker,
+		RerankerRequired:    *requireReranker,
+		RerankerCandidates:  rerankerCandidates,
+		RetrievalCandidates: *retrievalCandidates,
+		RerankerTimeout:     *rerankerTimeout,
+		DomainLexicon:       lexicon,
+		ReleaseGeneration:   releaseGeneration,
+	}
+	var report evaluation.Report
+	if *casePrefix != "" {
+		report, err = evaluation.RunCasePrefix(context.Background(), fixture, *casePrefix, service, provenance)
+	} else if *split == "" {
+		report, err = evaluation.Run(context.Background(), fixture, service, provenance)
+	} else {
+		report, err = evaluation.RunSplit(context.Background(), fixture, *split, service, provenance)
+	}
+	fatalIf(err)
+	fatalIf(writeReport(*outputPath, report))
+
+	fmt.Printf("rag-eval cases=%d document_hit@5=%.3f mrr@5=%.3f evidence_hit@1=%.3f evidence_recall@3=%.3f candidate_recall@64=%.3f reranker_pool_hit=%.3f evidence_bundle@5=%.3f context=%.3f filter_leaks=%d search_p95_ms=%.2f reranker_p95_ms=%.2f eval_p95_ms=%.2f report=%s\n",
+		report.Summary.Cases,
+		report.Summary.DocumentHitAt5Rate,
+		report.Summary.MRRAt5,
+		report.Summary.EvidenceHitAt1Rate,
+		report.Summary.EvidenceRecallAt3Rate,
+		report.Summary.CandidateEvidenceRecall64Rate,
+		report.Summary.RerankerPoolHitRate,
+		report.Summary.EvidenceBundleHitAt5Rate,
+		report.Summary.ContextConsistencyRate,
+		report.Summary.FilterLeaks,
+		report.Summary.P95SearchLatencyMillis,
+		report.Summary.P95RerankerLatencyMillis,
+		report.Summary.P95LatencyMillis,
+		*outputPath,
+	)
+	if *failOnGate {
+		baseline, err := loadCodeBaseline(*baselinePath)
+		fatalIf(err)
+		failures := qualityGateFailures(report, baseline)
+		if len(failures) > 0 {
+			for _, failure := range failures {
+				fmt.Fprintln(os.Stderr, "gate:", failure)
+			}
+			os.Exit(1)
+		}
+	}
+}
+
+func validateEvalOptions(split, casePrefix string, failOnGate bool) error {
+	if strings.TrimSpace(split) != "" && strings.TrimSpace(casePrefix) != "" {
+		return fmt.Errorf("--split and --case-prefix cannot be combined")
+	}
+	if (strings.TrimSpace(split) != "" || strings.TrimSpace(casePrefix) != "") && failOnGate {
+		return fmt.Errorf("--fail-on-gate cannot be combined with diagnostic filters")
+	}
+	return nil
+}
+
+type releaseVectorDescriptor struct {
+	ArtifactDigest     string `json:"artifact_digest"`
+	MetadataDigest     string `json:"metadata_digest"`
+	GenerationID       string `json:"generation_id"`
+	IndexSourceHash    string `json:"index_source_hash"`
+	IndexBuildHash     string `json:"index_build_hash"`
+	Model              string `json:"model"`
+	ModelRevision      string `json:"model_revision"`
+	Dimensions         int    `json:"dimensions"`
+	QueryPrefix        string `json:"query_prefix"`
+	DocumentPrefix     string `json:"document_prefix"`
+	InputFormat        string `json:"input_format"`
+	Scope              string `json:"scope"`
+	ExpectedChunkCount int    `json:"expected_chunk_count"`
+	StoredVectorCount  int    `json:"stored_vector_count"`
+}
+
+type releaseDescriptor struct {
+	Schema                  string                       `json:"schema"`
+	CorpusReleaseHash       string                       `json:"corpus_release_hash"`
+	IndexSourceHash         string                       `json:"index_source_hash"`
+	IndexBuildHash          string                       `json:"index_build_hash"`
+	BM25ArtifactDigest      string                       `json:"bm25_artifact_digest"`
+	BM25SnapshotVersion     uint16                       `json:"bm25_snapshot_version"`
+	IndexerVersion          string                       `json:"indexer_version"`
+	Vector                  *releaseVectorDescriptor     `json:"vector,omitempty"`
+	Reranker                *evaluation.RerankerIdentity `json:"reranker,omitempty"`
+	DomainLexiconDigest     string                       `json:"domain_lexicon_digest"`
+	RuntimeVectorMode       string                       `json:"runtime_vector_mode"`
+	RetrievalCandidateLimit int                          `json:"retrieval_candidate_limit"`
+	RetrievalPolicy         string                       `json:"retrieval_policy"`
+	SearchContract          string                       `json:"search_contract"`
+	ServerImageDigest       string                       `json:"server_image_digest"`
+	TEIImageDigest          string                       `json:"tei_image_digest"`
+	RerankerImageDigest     string                       `json:"reranker_image_digest,omitempty"`
+}
+
+func buildProvenance(repo *searchindex.Repository, lexiconDigest, runtimeVectorMode string, retrievalCandidateLimit int, reranker searchindex.Reranker, rerankerCandidates int, rerankerTimeout time.Duration, fixture evaluation.Fixture, fixtureHash string) (evaluation.Provenance, string, error) {
+	if repo == nil {
+		return evaluation.Provenance{}, "", fmt.Errorf("repository is nil")
+	}
+	var vectorDescriptor *releaseVectorDescriptor
+	var embedding *evaluation.EmbeddingIdentity
+	var rerankerIdentity *evaluation.RerankerIdentity
+	for _, status := range repo.VectorIndexes {
+		if status.RejectedReason != "" || status.LoadedVectors == 0 || status.Path != repo.VectorPath {
+			continue
+		}
+		metadata := status.Metadata
+		vectorDescriptor = &releaseVectorDescriptor{
+			ArtifactDigest: status.ArtifactDigest, MetadataDigest: status.MetadataDigest,
+			GenerationID: metadata.GenerationID, IndexSourceHash: metadata.IndexSourceHash,
+			IndexBuildHash: metadata.IndexBuildHash, Model: metadata.Model, ModelRevision: metadata.ModelRevision,
+			Dimensions: metadata.Dimensions, QueryPrefix: metadata.QueryPrefix, DocumentPrefix: metadata.DocumentPrefix,
+			InputFormat: string(metadata.InputFormat), Scope: string(metadata.Scope), ExpectedChunkCount: metadata.ExpectedChunkCount, StoredVectorCount: metadata.StoredVectorCount,
+		}
+		embedding = &evaluation.EmbeddingIdentity{
+			Model: metadata.Model, Revision: metadata.ModelRevision, Dimensions: metadata.Dimensions,
+			QueryPrefix: metadata.QueryPrefix, DocumentPrefix: metadata.DocumentPrefix, Scope: string(metadata.Scope),
+			InputFormat: string(metadata.InputFormat), ExpectedChunkCount: metadata.ExpectedChunkCount, StoredVectorCount: metadata.StoredVectorCount,
+			Coverage: repo.VectorCoverage, ArtifactDigest: status.ArtifactDigest, MetadataDigest: status.MetadataDigest,
+		}
+		break
+	}
+	if reranker != nil {
+		model, revision := reranker.RerankingInfo()
+		batchSize := 0
+		if configured, ok := reranker.(*searchindex.TEIReranker); ok {
+			batchSize = configured.BatchSize
+		}
+		rerankerIdentity = &evaluation.RerankerIdentity{
+			Model: model, Revision: revision, CandidateLimit: rerankerCandidates, BatchSize: batchSize, Mode: "bounded-korean", Timeout: rerankerTimeout.String(), InputFormat: "structured-korean-v1",
+		}
+	}
+	descriptor := releaseDescriptor{
+		Schema: "krx-rule-mcp-release-v6", CorpusReleaseHash: repo.CorpusReleaseHash,
+		IndexSourceHash: repo.IndexSourceHash, IndexBuildHash: repo.IndexBuildHash,
+		BM25ArtifactDigest: repo.BM25ArtifactDigest, BM25SnapshotVersion: repo.BM25SnapshotVersion,
+		IndexerVersion: repo.IndexerVersion, Vector: vectorDescriptor, Reranker: rerankerIdentity, DomainLexiconDigest: lexiconDigest,
+		RuntimeVectorMode: runtimeVectorMode, ServerImageDigest: strings.TrimSpace(os.Getenv("RULE_MCP_SERVER_IMAGE_DIGEST")),
+		RetrievalCandidateLimit: retrievalCandidateLimit,
+		RetrievalPolicy:         searchindex.RetrievalPolicyVersion,
+		SearchContract:          mcpserver.SearchContractVersion,
+		TEIImageDigest:          strings.TrimSpace(os.Getenv("RULE_MCP_TEI_IMAGE_DIGEST")),
+		RerankerImageDigest:     strings.TrimSpace(os.Getenv("RULE_MCP_RERANKER_IMAGE_DIGEST")),
+	}
+	encoded, err := json.Marshal(descriptor)
+	if err != nil {
+		return evaluation.Provenance{}, "", fmt.Errorf("encode release descriptor: %w", err)
+	}
+	sum := sha256.Sum256(encoded)
+	releaseGeneration := hex.EncodeToString(sum[:])
+	return evaluation.Provenance{
+		ServerCommit: vcsRevision(), ReleaseGeneration: releaseGeneration, CorpusReleaseHash: repo.CorpusReleaseHash,
+		IndexGeneration: repo.GenerationID, IndexSourceHash: repo.IndexSourceHash, IndexBuildHash: repo.IndexBuildHash,
+		IndexerVersion: repo.IndexerVersion, BM25ArtifactDigest: repo.BM25ArtifactDigest,
+		BM25SnapshotVersion: repo.BM25SnapshotVersion, Embedding: embedding, Reranker: rerankerIdentity, LexiconDigest: lexiconDigest,
+		RuntimeVectorMode: runtimeVectorMode, RetrievalContract: retrievalContract(reranker != nil), SearchContract: mcpserver.SearchContractVersion,
+		RetrievalCandidateLimit: retrievalCandidateLimit,
+		FixtureVersion:          fixture.FixtureVersion, FixtureSHA256: fixtureHash,
+	}, releaseGeneration, nil
+}
+
+func retrievalContract(rerankerEnabled bool) string {
+	if rerankerEnabled {
+		return searchindex.RetrievalPolicyVersion + "+bounded-rerank-v2"
+	}
+	return searchindex.RetrievalPolicyVersion
+}
+
+func writeReport(path string, report evaluation.Report) error {
+	encoded, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode evaluation report: %w", err)
+	}
+	encoded = append(encoded, '\n')
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create report directory: %w", err)
+	}
+	temp, err := os.CreateTemp(filepath.Dir(path), ".rag-eval-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create report temp file: %w", err)
+	}
+	tempName := temp.Name()
+	defer os.Remove(tempName)
+	if err := temp.Chmod(0o644); err != nil {
+		temp.Close()
+		return err
+	}
+	if _, err := temp.Write(encoded); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempName, path); err != nil {
+		return fmt.Errorf("publish evaluation report: %w", err)
+	}
+	return nil
+}
+
+func embeddingIntegrityFailures(embedding *evaluation.EmbeddingIdentity) []string {
+	if embedding == nil {
+		return []string{"full-vector embedding provenance is missing"}
+	}
+	var failures []string
+	if strings.TrimSpace(embedding.Model) == "" {
+		failures = append(failures, "embedding model identity is missing")
+	}
+	if embedding.Dimensions <= 0 {
+		failures = append(failures, "embedding dimensions must be positive")
+	}
+	if strings.TrimSpace(embedding.InputFormat) == "" {
+		failures = append(failures, "embedding input format is missing")
+	} else if _, err := searchindex.ParseEmbeddingInputFormat(embedding.InputFormat); err != nil {
+		failures = append(failures, "embedding input format is unsupported")
+	}
+	if embedding.Scope != string(searchindex.VectorScopeFull) {
+		failures = append(failures, "embedding vector scope is not full")
+	}
+	if embedding.ExpectedChunkCount <= 0 || embedding.StoredVectorCount != embedding.ExpectedChunkCount || embedding.Coverage != 1 {
+		failures = append(failures, "embedding vector coverage is incomplete")
+	}
+	if !isSHA256Hex(embedding.ArtifactDigest) || !isSHA256Hex(embedding.MetadataDigest) {
+		failures = append(failures, "embedding artifact provenance is incomplete")
+	}
+	return failures
+}
+
+func isSHA256Hex(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size
+}
+
+func vcsRevision() string {
+	if revision := strings.TrimSpace(os.Getenv("KRX_RULE_SERVER_COMMIT")); revision != "" {
+		return revision
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" && strings.TrimSpace(setting.Value) != "" {
+			return setting.Value
+		}
+	}
+	return "unknown"
+}
+
+func env(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func fatalIf(err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "error:", err)
+	os.Exit(1)
+}

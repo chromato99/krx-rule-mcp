@@ -35,12 +35,13 @@ type ArtifactDescriptor struct {
 }
 
 type VectorGenerationDescriptor struct {
-	Artifact ArtifactDescriptor `json:"artifact"`
-	Metadata ArtifactDescriptor `json:"metadata"`
-	Scope    VectorScope        `json:"scope"`
-	Model    string             `json:"model"`
-	Revision string             `json:"revision,omitempty"`
-	Vectors  int                `json:"vectors"`
+	Artifact    ArtifactDescriptor   `json:"artifact"`
+	Metadata    ArtifactDescriptor   `json:"metadata"`
+	Scope       VectorScope          `json:"scope"`
+	Model       string               `json:"model"`
+	Revision    string               `json:"revision,omitempty"`
+	InputFormat EmbeddingInputFormat `json:"input_format"`
+	Vectors     int                  `json:"vectors"`
 }
 
 type GenerationDescriptor struct {
@@ -106,7 +107,6 @@ func (lock *GenerationBuildLock) Publish(build GenerationBuild) (GenerationDescr
 		return GenerationDescriptor{}, fmt.Errorf("generation build lock is not held")
 	}
 	snap := build.Snapshot
-	normalizeSnapshotHashes(&snap)
 	if snap.CorpusReleaseHash == "" {
 		return GenerationDescriptor{}, fmt.Errorf("generation publish requires corpus release hash")
 	}
@@ -182,12 +182,13 @@ func (lock *GenerationBuildLock) Publish(build GenerationBuild) (GenerationDescr
 			return GenerationDescriptor{}, err
 		}
 		descriptor.Vector = &VectorGenerationDescriptor{
-			Artifact: vectorArtifact,
-			Metadata: metadataArtifact,
-			Scope:    vectorSnapshot.Scope,
-			Model:    vectorSnapshot.Model,
-			Revision: vectorSnapshot.ModelRevision,
-			Vectors:  len(vectorSnapshot.Vectors),
+			Artifact:    vectorArtifact,
+			Metadata:    metadataArtifact,
+			Scope:       vectorSnapshot.Scope,
+			Model:       vectorSnapshot.Model,
+			Revision:    vectorSnapshot.ModelRevision,
+			InputFormat: loadedMetadata.InputFormat,
+			Vectors:     len(vectorSnapshot.Vectors),
 		}
 	}
 
@@ -198,6 +199,11 @@ func (lock *GenerationBuildLock) Publish(build GenerationBuild) (GenerationDescr
 	descriptorPath := filepath.Join(staging, GenerationDescriptorFile)
 	if err := writeGenerationDescriptor(descriptorPath, descriptor); err != nil {
 		return GenerationDescriptor{}, err
+	}
+	// MkdirTemp keeps the build private (0700). Published public rule indexes
+	// must also be traversable by the non-root reader used in the server image.
+	if err := os.Chmod(staging, 0o755); err != nil {
+		return GenerationDescriptor{}, fmt.Errorf("set published generation permissions: %w", err)
 	}
 	if err := syncDirectory(staging); err != nil {
 		return GenerationDescriptor{}, err
@@ -287,6 +293,9 @@ func validateGenerationDirectory(dir, expectedID string) (GenerationDescriptor, 
 	if descriptor.Vector != nil {
 		if descriptor.Vector.Vectors < 0 {
 			return GenerationDescriptor{}, fmt.Errorf("negative vector count")
+		}
+		if _, err := ParseEmbeddingInputFormat(string(descriptor.Vector.InputFormat)); err != nil || descriptor.Vector.InputFormat == "" {
+			return GenerationDescriptor{}, fmt.Errorf("invalid vector input format %q", descriptor.Vector.InputFormat)
 		}
 		if err := validateArtifactDescriptor(dir, descriptor.Vector.Artifact, VectorSnapshotFile); err != nil {
 			return GenerationDescriptor{}, fmt.Errorf("vector artifact: %w", err)

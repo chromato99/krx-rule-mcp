@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chromato99/krx-rule-mcp/internal/corpus"
 	"github.com/chromato99/krx-rule-mcp/internal/model"
 )
 
@@ -22,18 +21,6 @@ func buildHash(indexSourceHash, version string) string {
 		"indexer_version":      version,
 	})
 	return model.HashBytes(payload)
-}
-
-func normalizeSnapshotHashes(snap *Snapshot) {
-	if snap.IndexSourceHash == "" {
-		snap.IndexSourceHash = snap.CorpusHash
-	}
-	if snap.CorpusHash == "" {
-		snap.CorpusHash = snap.IndexSourceHash
-	}
-	if snap.IndexBuildHash == "" && snap.IndexSourceHash != "" {
-		snap.IndexBuildHash = buildHash(snap.IndexSourceHash, firstNonEmpty(snap.IndexerVersion, indexerVersion))
-	}
 }
 
 func attachmentDocuments(docs []model.Document, texts map[string]string) map[string]AttachmentDocument {
@@ -81,31 +68,6 @@ func vectorSnapshotIDSetHash(snap VectorSnapshot) string {
 	return chunkIDSetHash(ids)
 }
 
-func snapshotForValidation(docs []model.Document, attachments map[string]AttachmentDocument) (Snapshot, error) {
-	documents, err := snapshotDocuments(docs, attachments)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	indexSourceHash, err := corpus.IndexSourceHash(docs, attachmentTextMap(attachments))
-	if err != nil {
-		return Snapshot{}, err
-	}
-	engine := BuildWithAttachments(docs, attachments, nil)
-	chunks := make([]SnapshotChunk, 0, len(engine.chunks))
-	for _, chunk := range engine.chunks {
-		chunks = append(chunks, SnapshotChunk{ID: chunk.ID})
-	}
-	return Snapshot{
-		Version:         indexSnapshotFormatVersion,
-		IndexerVersion:  indexerVersion,
-		IndexSourceHash: indexSourceHash,
-		IndexBuildHash:  buildHash(indexSourceHash, indexerVersion),
-		CorpusHash:      indexSourceHash,
-		Documents:       documents,
-		Chunks:          chunks,
-	}, nil
-}
-
 func inferVectorScope(expectedIDs []string, vectors map[string][]float64) VectorScope {
 	if len(expectedIDs) != len(vectors) {
 		return VectorScopeSample
@@ -120,6 +82,9 @@ func inferVectorScope(expectedIDs []string, vectors map[string][]float64) Vector
 
 func normalizeVectorWriteOptions(snap Snapshot, vectors map[string][]float64, modelName string, dimensions int, option VectorWriteOptions) VectorWriteOptions {
 	option.ModelRevision = strings.TrimSpace(option.ModelRevision)
+	if option.InputFormat == "" {
+		option.InputFormat = DefaultEmbeddingInputFormat
+	}
 	if option.Scope == "" {
 		option.Scope = inferVectorScope(snapshotChunkIDs(snap.Chunks), vectors)
 	}
@@ -130,7 +95,6 @@ func normalizeVectorWriteOptions(snap Snapshot, vectors map[string][]float64, mo
 }
 
 func vectorGenerationID(snap Snapshot, vectors map[string][]float64, modelName string, dimensions int, option VectorWriteOptions) string {
-	normalizeSnapshotHashes(&snap)
 	ids := make([]string, 0, len(vectors))
 	for id := range vectors {
 		ids = append(ids, id)
@@ -148,6 +112,7 @@ func vectorGenerationID(snap Snapshot, vectors map[string][]float64, modelName s
 		"corpus_release_hash": snap.CorpusReleaseHash,
 		"dimensions":          dimensions,
 		"document_prefix":     option.DocumentPrefix,
+		"input_format":        option.InputFormat,
 		"index_build_hash":    snap.IndexBuildHash,
 		"model":               modelName,
 		"model_revision":      option.ModelRevision,
@@ -316,7 +281,6 @@ func validateVectorSnapshotStructure(snap VectorSnapshot) error {
 }
 
 func BuildVectorMetadata(snap Snapshot, vectors map[string][]float64, modelName string, dimensions int, option VectorWriteOptions) VectorMetadata {
-	normalizeSnapshotHashes(&snap)
 	option = normalizeVectorWriteOptions(snap, vectors, modelName, dimensions, option)
 	expectedIDs := snapshotChunkIDs(snap.Chunks)
 	storedIDs := make([]string, 0, len(vectors))
@@ -330,12 +294,12 @@ func BuildVectorMetadata(snap Snapshot, vectors map[string][]float64, modelName 
 		IndexSourceHash:      snap.IndexSourceHash,
 		IndexBuildHash:       snap.IndexBuildHash,
 		CorpusReleaseHash:    snap.CorpusReleaseHash,
-		CorpusHash:           snap.IndexSourceHash,
 		Model:                modelName,
 		ModelRevision:        option.ModelRevision,
 		Dimensions:           dimensions,
 		QueryPrefix:          option.QueryPrefix,
 		DocumentPrefix:       option.DocumentPrefix,
+		InputFormat:          option.InputFormat,
 		Scope:                option.Scope,
 		ExpectedChunkCount:   len(expectedIDs),
 		StoredVectorCount:    len(vectors),

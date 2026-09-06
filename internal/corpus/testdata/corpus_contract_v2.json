@@ -141,7 +141,6 @@
   "expected": {
     "canonical_body": "Café body\n제1조",
     "body_hash": "a5baa37d69a5be5c80c341e4fac31a071eea8084d88a9cf80878ddf0c74264bb",
-    "legacy_content_hash": "4056260ef60c79a261415714210484a21298bd3012f83807badd132eabac23cd",
     "index_source_canonical_json": "{\"documents\":[{\"attachments\":[{\"conversion_status\":\"converted\",\"converted_text_hash\":\"eafa74e56b7c5fe910b455ed30a0ff8d7d5c3227a1743507e802802336d89260\",\"file_name\":\"appendix.hwp\",\"id\":\"att-1\",\"quality_codes\":[\"hwp_picture_missing\",\"image_content_unindexed\"],\"quality_status\":\"warn\",\"searchable\":false,\"title\":\"별표 1\"}],\"body_hash\":\"a5baa37d69a5be5c80c341e4fac31a071eea8084d88a9cf80878ddf0c74264bb\",\"category\":\"시장 / 공시\",\"collected_at\":\"2026-07-01T00:00:00Z\",\"document_type\":\"rule\",\"effective_date\":\"\",\"file_name\":\"source.html\",\"id\":\"rule-1\",\"language\":\"ko\",\"published_date\":\"\",\"quality_codes\":[\"image_content_unindexed\",\"inline_image_missing\"],\"quality_status\":\"warn\",\"searchable\":true,\"source_id\":\"source-1\",\"source_url\":\"https://example.test/rule-1\",\"title\":\"Café 규정\"}],\"schema_version\":2}",
     "index_source_hash": "c89d27fcdb58d44f2785625db64eb98a24f3fb978222cbff240df7845473bfaa"
   }

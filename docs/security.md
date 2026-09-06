@@ -49,9 +49,7 @@ The server hashes the presented bearer value and compares it against every
 enabled digest using constant-time comparison. It never logs token values,
 registry token IDs, stored token hashes, or Authorization headers.
 
-`RULE_MCP_BEARER_TOKEN` and `--token` have been removed. Use
-`RULE_MCP_BEARER_TOKEN_FILE` or `--bearer-token-file`; the old environment
-variable produces a migration error.
+Use `RULE_MCP_BEARER_TOKEN_FILE` or `--bearer-token-file` to select the registry.
 
 The server does not watch or reload the file. To rotate credentials:
 
@@ -112,9 +110,18 @@ RULE_MCP_SHUTDOWN_TIMEOUT=45s
 KRX_VECTOR_SEARCH_ENABLED=true
 KRX_VECTOR_SEARCH_POLICY=required
 KRX_REQUIRE_VECTOR=true
+# When the optional Korean reranker is enabled:
+# RULE_MCP_RERANKER_IMAGE_DIGEST=sha256:<reranker-runtime-image-digest>
+# RULE_MCP_RERANKER_TIMEOUT=30m
+# RULE_MCP_READINESS_RERANKER_TIMEOUT=5m
+# RULE_MCP_REQUEST_TIMEOUT=32m
+# KRX_RERANKER_ENABLED=true
+# KRX_RERANKER_POLICY=required
+# KRX_REQUIRE_RERANKER=true
 ```
 
 For public deployment, keep authentication required, terminate TLS at the
 trusted ingress or reverse proxy, and rotate tokens after any suspected
-exposure. Do not expose the embeddings sidecar unless it is intentionally
-operated as a separate embeddings API.
+exposure. Do not expose the embeddings or reranker sidecars unless they are intentionally
+operated as separate APIs. Required reranker mode verifies the endpoint's
+reported immutable model revision and fails readiness when its canary fails.

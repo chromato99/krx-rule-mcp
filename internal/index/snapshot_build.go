@@ -18,10 +18,9 @@ import (
 
 const (
 	indexSnapshotFormatVersion  uint16 = 6
-	indexerVersion                     = "tokenizer-ko-2gram-3gram-script-html-alias-structured-anchor-v1-asset-ref-v1-chunk1600-md-html-table-row-equation-pair-bm25-k1-1.4-b-0.75"
-	vectorSnapshotFormatVersion uint16 = VectorSnapshotFormatVersion
+	IndexerVersion                     = "tokenizer-ko-2gram-3gram-script-html-alias-structured-anchor-v2-en-section-bounded-headings-evidence-only-chunk1600-md-html-table-row-equation-pair-bm25-k1-1.4-b-0.75-chunk-rrf-v1"
 	VectorSnapshotFormatVersion uint16 = 3
-	VectorMetadataFormatVersion        = 3
+	VectorMetadataFormatVersion        = 4
 )
 
 type VectorScope string
@@ -32,23 +31,23 @@ const (
 )
 
 type VectorMetadata struct {
-	Version              int         `json:"version"`
-	GeneratedAt          string      `json:"generated_at"`
-	GenerationID         string      `json:"generation_id"`
-	IndexSourceHash      string      `json:"index_source_hash"`
-	IndexBuildHash       string      `json:"index_build_hash"`
-	CorpusReleaseHash    string      `json:"corpus_release_hash,omitempty"`
-	CorpusHash           string      `json:"corpus_hash,omitempty"`
-	Model                string      `json:"model"`
-	ModelRevision        string      `json:"model_revision,omitempty"`
-	Dimensions           int         `json:"dimensions"`
-	QueryPrefix          string      `json:"query_prefix"`
-	DocumentPrefix       string      `json:"document_prefix"`
-	Scope                VectorScope `json:"scope"`
-	ExpectedChunkCount   int         `json:"expected_chunk_count"`
-	StoredVectorCount    int         `json:"stored_vector_count"`
-	ChunkIDSetHash       string      `json:"chunk_id_set_hash"`
-	StoredChunkIDSetHash string      `json:"stored_chunk_id_set_hash"`
+	Version              int                  `json:"version"`
+	GeneratedAt          string               `json:"generated_at"`
+	GenerationID         string               `json:"generation_id"`
+	IndexSourceHash      string               `json:"index_source_hash"`
+	IndexBuildHash       string               `json:"index_build_hash"`
+	CorpusReleaseHash    string               `json:"corpus_release_hash,omitempty"`
+	Model                string               `json:"model"`
+	ModelRevision        string               `json:"model_revision,omitempty"`
+	Dimensions           int                  `json:"dimensions"`
+	QueryPrefix          string               `json:"query_prefix"`
+	DocumentPrefix       string               `json:"document_prefix"`
+	InputFormat          EmbeddingInputFormat `json:"input_format"`
+	Scope                VectorScope          `json:"scope"`
+	ExpectedChunkCount   int                  `json:"expected_chunk_count"`
+	StoredVectorCount    int                  `json:"stored_vector_count"`
+	ChunkIDSetHash       string               `json:"chunk_id_set_hash"`
+	StoredChunkIDSetHash string               `json:"stored_chunk_id_set_hash"`
 }
 
 func BuildSnapshot(dataRoot string) (Snapshot, []model.Document, error) {
@@ -75,7 +74,7 @@ func buildSnapshot(dataRoot string, requireManifest bool) (Snapshot, []model.Doc
 	if err != nil {
 		return Snapshot{}, nil, err
 	}
-	indexBuildHash := buildHash(indexSourceHash, indexerVersion)
+	indexBuildHash := buildHash(indexSourceHash, IndexerVersion)
 	chunks := make([]SnapshotChunk, 0, len(engine.chunks))
 	for _, c := range engine.chunks {
 		chunks = append(chunks, SnapshotChunk{
@@ -95,12 +94,11 @@ func buildSnapshot(dataRoot string, requireManifest bool) (Snapshot, []model.Doc
 	}
 	return Snapshot{
 		Version:           indexSnapshotFormatVersion,
-		IndexerVersion:    indexerVersion,
+		IndexerVersion:    IndexerVersion,
 		GeneratedAt:       nowRFC3339(),
 		IndexSourceHash:   indexSourceHash,
 		IndexBuildHash:    indexBuildHash,
 		CorpusReleaseHash: loaded.ReleaseHash,
-		CorpusHash:        indexSourceHash,
 		Documents:         documents,
 		AvgDocLength:      engine.avgDocLength,
 		DF:                engine.df,
@@ -109,9 +107,8 @@ func buildSnapshot(dataRoot string, requireManifest bool) (Snapshot, []model.Doc
 }
 
 func WriteSnapshot(path string, snap Snapshot) error {
-	normalizeSnapshotHashes(&snap)
 	snap.Version = indexSnapshotFormatVersion
-	snap.IndexerVersion = firstNonEmpty(snap.IndexerVersion, indexerVersion)
+	snap.IndexerVersion = firstNonEmpty(snap.IndexerVersion, IndexerVersion)
 	if err := validateSnapshotStructure(snap); err != nil {
 		return fmt.Errorf("write index snapshot: %w", err)
 	}
@@ -121,11 +118,11 @@ func WriteSnapshot(path string, snap Snapshot) error {
 	writeString(&payload, snap.IndexSourceHash)
 	writeString(&payload, snap.IndexBuildHash)
 	writeString(&payload, snap.CorpusReleaseHash)
-	writeString(&payload, firstNonEmpty(snap.IndexerVersion, indexerVersion))
+	writeString(&payload, firstNonEmpty(snap.IndexerVersion, IndexerVersion))
 	writeU32(&payload, uint32(len(snap.Documents)))
 	for _, doc := range snap.Documents {
 		writeString(&payload, doc.ID)
-		writeString(&payload, doc.ContentHash)
+		writeString(&payload, doc.BodyHash)
 		writeString(&payload, doc.IndexHash)
 	}
 	writeF64(&payload, snap.AvgDocLength)
@@ -168,17 +165,13 @@ type VectorWriteOptions struct {
 	ModelRevision  string
 	QueryPrefix    string
 	DocumentPrefix string
+	InputFormat    EmbeddingInputFormat
 	GenerationID   string
 }
 
-func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float64, model string, dimensions int, options ...VectorWriteOptions) error {
-	normalizeSnapshotHashes(&snap)
+func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float64, model string, dimensions int, option VectorWriteOptions) error {
 	if strings.TrimSpace(model) == "" {
 		return fmt.Errorf("embedding model is required")
-	}
-	option := VectorWriteOptions{}
-	if len(options) > 0 {
-		option = options[0]
 	}
 	expectedIDs := snapshotChunkIDs(snap.Chunks)
 	option = normalizeVectorWriteOptions(snap, vectors, model, dimensions, option)
@@ -190,7 +183,7 @@ func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float6
 	}
 	generatedAt := nowRFC3339()
 	var payload bytes.Buffer
-	writeU16(&payload, vectorSnapshotFormatVersion)
+	writeU16(&payload, VectorSnapshotFormatVersion)
 	writeString(&payload, generatedAt)
 	writeString(&payload, option.GenerationID)
 	writeString(&payload, snap.IndexSourceHash)
@@ -207,7 +200,7 @@ func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float6
 	writeU32(&payload, uint32(len(snap.Documents)))
 	for _, doc := range snap.Documents {
 		writeString(&payload, doc.ID)
-		writeString(&payload, doc.ContentHash)
+		writeString(&payload, doc.BodyHash)
 		writeString(&payload, doc.IndexHash)
 	}
 	ids := make([]string, 0, len(vectors))
@@ -229,12 +222,6 @@ func WriteVectorSnapshot(path string, snap Snapshot, vectors map[string][]float6
 
 func WriteVectorMetadata(path string, metadata VectorMetadata) error {
 	metadata.Version = VectorMetadataFormatVersion
-	if metadata.IndexSourceHash == "" {
-		metadata.IndexSourceHash = metadata.CorpusHash
-	}
-	if metadata.CorpusHash == "" {
-		metadata.CorpusHash = metadata.IndexSourceHash
-	}
 	if metadata.GeneratedAt == "" {
 		metadata.GeneratedAt = nowRFC3339()
 	}
@@ -287,9 +274,9 @@ func snapshotDocuments(docs []model.Document, attachments map[string]AttachmentD
 			return nil, err
 		}
 		out = append(out, SnapshotDocument{
-			ID:          doc.ID,
-			ContentHash: doc.EffectiveBodyHash(),
-			IndexHash:   indexHash,
+			ID:        doc.ID,
+			BodyHash:  strings.TrimSpace(doc.BodyHash),
+			IndexHash: indexHash,
 		})
 	}
 	return out, nil
