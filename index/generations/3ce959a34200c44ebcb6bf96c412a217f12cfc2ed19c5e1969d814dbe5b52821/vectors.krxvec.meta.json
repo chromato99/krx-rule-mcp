@@ -1,0 +1,19 @@
+{
+  "version": 4,
+  "generated_at": "2026-09-22T14:58:48.70907447Z",
+  "generation_id": "8e4479142ecac43eda0a38dc2b899f4eeddc31d5a89d9007ba059cfa3b65b6b2",
+  "index_source_hash": "96d1b627a08f9dd0c83446d8c0d87d4ddafd01cc4183d2ba48c2353ab1a13a47",
+  "index_build_hash": "4007d8e40a0efca8138ec54d9e928a5ad6871f6a5bc4aa2de35a93618d7fc04c",
+  "corpus_release_hash": "e0e651e3599e1bf62ecf5bb60def1c8b191dda37c0da06f646e9777153028398",
+  "model": "intfloat/multilingual-e5-small",
+  "model_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+  "dimensions": 384,
+  "query_prefix": "query: ",
+  "document_prefix": "passage: ",
+  "input_format": "text-v1",
+  "scope": "full",
+  "expected_chunk_count": 50924,
+  "stored_vector_count": 50924,
+  "chunk_id_set_hash": "e065d3f1dd041eb455696f3e02ca7dcbc4f1ed9f8a5c311a1acc251ceb7f6dca",
+  "stored_chunk_id_set_hash": "e065d3f1dd041eb455696f3e02ca7dcbc4f1ed9f8a5c311a1acc251ceb7f6dca"
+}

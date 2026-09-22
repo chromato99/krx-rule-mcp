@@ -220,7 +220,8 @@ func validateSnapshotStructure(snap Snapshot) error {
 			if strings.TrimSpace(heading) == "" {
 				return fmt.Errorf("chunk %q has an empty heading path element", chunk.ID)
 			}
-			if chunk.ArticleID != "" && strings.HasPrefix(heading, chunk.ArticleID) {
+			headingArticle, _, _, isArticle := extractArticleHeading(heading)
+			if chunk.ArticleID != "" && isArticle && headingArticle == chunk.ArticleID {
 				articleFound = true
 			}
 		}
