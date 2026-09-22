@@ -92,7 +92,7 @@ func buildSnapshot(dataRoot string, requireManifest bool) (Snapshot, []model.Doc
 			Tokens:           c.Tokens,
 		})
 	}
-	return Snapshot{
+	snapshot := Snapshot{
 		Version:           indexSnapshotFormatVersion,
 		IndexerVersion:    IndexerVersion,
 		GeneratedAt:       nowRFC3339(),
@@ -103,7 +103,11 @@ func buildSnapshot(dataRoot string, requireManifest bool) (Snapshot, []model.Doc
 		AvgDocLength:      engine.avgDocLength,
 		DF:                engine.df,
 		Chunks:            chunks,
-	}, docs, nil
+	}
+	if err := validateSnapshotStructure(snapshot); err != nil {
+		return Snapshot{}, nil, fmt.Errorf("build index snapshot: %w", err)
+	}
+	return snapshot, docs, nil
 }
 
 func WriteSnapshot(path string, snap Snapshot) error {
