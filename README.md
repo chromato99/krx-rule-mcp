@@ -6,7 +6,7 @@
 
 ## 제공 기능
 
-- **MCP tools/resources**: `search_rules`, `get_context`, `get_rule`, `list_rules`, `get_attachment`, `list_recent_changes`와 `krx-rule://...` resource URI를 제공합니다.
+- **MCP tools/resources**: `search_rules`, `get_context`, `get_rule`, `get_attachment`, `list_rules`, `list_categories`, `list_recent_changes`와 `krx-rule://...` resource URI를 제공합니다.
 - **언어별 corpus 제공**: `ko`/`en` metadata를 읽고 MCP 검색, 목록, 최근 변경 조회에서 언어 필터를 제공합니다.
 - **수식 친화적 RAG**: HWP EqEdit 원본 수식과 LaTeX(best-effort) 변환 블록을 함께 인덱싱하고 `get_attachment`로 제공합니다.
 - **BM25 기본 검색**: producer의 `release_hash`와 `index_source_hash`가 맞는 `KRXIDX2` snapshot을 로드해 한국어 2-gram/3-gram 기반 검색을 수행합니다.
@@ -19,6 +19,100 @@
 - **TEI sidecar 운영 예시**: Docker Compose 예시는 운영자가 선택한 호환 TEI 이미지를 embeddings sidecar로 함께 띄웁니다.
 - **안전한 stateless HTTP 배포**: 서버측 MCP session을 보관하지 않으며 선택 가능한 Bearer 인증, 해시 기반 다중 토큰 registry, Origin allowlist, 요청·전체 응답·질의 크기 제한, 동시성 제한, deadline, rate limit, graceful shutdown을 제공합니다.
 - **배포 generation 검증**: corpus/index/vector/도메인 사전/runtime mode/server image를 묶은 canonical release descriptor의 SHA-256을 응답·로그·metrics에 기록하고 `/readyz`에서 기대값과 비교합니다.
+
+## 원격 테스트 서버에 연결하기
+
+Streamable HTTP MCP 주소는 다음과 같습니다.
+
+```text
+https://krx-rule-mcp.chromato99.com/mcp
+```
+
+2026-09-23에 HTTPS 연결과 MCP 초기화, 7개 도구, 규정 검색 → `get_context`, 원문·첨부·목록·resource 조회를 확인했습니다. 서버는 `v2.0.1`을 응답했고 검색은 vector와 BM25를 함께 사용했습니다. 이 주소에서는 인증 헤더 없이 MCP 도구 호출이 성공했습니다. 이 저장소를 **직접 HTTP로 실행할 때의 기본 인증 모드**는 아래 [서버 실행](#서버-실행)에 설명한 `required`입니다.
+
+브라우저로 `/mcp`를 열면 GET 요청의 헤더에 따라 `400` 또는 `405`가 나올 수 있습니다. MCP 클라이언트는 이 주소에 HTTP POST로 연결합니다. 배포 환경은 공개 경로로 `/mcp`만 제공하므로 `/readyz`의 `404`는 MCP 상태 검사가 아닙니다. 수동으로 초기화를 확인하려면:
+
+```bash
+curl -sS https://krx-rule-mcp.chromato99.com/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"krx-smoke","version":"1"}}}'
+```
+
+다음 예시는 개인 사용자 범위에 서버를 추가합니다. 기존 설정 파일이 있다면 각 예시의 서버 항목을 추가하세요.
+
+### Codex
+
+```bash
+codex mcp add krx-rule-mcp --url https://krx-rule-mcp.chromato99.com/mcp
+codex mcp list
+```
+
+Codex CLI와 IDE 확장은 MCP 설정을 공유합니다. 새 세션에서 아래 시험 질문을 사용해 실제 도구 호출을 확인하세요. [Codex MCP 공식 문서](https://developers.openai.com/codex/mcp)
+
+### Claude Code
+
+```bash
+claude mcp add --transport http krx-rule-mcp --scope user https://krx-rule-mcp.chromato99.com/mcp
+claude mcp list
+```
+
+Claude Code 안에서 `/mcp`로 연결 상태와 도구를 확인합니다. [Claude Code MCP 공식 문서](https://code.claude.com/docs/en/mcp)
+
+### Google Antigravity
+
+IDE의 **MCP Servers → Manage MCP Servers → View raw config**에서, 또는 CLI의 전역 설정 파일 `~/.gemini/config/mcp_config.json`에서 `mcpServers`에 다음 항목을 추가합니다.
+
+```json
+{
+  "mcpServers": {
+    "krx-rule-mcp": {
+      "serverUrl": "https://krx-rule-mcp.chromato99.com/mcp"
+    }
+  }
+}
+```
+
+Antigravity CLI에서는 `/mcp`로 서버 상태와 도구 목록을 확인합니다. 원격 연결에는 `serverUrl`을 사용합니다. [Antigravity MCP 공식 문서](https://antigravity.google/docs/mcp)
+
+### Cursor
+
+개인 설정 파일 `~/.cursor/mcp.json`의 `mcpServers`에 다음 항목을 추가하고 Cursor를 다시 시작합니다.
+
+```json
+{
+  "mcpServers": {
+    "krx-rule-mcp": {
+      "url": "https://krx-rule-mcp.chromato99.com/mcp"
+    }
+  }
+}
+```
+
+Agent 채팅의 도구 목록에서 서버를 확인합니다. [Cursor MCP 공식 문서](https://prod.cursor.com/help/customization/mcp)
+
+### VS Code의 GitHub Copilot
+
+명령 팔레트에서 **MCP: Add Server → HTTP**를 선택하고 위 주소와 `krx-rule-mcp` 이름을 입력한 뒤 **Global**로 저장합니다. Copilot Chat을 Agent 모드로 열어 도구 선택 목록에서 서버를 활성화합니다. 직접 설정하려면 **MCP: Open User Configuration**으로 사용자 `mcp.json`을 열고 `servers`에 다음 항목을 추가합니다.
+
+```json
+{
+  "servers": {
+    "krx-rule-mcp": {
+      "type": "http",
+      "url": "https://krx-rule-mcp.chromato99.com/mcp"
+    }
+  }
+}
+```
+
+[VS Code MCP 공식 문서](https://code.visualstudio.com/docs/agent-customization/mcp-servers)
+
+연결 후에는 어느 에이전트에서나 다음처럼 요청해 봅니다.
+
+> KRX MCP의 `search_rules`로 「저PBR기업 선정 등에 관한 지침」의 선정 기준을 찾고, 반환된 `evidence_matches[].chunk_id`를 `get_context`로 읽어 주세요. 적용 조건과 예외를 확인한 뒤 근거가 충분하면 규정명·조문과 `source_url`을 제시해 주세요. 근거가 부족하면 확인되지 않은 부분을 알려 주세요.
+
+검색 결과는 답변 후보입니다. 적용 시장·시점·주체와 근거가 충분한지는 호출하는 모델이 원문을 읽고 판단해야 합니다. 자세한 순서는 [LLM 클라이언트 안내](docs/llm-client.md)를 참고하세요.
 
 ## Corpus 준비
 
