@@ -30,7 +30,7 @@ https://krx-rule-mcp.chromato99.com/mcp
 
 2026-09-23에 HTTPS 연결과 MCP 초기화, 7개 도구, 규정 검색 → `get_context`, 원문·첨부·목록·resource 조회를 확인했습니다. 서버는 `v2.0.1`을 응답했고 검색은 vector와 BM25를 함께 사용했습니다. 이 주소에서는 인증 헤더 없이 MCP 도구 호출이 성공했습니다. 이 저장소를 **직접 HTTP로 실행할 때의 기본 인증 모드**는 아래 [서버 실행](#서버-실행)에 설명한 `required`입니다.
 
-브라우저로 `/mcp`를 열면 GET 요청에 `405`가 나올 수 있습니다. MCP 클라이언트는 이 주소에 HTTP POST로 연결합니다. 배포 환경은 공개 경로로 `/mcp`만 제공하므로 `/readyz`의 `404`는 MCP 상태 검사가 아닙니다. 수동으로 초기화를 확인하려면:
+브라우저로 `/mcp`를 열면 GET 요청의 헤더에 따라 `400` 또는 `405`가 나올 수 있습니다. MCP 클라이언트는 이 주소에 HTTP POST로 연결합니다. 배포 환경은 공개 경로로 `/mcp`만 제공하므로 `/readyz`의 `404`는 MCP 상태 검사가 아닙니다. 수동으로 초기화를 확인하려면:
 
 ```bash
 curl -sS https://krx-rule-mcp.chromato99.com/mcp \
