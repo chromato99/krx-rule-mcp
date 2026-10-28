@@ -1,20 +1,20 @@
 {
   "schema_version": 2,
   "evaluator_version": "rag-retrieval-evaluator-v4",
-  "reference": "Maintained retrieval floors after the 2026-09-22 corpus refresh. All 210 queries are preserved; 11 cases whose source documents left the current corpus are unavailable-source cases. The prior allowed miss counts are unchanged. See the corpus refresh PRs for source mappings and before/after evidence.",
-  "case_set_sha256": "2674e3d8f8913bd000420b2a1fb35fd3aea062d0470ebcd2117aa58176d91d68",
-  "fixture_sha256": "08cac6351c07d468e4e8d95286facaa34834f4fba83824790e757e8f320fb01d",
-  "corpus_release_hash": "e0e651e3599e1bf62ecf5bb60def1c8b191dda37c0da06f646e9777153028398",
-  "index_generation": "3ce959a34200c44ebcb6bf96c412a217f12cfc2ed19c5e1969d814dbe5b52821",
-  "embedding_artifact_digest": "dce3818fbfdfc3be6259535a6323bb8523975fb4f94bac5482ba0f9dcd07e9a6",
+  "reference": "Maintained retrieval floors after the 2026-10-28 corpus refresh. All 210 queries and input filters are preserved; 12 cases whose source documents are absent from the current corpus are unavailable-source cases. One newly unavailable English source reduces its eligible and required-hit counts equally. The prior allowed miss counts are unchanged. See the index refresh PR for source mappings and before/after evidence.",
+  "case_set_sha256": "28eeae2d54bfea2214c2abf459ef5cd46c7b109ec27f146ceb4da663f221b0bc",
+  "fixture_sha256": "efeae137b1ecde0305136a68aeeec784f5f6315b42e4117741b007f72a4711fe",
+  "corpus_release_hash": "89db4defcbaf60c61566997dc709d1984e94f178b735bad659a47ff3fa1b0fbe",
+  "index_generation": "7d9c7144c732140240246eebf933db56256c09080922bc1801d8c938cbff3abe",
+  "embedding_artifact_digest": "7a9062ddbef638d952249f167de3d103d761dc5fc8e8447ce3d5c3d588c1c6bf",
   "lexicon_digest": "53f5251b2a185ac28c131f7bf55a02f994abdf6b88146ad6a5796d5fc8b09dfd",
   "retrieval_candidate_limit": 120,
   "languages": {
     "en": {
-      "document_eligible": 22,
-      "document_hit_at_5": 22,
-      "evidence_eligible": 22,
-      "evidence_bundle_hit_at_5": 22
+      "document_eligible": 21,
+      "document_hit_at_5": 21,
+      "evidence_eligible": 21,
+      "evidence_bundle_hit_at_5": 21
     },
     "ko": {
       "document_eligible": 115,

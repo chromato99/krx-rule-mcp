@@ -117,7 +117,7 @@ Agent 채팅의 도구 목록에서 서버를 확인합니다. [Cursor MCP 공�
 ## Corpus 준비
 
 이번 검색 평가와 저장소 기본 인덱스를 그대로 재현하려면 corpus의
-[`6e68073`](https://github.com/chromato99/krx-rule-markdown/commit/6e68073d4bc4997fdbeac0665432e78e77a22306) 커밋을 사용하세요.
+[`4f3a111`](https://github.com/chromato99/krx-rule-markdown/commit/4f3a111f7184737f6e959b50af62f9cc87db412f) 커밋을 사용하세요.
 Corpus와 인덱스의 일치 조건은 [데이터 계약](docs/data-format.md)을 참고하세요.
 
 먼저 별도 프로젝트인 [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)에서 corpus를 생성합니다.
@@ -421,9 +421,9 @@ TEI 이미지는 운영자가 선택합니다. `RULE_MCP_TEI_IMAGE`에는 대상
 - `eval/baselines/retrieval.json`: 동일 corpus/index/질의 계약의 언어별 검색 회귀 기준선.
 - `eval/schema/retrieval.schema.json`: 현재 평가 fixture의 schema v2.
 
-2026-09-22 corpus 갱신에서도 210개 질의와 입력 필터를 유지했습니다. 개정된
+2026-10-28 corpus 갱신에서도 210개 질의와 입력 필터를 유지했습니다. 개정된
 규정의 target ID는 현재 문서·첨부로 연결했고, 현재 수집 범위에서 사라진
-개정예고·영문 원문을 요구하는 11개 사례는 `unavailable-source`로 표시했습니다.
+개정예고·영문 원문을 요구하는 12개 사례는 `unavailable-source`로 표시했습니다.
 이 사례들은 호출 LLM에 제공할 원문이 현재 snapshot에 없다는 의미이며, 해당
 법적 사실이 존재하지 않는다는 판정은 아닙니다. 기준선의 분모·최소 적중 건수는
 제외된 기존 적중 사례 수만큼 함께 조정해 언어별 허용 실패 건수를 유지합니다.
