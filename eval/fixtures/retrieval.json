@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "fixture_version": "rag-v2-corpus-20260922",
+  "fixture_version": "rag-v2-corpus-20261028",
   "name": "KRX Rule MCP versioned RAG evaluation golden set",
   "source": {
     "url": "https://gist.githubusercontent.com/chromato99/83b3d788faaacba879210438c46044bc/raw/8cd3ddd0bd363e6315cd725cad4da08f4eaed292/krx-rule-mcp-rag-evaluation-queries-2026-07-28.json",
@@ -31,7 +31,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -215,7 +215,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -325,7 +325,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -433,7 +433,7 @@
             "article_id": "제20조의4"
           },
           {
-            "document_id": "330013576",
+            "document_id": "330020420",
             "article_id": "제96조"
           },
           {
@@ -473,7 +473,7 @@
             "document_id": "330011206"
           },
           {
-            "document_id": "330006388"
+            "document_id": "330014540"
           },
           {
             "document_id": "230001398"
@@ -893,7 +893,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -996,7 +996,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조",
             "evidence": {
               "must_contain_all": [
@@ -1051,7 +1051,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조",
             "evidence": {
               "must_contain_all": [
@@ -1271,7 +1271,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -1455,7 +1455,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -1565,7 +1565,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -1673,7 +1673,7 @@
             "article_id": "제20조의4"
           },
           {
-            "document_id": "330013576",
+            "document_id": "330020420",
             "article_id": "제96조"
           }
         ],
@@ -1709,7 +1709,7 @@
             "document_id": "330011206"
           },
           {
-            "document_id": "330006388"
+            "document_id": "330014540"
           },
           {
             "document_id": "230001398"
@@ -2118,7 +2118,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -2221,7 +2221,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조",
             "evidence": {
               "must_contain_all": [
@@ -2276,7 +2276,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조",
             "evidence": {
               "must_contain_all": [
@@ -2827,7 +2827,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -2993,7 +2993,7 @@
             "article_id": "제20조의4"
           },
           {
-            "document_id": "330013576",
+            "document_id": "330020420",
             "article_id": "제96조"
           },
           {
@@ -3019,7 +3019,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -3491,7 +3491,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -3848,7 +3848,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -4102,7 +4102,7 @@
         "target_policy": "any",
         "targets": [
           {
-            "document_id": "330006388",
+            "document_id": "330014540",
             "article_id": "제20조"
           }
         ]
@@ -4888,7 +4888,7 @@
     },
     {
       "id": "english-holdout-kosdaq-listing-objection",
-      "group": "english-holdout-new",
+      "group": "unavailable-source",
       "split": "validation",
       "input": {
         "query": "How many business days does the KOSDAQ Market Committee have to convene after objection documents are submitted?",
@@ -4897,21 +4897,10 @@
         "limit": 5
       },
       "expectation": {
-        "evidence_status": "supported",
-        "claim_relation": "supports",
+        "evidence_status": "insufficient",
+        "claim_relation": "not_applicable",
         "target_policy": "any",
-        "targets": [
-          {
-            "document_id": "330010027-en",
-            "article_id": "§14",
-            "evidence": {
-              "must_contain_all": [
-                "fifteen (15) days",
-                "business days"
-              ]
-            }
-          }
-        ]
+        "targets": []
       }
     }
   ]
