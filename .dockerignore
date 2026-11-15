@@ -3,7 +3,8 @@
 .env
 .env.*
 data
-index
+index/.generation-build.lock
+bin
 docs
 deploy/kubernetes
 compose.yaml

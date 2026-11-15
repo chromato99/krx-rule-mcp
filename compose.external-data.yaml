@@ -1,0 +1,17 @@
+# Opt in to a separately generated corpus and matching index generation:
+# docker compose -f compose.yaml -f compose.external-data.yaml up -d
+services:
+  krx-rule-mcp:
+    volumes:
+      - type: bind
+        source: "${KRX_RULE_DATA_DIR:?Set KRX_RULE_DATA_DIR to a generated krx-rule-markdown data directory}"
+        target: /app/data
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${KRX_RULE_INDEX_DIR:?Set KRX_RULE_INDEX_DIR to a matching krx-rule-mcp index directory}"
+        target: /app/index
+        read_only: true
+        bind:
+          create_host_path: false
