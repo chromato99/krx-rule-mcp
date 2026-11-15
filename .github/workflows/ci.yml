@@ -133,12 +133,37 @@ jobs:
 
       - name: Docker Compose config
         env:
-          KRX_RULE_DATA_DIR: /opt/krx-rule-data
-          KRX_RULE_INDEX_DIR: /opt/krx-rule-index
           RULE_MCP_AUTH_CONFIG_DIR: /opt/krx-rule-auth
           RULE_MCP_TEI_IMAGE: registry.example/user-selected-tei@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
           RULE_MCP_TEI_IMAGE_DIGEST: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-        run: docker compose config
+        run: |
+          docker compose config --quiet
+          KRX_RULE_DATA_DIR=/opt/krx-rule-data KRX_RULE_INDEX_DIR=/opt/krx-rule-index \
+            docker compose -f compose.yaml -f compose.external-data.yaml config --quiet
 
       - name: Docker build
         run: docker build -f deploy/docker/Dockerfile --target server -t krx-rule-mcp:ci .
+
+      - name: Verify bundled corpus and full vector index without mounts or network
+        run: |
+          docker run --rm --read-only --network none \
+            --entrypoint /usr/local/bin/krx-rule-index krx-rule-mcp:ci \
+            --vector --check --require-full-vector
+          docker run --rm --read-only --network none \
+            -e KRX_VECTOR_SEARCH_ENABLED=true -e KRX_VECTOR_SEARCH_POLICY=required \
+            krx-rule-mcp:ci --print-release-generation
+
+      - name: Bundled corpus MCP search and context smoke test
+        run: |
+          set -eu
+          docker run --detach --rm --name krx-rule-bundled-smoke --read-only \
+            -p 127.0.0.1:18083:8080 -e RULE_MCP_AUTH_MODE=disabled krx-rule-mcp:ci
+          trap 'docker logs krx-rule-bundled-smoke; docker stop krx-rule-bundled-smoke' EXIT
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:18083/readyz; then
+              break
+            fi
+            sleep 1
+          done
+          KRX_HTTP_SMOKE_ENDPOINT=http://127.0.0.1:18083/mcp KRX_HTTP_SMOKE_TOKEN=unused \
+            go test ./cmd/krx-rule-mcp -run '^TestHTTPMCPManualSmoke$' -count=1

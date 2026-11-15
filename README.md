@@ -4,6 +4,8 @@
 
 이 저장소는 수집기를 포함하지 않습니다. [`krx-rule-markdown`](https://github.com/chromato99/krx-rule-markdown)이 만든 schema-v2 `data/` release를 검증한 뒤 BM25/vector index generation을 생성하고, stdio 또는 Streamable HTTP MCP 서버로 제공합니다. 소스 checkout의 `index/current`는 현재 관리 중인 corpus와 맞춘 immutable generation을 가리킵니다.
 
+이 Dockerfile로 빌드하는 서버 이미지는 현재 규정 corpus와 BM25/vector 인덱스를 기본 포함합니다. 별도 수집·인덱스 생성 없이 내장 snapshot을 사용할 수 있으며, 더 최신 규정이나 다른 embedding 모델이 필요하면 규정과 인덱스를 따로 생성해 함께 마운트하세요. 사용 방법은 [Docker Compose](#docker-compose)와 [배포 안내](docs/deployment.md)를 참고하세요.
+
 ## 제공 기능
 
 - **MCP tools/resources**: `search_rules`, `get_context`, `get_rule`, `get_attachment`, `list_rules`, `list_categories`, `list_recent_changes`와 `krx-rule://...` resource URI를 제공합니다.
@@ -115,6 +117,8 @@ Agent 채팅의 도구 목록에서 서버를 확인합니다. [Cursor MCP 공�
 검색 결과는 답변 후보입니다. 적용 시장·시점·주체와 근거가 충분한지는 호출하는 모델이 원문을 읽고 판단해야 합니다. 자세한 순서는 [LLM 클라이언트 안내](docs/llm-client.md)를 참고하세요.
 
 ## Corpus 준비
+
+이미지에 포함된 기본 데이터를 사용한다면 이 절과 `Index 생성` 절의 생성 작업은 생략합니다. 아래 절차는 소스에서 직접 실행하거나 별도의 corpus/index를 만들 때 사용합니다.
 
 이번 검색 평가와 저장소 기본 인덱스를 그대로 재현하려면 corpus의
 [`4f3a111`](https://github.com/chromato99/krx-rule-markdown/commit/4f3a111f7184737f6e959b50af62f9cc87db412f) 커밋을 사용하세요.
@@ -376,14 +380,25 @@ docker compose up -d krx-rule-mcp
 
 ```bash
 cp .env.compose.example .env
-vi .env  # data/index, auth registry directory, user-selected TEI image/digest 설정
+vi .env  # auth registry directory, user-selected TEI image/digest 설정
 docker compose up -d --build
 curl http://localhost:8080/healthz
 ```
 
-`KRX_RULE_DATA_DIR` host path는 컨테이너의 `/app/data:ro`로, `KRX_RULE_INDEX_DIR` host path는 `/app/index:ro`로, `RULE_MCP_AUTH_CONFIG_DIR`은 `/run/secrets/krx-rule-mcp:ro`로 mount됩니다. 인증 directory에는 위 형식의 `bearer-tokens.yaml`을 둡니다. 변경 후 `docker compose restart krx-rule-mcp`로 registry를 다시 로드합니다. 로컬에서 저장소 기본 generation을 쓰려면 `KRX_RULE_INDEX_DIR`를 checkout의 `krx-rule-mcp/index`로 지정할 수 있습니다. Server image는 corpus나 index를 내장하지 않으므로 volume mount가 필요합니다. 기본 host bind는 `127.0.0.1`이며 외부 공개가 필요할 때만 `RULE_MCP_BIND_ADDRESS`를 변경합니다.
+기본 Compose는 이미지의 `/app/data`와 `/app/index`를 사용하므로 별도 데이터 경로를 설정할 필요가 없습니다. 현재 내장 snapshot은 corpus 커밋 `4f3a111`의 121개 문서와 `index/current`가 가리키는 `7d9c7144…` generation의 전체 벡터 48,139개를 포함합니다. 빌드 시 고정된 corpus archive의 SHA-256과 corpus/index 일치 여부, 전체 vector coverage를 검증합니다. 내장 데이터는 빌드 시점의 snapshot이며 실행 중 자동 최신화되지 않습니다. Embedding 모델 가중치는 포함하지 않으므로 vector 검색에는 기존처럼 호환 TEI/API가 필요합니다. 기존에 게시된 `v2.0.1` 이미지는 이 데이터를 포함하지 않으므로 이 변경을 포함한 이미지를 빌드하거나 해당 이미지가 게시된 뒤 사용해야 합니다.
 
-세 경로는 non-root 컨테이너 사용자가 읽을 수 있어야 합니다. 로컬 테스트용 임시 디렉터리를 쓸 때는 `chmod -R a+rX "$KRX_RULE_DATA_DIR" "$KRX_RULE_INDEX_DIR" "$RULE_MCP_AUTH_CONFIG_DIR"`처럼 읽기 권한을 열어 주세요.
+`RULE_MCP_AUTH_CONFIG_DIR`은 `/run/secrets/krx-rule-mcp:ro`로 mount되며, non-root 컨테이너 사용자가 읽을 수 있는 `bearer-tokens.yaml`을 둡니다. 변경 후 `docker compose restart krx-rule-mcp`로 registry를 다시 로드합니다. 기본 host bind는 `127.0.0.1`이며 외부 공개가 필요할 때만 `RULE_MCP_BIND_ADDRESS`를 변경합니다.
+
+더 최신 규정이나 다른 embedding 모델이 필요하면 [Corpus 준비](#corpus-준비)와 [Index 생성](#index-생성)에 따라 별도 corpus와 전체 vector index를 만들고 검증한 뒤 다음 override를 사용하세요.
+
+```bash
+# .env에 두 host 경로를 설정합니다.
+# KRX_RULE_DATA_DIR=/opt/krx-rule-data
+# KRX_RULE_INDEX_DIR=/opt/krx-rule-index
+docker compose -f compose.yaml -f compose.external-data.yaml up -d
+```
+
+이 override는 두 경로를 `/app/data:ro`, `/app/index:ro`로 mount해 내장 데이터를 대체합니다. 두 디렉터리는 미리 존재하고 non-root 사용자가 읽을 수 있어야 합니다. `KRX_RULE_DATA_DIR`/`KRX_RULE_INDEX_DIR`만 설정하고 override를 생략하면 기본 Compose는 계속 내장 데이터를 사용합니다. 기존 외부 데이터 구성을 유지하는 경우에도 override를 함께 지정하세요. Corpus와 index는 항상 일치하는 쌍으로 교체하고, embedding 설정도 해당 index에 맞추세요. 교체 후 서버를 재시작하고, `RULE_MCP_EXPECTED_RELEASE_GENERATION`을 사용한다면 새 구성을 기준으로 다시 계산하세요.
 
 ## Embeddings 설정
 

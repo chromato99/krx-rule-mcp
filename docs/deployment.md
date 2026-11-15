@@ -8,31 +8,30 @@ The root `compose.yaml` is the recommended Docker-only runtime. It starts:
 - `krx-rule-embeddings`: operator-selected, TEI-compatible embeddings sidecar.
 - `krx-rule-reranker`: optional `reranker` profile for Korean evidence reranking.
 
-Prepare a corpus with `krx-rule-markdown`, copy it to a host path, and point Compose at that corpus plus a matching index directory.
-This repository does not contain a generated corpus, but the source checkout may include a default immutable index generation under root-level `index/`.
-Use that bundled generation when it matches your mounted corpus, or generate a separate `KRX_RULE_INDEX_DIR` for your deployment.
-The server image does not contain corpus or index files, so both paths are still supplied as volumes.
-Do not start the server until `$KRX_RULE_INDEX_DIR/current` selects a generation whose `generation.json` and BM25 artifact match the corpus release; otherwise startup fails while loading the repository.
+The server image built by this repository includes a matching corpus at `/app/data`
+and the checked-in current BM25/full-vector generation at `/app/index`.
+Default Compose uses these files without data/index mounts or an index build.
+The bundled snapshot contains 121 documents from corpus commit `4f3a111` and
+48,139 vectors in generation `7d9c7144c732140240246eebf933db56256c09080922bc1801d8c938cbff3abe`.
+It does not update itself at runtime. Embedding model weights are not bundled;
+vector search still needs the compatible TEI sidecar or embeddings API.
+Previously published `v2.0.1` images do not include the data; build this Dockerfile
+or use an image published from this change.
 
 ```bash
 cp .env.compose.example .env
-vi .env  # set data/index, auth registry directory, and a user-selected TEI image/digest
-# KRX_RULE_INDEX_DIR may point to this repository's ./index if it matches KRX_RULE_DATA_DIR.
-# Otherwise publish at least a BM25 generation before starting the server.
-# See "Manual Index Jobs" below for local and container commands.
+vi .env  # set auth registry directory and a user-selected TEI image/digest
 docker compose up -d --build
 curl http://localhost:8080/healthz
 ```
 
-`KRX_RULE_DATA_DIR` is mounted read-only at `/app/data`; `KRX_RULE_INDEX_DIR` is mounted read-only at `/app/index`. The server image does not contain corpus or index files, but it does include the default domain lexicon at `/app/config/domain-lexicon.yaml`.
+The default domain lexicon is also included at `/app/config/domain-lexicon.yaml`.
 `RULE_MCP_AUTH_CONFIG_DIR` is mounted read-only at `/run/secrets/krx-rule-mcp`
 and, in the default required mode, must contain `bearer-tokens.yaml`. Create it
 with the version-1 registry format in [security.md](security.md); the actual
 bearer values remain with clients and only their SHA-256 digests are mounted.
-The host directories must be readable by the non-root container user. For local
-smoke tests with temporary directories, run
-`chmod -R a+rX "$KRX_RULE_DATA_DIR" "$KRX_RULE_INDEX_DIR" "$RULE_MCP_AUTH_CONFIG_DIR"`
-after creating them.
+The authentication directory and registry must be readable by the non-root
+container user (UID 65532).
 
 Compose defaults `RULE_MCP_AUTH_MODE` to `required`,
 binds the MCP port to `127.0.0.1` unless `RULE_MCP_BIND_ADDRESS` is set, and
@@ -52,6 +51,32 @@ for the Compose bind mount, but `bearer-tokens.yaml` may be absent. All other
 HTTP controls remain enabled.
 
 HTTP request and complete JSON-RPC response bodies default to 1 MiB (`RULE_MCP_REQUEST_SIZE_LIMIT` and `RULE_MCP_RESPONSE_SIZE_LIMIT`, minimum 1024 bytes). Tool payload shaping has a separate 512 KiB default (`RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT`). The response limit covers the final wire representation after SDK serialization, including both `structuredContent` and its identical JSON text block. Hosts should forward one representation to the LLM. Requests that exceed the payload or wire limit need a smaller page.
+
+### Use separately generated data
+
+For newer rules or a different embedding model, generate a corpus with
+`krx-rule-markdown` and a matching full-vector index using
+[Manual Index Jobs](#manual-index-jobs). Set both host paths in `.env`, then use
+the explicit override:
+
+```bash
+# .env:
+# KRX_RULE_DATA_DIR=/opt/krx-rule-data
+# KRX_RULE_INDEX_DIR=/opt/krx-rule-index
+docker compose -f compose.yaml -f compose.external-data.yaml up -d
+```
+
+The override mounts the corpus at `/app/data:ro` and index at `/app/index:ro`,
+replacing the bundled pair. Both host directories must already exist and be
+readable by UID 65532. Keep the corpus, index and runtime embedding profile
+consistent; an incompatible pair fails startup. When changing mounted data,
+restart the server because it loads the generation once at startup. Recalculate
+`RULE_MCP_EXPECTED_RELEASE_GENERATION` if configured.
+
+Migration from the previous Compose configuration requires this override to
+continue using external data. Setting `KRX_RULE_DATA_DIR` and
+`KRX_RULE_INDEX_DIR` alone no longer adds mounts to the base `compose.yaml`.
+Pass both `-f` options consistently for subsequent Compose commands.
 
 ### Optional Korean reranker
 
@@ -85,7 +110,15 @@ after each restart.
 ## Manual Index Jobs
 
 Index generation is explicit and can run locally or inside the server image.
-Run it whenever the corpus changes, the indexer changes, or the repository-provided `index/` no longer matches your corpus.
+Skip it when using the image's bundled snapshot. Run it whenever your separate corpus changes, the indexer changes, or the repository-provided `index/` no longer matches your corpus. Write new indexes to a separate writable host directory, then serve them through the read-only override above.
+
+To verify the bundled pair without any mounts or embeddings service:
+
+```bash
+docker run --rm --read-only --network none \
+  --entrypoint /usr/local/bin/krx-rule-index krx-rule-mcp:local \
+  --vector --check --require-full-vector
+```
 
 To verify the repository-provided generation and every declared artifact digest:
 
@@ -158,9 +191,31 @@ The vector command builds the full corpus by default. For a cheap smoke test, ad
 
 `deploy/docker/Dockerfile` has one runtime target:
 
-- `server`: distroless Go image containing `krx-rule-mcp`, `krx-rule-index`, and `config/domain-lexicon.yaml`.
+- `server`: distroless Go image containing `krx-rule-mcp`, `krx-rule-index`, `config/domain-lexicon.yaml`, the matching corpus, and the current BM25/full-vector index generation.
 
-The image is non-root and can run with a read-only filesystem. Corpus data is provided by a read-only volume. Search indexes are provided by a separate read-only volume for serving, and by a writable volume only when running `krx-rule-index`.
+The image is non-root and can run with a read-only filesystem. Data/index volumes
+are optional overrides for serving; index generation requires a separate writable
+volume. The Docker build fetches the corpus archive at `CORPUS_REVISION` and checks
+`CORPUS_ARCHIVE_SHA256`, then validates corpus/index identity, artifact hashes and
+full vector coverage without network access. Only the generation selected by
+`index/current` is copied into the runtime image. Validation runs on the build
+platform, including when cross-compiling an arm64 image.
+
+When updating the default snapshot, commit the matching `index/current` and
+generation artifacts, and update the Dockerfile's `CORPUS_REVISION` and
+`CORPUS_ARCHIVE_SHA256` together. Obtain the archive checksum with:
+
+```bash
+CORPUS_REVISION=4f3a111f7184737f6e959b50af62f9cc87db412f
+curl --fail --location \
+  "https://codeload.github.com/chromato99/krx-rule-markdown/tar.gz/$CORPUS_REVISION" \
+  --output /tmp/krx-rule-corpus.tar.gz
+sha256sum /tmp/krx-rule-corpus.tar.gz
+```
+
+Rebuild and publish the server image to distribute an updated bundled snapshot;
+updating Git alone does not change existing images. A deployment using external
+mounts can still update its matched data/index pair without rebuilding the image.
 
 ## Kubernetes
 
@@ -171,6 +226,10 @@ sidecar in the same Pod. It expects a PVC named `krx-rule-data` mounted at
 `/app/data` with a validated schema-v2 corpus and a separate PVC named
 `krx-rule-index` mounted at `/app/index` with `current` plus immutable
 generation directories.
+These explicit PVC mounts override the image's bundled data. To use the bundled
+snapshot instead, remove both data/index volume mounts and their corresponding
+volumes from the Deployment; the authentication Secret mount remains required
+in the default mode.
 The Kubernetes ConfigMap and Compose runtime use
 `KRX_VECTOR_SEARCH_POLICY=required`, so a missing, malformed, partial, stale,
 or incompatible vector release prevents the replica from becoming a BM25-only
@@ -265,7 +324,7 @@ This is a corpus-specific baseline, not a permanent sizing guarantee. Re-run sta
 
 ## GitHub Actions
 
-CI covers Go tests, Docker build, and smoke checks for `krx-rule-index`/server against a sample corpus. `.github/workflows/publish-image.yml` publishes a single GHCR manifest for `linux/amd64` and `linux/arm64` on `v*` tags or manual dispatch; record its reported manifest digest in the deployment release manifest and deploy by digest. Scheduled sync workflows belong in the separate `krx-rule-markdown` repository.
+CI covers Go tests, Docker build, sample-corpus smoke checks, and verification of the bundled full-vector index as non-root with no mounts or network. It also checks vector adoption and runs MCP search → `get_context` against the image's bundled corpus in BM25 mode. `.github/workflows/publish-image.yml` publishes a single GHCR manifest for `linux/amd64` and `linux/arm64` on `v*` tags or manual dispatch; record its reported manifest digest in the deployment release manifest and deploy by digest. Scheduled sync workflows belong in the separate `krx-rule-markdown` repository.
 
 ## Index publication permissions
 

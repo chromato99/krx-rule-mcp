@@ -57,8 +57,6 @@ services:
       KRX_RERANKER_BATCH_SIZE: "${KRX_RERANKER_BATCH_SIZE:-4}"
       RULE_MCP_RERANKER_IMAGE_DIGEST: "${RULE_MCP_RERANKER_IMAGE_DIGEST:-}"
     volumes:
-      - "${KRX_RULE_DATA_DIR:?Set KRX_RULE_DATA_DIR to a generated krx-rule-markdown data directory}:/app/data:ro"
-      - "${KRX_RULE_INDEX_DIR:?Set KRX_RULE_INDEX_DIR to a krx-rule-mcp index directory}:/app/index:ro"
       - "${RULE_MCP_AUTH_CONFIG_DIR:?Set RULE_MCP_AUTH_CONFIG_DIR to a directory containing bearer-tokens.yaml}:/run/secrets/krx-rule-mcp:ro"
     read_only: true
     tmpfs:
