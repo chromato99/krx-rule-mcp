@@ -457,13 +457,13 @@ func runHTTP(ctx context.Context, config httpRuntimeConfig, server *mcpsdk.Serve
 }
 
 func statelessMCPHandler(server *mcpsdk.Server, logger *slog.Logger) http.Handler {
-	return mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server {
+	return withBrowserProjectRedirect(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server {
 		return server
 	}, &mcpsdk.StreamableHTTPOptions{
 		Logger:       logger,
 		Stateless:    true,
 		JSONResponse: true,
-	})
+	}))
 }
 
 // withResponseSizeLimit applies to synchronous MCP POST replies. The SDK's
