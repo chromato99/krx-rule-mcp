@@ -1,335 +1,110 @@
 # Deployment
 
+Use Docker Compose to serve the bundled rules over HTTP, or run the Go binary against a matching corpus and index. Starting with v2.1.0, the server image includes the corpus and index. The checked-in snapshot contains 121 documents from corpus commit `4f3a111` and 48,139 vectors from generation `7d9c7144…`. The data stays fixed for the life of the image. TEI loads the embedding model weights separately.
+
 ## Docker Compose
 
-The root `compose.yaml` is the recommended Docker-only runtime. It starts:
-
-- `krx-rule-mcp`: Go HTTP MCP server.
-- `krx-rule-embeddings`: operator-selected, TEI-compatible embeddings sidecar.
-- `krx-rule-reranker`: optional `reranker` profile for Korean evidence reranking.
-
-The server image built by this repository includes a matching corpus at `/app/data`
-and the checked-in current BM25/full-vector generation at `/app/index`.
-Default Compose uses these files without data/index mounts or an index build.
-The bundled snapshot contains 121 documents from corpus commit `4f3a111` and
-48,139 vectors in generation `7d9c7144c732140240246eebf933db56256c09080922bc1801d8c938cbff3abe`.
-It does not update itself at runtime. Embedding model weights are not bundled;
-vector search still needs the compatible TEI sidecar or embeddings API.
-Previously published `v2.0.1` images do not include the data; build this Dockerfile
-or use an image published from this change.
+1. Copy `.env.compose.example` to `.env`. Pin `RULE_MCP_TEI_IMAGE` to a compatible image for the target architecture (`registry/repository@sha256:<digest>`) and set `RULE_MCP_TEI_IMAGE_DIGEST` to that same `sha256:<digest>`. The bundled index uses the default E5 profile. [Environment template](../.env.compose.example)
+2. Set `RULE_MCP_AUTH_CONFIG_DIR` to an existing directory. In the default `required` mode, place `bearer-tokens.yaml` there and give the container user (UID 65532) directory traversal and file read access. [Create the bearer registry](security.md#bearer-token-registry)
+3. From the repository root, start the services and check readiness.
 
 ```bash
-cp .env.compose.example .env
-vi .env  # set auth registry directory and a user-selected TEI image/digest
+docker compose config --quiet
 docker compose up -d --build
-curl http://localhost:8080/healthz
+curl --fail --retry 30 --retry-connrefused --retry-delay 2 http://127.0.0.1:8080/readyz
 ```
 
-The default domain lexicon is also included at `/app/config/domain-lexicon.yaml`.
-`RULE_MCP_AUTH_CONFIG_DIR` is mounted read-only at `/run/secrets/krx-rule-mcp`
-and, in the default required mode, must contain `bearer-tokens.yaml`. Create it
-with the version-1 registry format in [security.md](security.md); the actual
-bearer values remain with clients and only their SHA-256 digests are mounted.
-The authentication directory and registry must be readable by the non-root
-container user (UID 65532).
-
-Compose defaults `RULE_MCP_AUTH_MODE` to `required`,
-binds the MCP port to `127.0.0.1` unless `RULE_MCP_BIND_ADDRESS` is set, and
-gives the server 50 seconds to drain. It does not select a TEI image: the
-operator must provide `RULE_MCP_TEI_IMAGE` and its matching
-`RULE_MCP_TEI_IMAGE_DIGEST` for the target architecture. TEI must pass
-`/health` before the MCP server starts, the selected generation must contain
-full vector coverage, and `/readyz` runs a live embedding canary. For production
-set `RULE_MCP_IMAGE` to the GHCR manifest digest reference and set
-`RULE_MCP_SERVER_IMAGE_DIGEST` to the same digest value. Set
-`RULE_MCP_EXPECTED_RELEASE_GENERATION` after calculating it to reject a
-mismatched release.
-
-To run without bearer authentication on a trusted private network, set
-`RULE_MCP_AUTH_MODE=disabled`. The authentication directory must still exist
-for the Compose bind mount, but `bearer-tokens.yaml` may be absent. All other
-HTTP controls remain enabled.
-
-HTTP request and complete JSON-RPC response bodies default to 1 MiB (`RULE_MCP_REQUEST_SIZE_LIMIT` and `RULE_MCP_RESPONSE_SIZE_LIMIT`, minimum 1024 bytes). Tool payload shaping has a separate 512 KiB default (`RULE_MCP_TOOL_OUTPUT_SIZE_LIMIT`). The response limit covers the final wire representation after SDK serialization, including both `structuredContent` and its identical JSON text block. Hosts should forward one representation to the LLM. Requests that exceed the payload or wire limit need a smaller page.
+The client endpoint is `http://127.0.0.1:8080/mcp`. Compose waits for the embeddings service's `/health` check and requires a full-vector index. The MCP port binds to loopback by default. For a published build, set `RULE_MCP_IMAGE=ghcr.io/chromato99/krx-rule-mcp@sha256:<manifest-digest>`, set `RULE_MCP_SERVER_IMAGE_DIGEST` to the same `sha256:…` value, and start with `docker compose up -d --no-build`.
 
 ### Use separately generated data
 
-For newer rules or a different embedding model, generate a corpus with
-`krx-rule-markdown` and a matching full-vector index using
-[Manual Index Jobs](#manual-index-jobs). Set both host paths in `.env`, then use
-the explicit override:
+Build a matching corpus and full-vector index first. Set their existing host paths in `.env`, for example `KRX_RULE_DATA_DIR=/opt/krx-rule-data` and `KRX_RULE_INDEX_DIR=/opt/krx-rule-index`. Enable both read-only mounts with the override.
 
 ```bash
-# .env:
-# KRX_RULE_DATA_DIR=/opt/krx-rule-data
-# KRX_RULE_INDEX_DIR=/opt/krx-rule-index
 docker compose -f compose.yaml -f compose.external-data.yaml up -d
 ```
 
-The override mounts the corpus at `/app/data:ro` and index at `/app/index:ro`,
-replacing the bundled pair. Both host directories must already exist and be
-readable by UID 65532. Keep the corpus, index and runtime embedding profile
-consistent; an incompatible pair fails startup. When changing mounted data,
-restart the server because it loads the generation once at startup. Recalculate
-`RULE_MCP_EXPECTED_RELEASE_GENERATION` if configured.
-
-Migration from the previous Compose configuration requires this override to
-continue using external data. Setting `KRX_RULE_DATA_DIR` and
-`KRX_RULE_INDEX_DIR` alone no longer adds mounts to the base `compose.yaml`.
-Pass both `-f` options consistently for subsequent Compose commands.
+Use both `-f` options for subsequent Compose commands. The base file uses the bundled data. The override mounts the pair at `/app/data` and `/app/index`, both readable by UID 65532. When replacing the pair, recalculate any configured `RULE_MCP_EXPECTED_RELEASE_GENERATION` with those same mounts and recreate the server to load the new data and settings. [External-data override](../compose.external-data.yaml)
 
 ### Optional Korean reranker
 
-The reranker is a separate TEI process because one TEI instance serves one model. Start the profile before enabling required mode in the server:
+To rerank Korean passages, start the separate TEI process, set `KRX_RERANKER_ENABLED=true`, `KRX_RERANKER_POLICY=required` and `KRX_REQUIRE_RERANKER=true` in `.env`, then recreate the server.
 
 ```bash
-docker compose --profile reranker up -d krx-rule-reranker
+docker compose --profile reranker up -d --wait krx-rule-reranker
 docker compose up -d krx-rule-mcp
 ```
 
-Set `KRX_RERANKER_ENABLED=true`, `KRX_RERANKER_POLICY=required`, and `KRX_REQUIRE_RERANKER=true` in `.env`. The maintained experiment pins `dragonkue/bge-reranker-v2-m3-ko` revision `2aca5884ecac490192af9ebd86836d9073d826cd`, F16, candidate K 20, and client batch 4. The service verifies `/info` model identity before serving and `/readyz` sends a live two-passage canary. `RULE_MCP_REQUEST_TIMEOUT` must exceed `RULE_MCP_RERANKER_TIMEOUT`; measured long legal inputs required a 30-minute reranker deadline in required mode.
+The example uses `dragonkue/bge-reranker-v2-m3-ko` with a pinned revision, F16, 20 candidates and batches of four. Pin its runtime image and set `RULE_MCP_RERANKER_IMAGE_DIGEST` for reproducible deployments. Required mode verifies model identity at startup and runs a two-passage readiness check. Keep the HTTP deadline longer than the reranker deadline. This profile is off by default. In the recorded CPU trial, real queries took over two minutes at p95 and the retrieval evaluation missed its release targets.
 
-On the current x86_64 CPU workstation, the constrained TEI process used about 2 GiB when idle. Three short passages took 4.79 seconds; selected real legal queries had a reranker p95 above two minutes. Treat these measurements as hardware-specific. The profile is optional because the protected audit did not meet release-quality gates even though it improved one retrospective evidence case.
+## Manual index jobs
 
-## Bearer Token Rotation
-
-The registry is loaded once at process startup. Editing the host file alone
-does not change accepted credentials. For Compose, add or disable a registry
-record and then run:
+Run the following from `krx-rule-mcp/`. For the checked-in index, use the producer's [pinned corpus](https://github.com/chromato99/krx-rule-markdown/tree/4f3a111f7184737f6e959b50af62f9cc87db412f). To collect newer rules, follow the producer's commands for sync, conversion, cleanup and release validation. [Corpus generation](https://github.com/chromato99/krx-rule-markdown#corpus-생성)
 
 ```bash
-docker compose restart krx-rule-mcp
-curl --fail http://localhost:8080/readyz
+export KRX_RULE_DATA_DIR=../krx-rule-markdown/data
+go run ./cmd/krx-rule-index --index-dir ./index --vector --check --require-full-vector
 ```
 
-Add a replacement token and restart before moving clients. After every client
-uses it, set the old record to `enabled: false` and restart again. Compare the
-`auth_registry_generation` and `active_bearer_tokens` fields from `/readyz`
-after each restart.
+`--check` is read-only and exits nonzero for a missing, stale or invalid generation. To **build** a generation, choose a writable index directory. For BM25 alone, run `go run ./cmd/krx-rule-index` with both directory variables set. For full-vector serving, use a healthy embeddings API and the same profile at build and query time.
 
-## Manual Index Jobs
+```bash
+export KRX_RULE_INDEX_DIR=/opt/krx-rule-index
+mkdir -p "$KRX_RULE_INDEX_DIR"
+docker compose up -d --wait krx-rule-embeddings
+KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 go run ./cmd/krx-rule-index --vector
+go run ./cmd/krx-rule-index --vector --check --require-full-vector
+```
 
-Index generation is explicit and can run locally or inside the server image.
-Skip it when using the image's bundled snapshot. Run it whenever your separate corpus changes, the indexer changes, or the repository-provided `index/` no longer matches your corpus. Write new indexes to a separate writable host directory, then serve them through the read-only override above.
+The example uses the Compose service configured above and its default host port. The container reaches TEI at `http://krx-rule-embeddings:80/v1`. For a different model, set its profile in both the indexer's shell and the server environment. `text-v1` can reuse exact chunk text from a verified previous full generation with the same pinned profile. `--force` recomputes vectors. For a sample, use a separate index directory and add `--vector-sample-query "상장 심사" --vector-sample-per-query 16` to the `--vector` build. [Embedding profile](search.md#embedding-profile)
 
-To verify the bundled pair without any mounts or embeddings service:
+The server image also contains the indexer. For a containerized build, select `--entrypoint /usr/local/bin/krx-rule-index`, mount the corpus read-only and the target index writable, and run as a user that can write to that target. Published generation directories use mode 0755 and artifacts use 0644.
+
+## Serve from source
+
+Set `KRX_RULE_DATA_DIR` and `KRX_RULE_INDEX_DIR` to the validated pair. The binary starts in stdio mode by default. For local HTTP with bearer authentication, set the registry path and listen address.
+
+```bash
+export RULE_MCP_BEARER_TOKEN_FILE=/opt/krx-rule-mcp-auth/bearer-tokens.yaml
+go run ./cmd/krx-rule-mcp --mode http --addr 127.0.0.1:8080
+```
+
+To require hybrid search, set `KRX_VECTOR_SEARCH_ENABLED=true`, configure the matching embedding endpoint and pass `--require-vector` to the server. For a trusted private network, `RULE_MCP_AUTH_MODE=disabled` explicitly disables bearer authentication. Compose still requires its auth directory mount in this mode. [HTTP controls](security.md#http-runtime)
+
+## Release verification
+
+For a local build named `krx-rule-mcp:local`, verify the embedded artifacts offline. Then calculate `release_generation` with the exact image, mounts, image digests, lexicon and search configuration you will deploy. For a Compose deployment using bundled data, run the second command with the deployment's `.env`.
 
 ```bash
 docker run --rm --read-only --network none \
   --entrypoint /usr/local/bin/krx-rule-index krx-rule-mcp:local \
   --vector --check --require-full-vector
+docker compose run --rm --no-deps krx-rule-mcp --print-release-generation
 ```
 
-To verify the repository-provided generation and every declared artifact digest:
+Set `RULE_MCP_EXPECTED_RELEASE_GENERATION` to the printed `release_generation` and recreate the service. `/healthz` checks liveness. `/readyz` returns 503 for a generation mismatch or failed required-backend canary. Find release identity and backend metrics on the internal `/metrics` endpoint.
 
-```bash
-go run ./cmd/krx-rule-index \
-  --data-dir "$KRX_RULE_DATA_DIR" \
-  --index-dir ./index \
-  --check
-```
-
-Add `--vector --require-full-vector` when checking a generation that must contain a full vector artifact.
-
-Local:
-
-```bash
-export KRX_RULE_INDEX_DIR=/opt/krx-rule-index
-mkdir -p "$KRX_RULE_INDEX_DIR"
-
-go run ./cmd/krx-rule-index \
-  --data-dir "$KRX_RULE_DATA_DIR" \
-  --index-dir "$KRX_RULE_INDEX_DIR"
-```
-
-Container:
-
-```bash
-docker build -f deploy/docker/Dockerfile --target server -t krx-rule-mcp:local .
-docker run --rm \
-  --entrypoint /usr/local/bin/krx-rule-index \
-  --user "$(id -u):$(id -g)" \
-  -v "$KRX_RULE_DATA_DIR:/app/data:ro" \
-  -v "$KRX_RULE_INDEX_DIR:/app/index" \
-  krx-rule-mcp:local \
-  --data-dir /app/data --index-dir /app/index
-```
-
-To build vectors with the compose TEI sidecar:
-
-```bash
-docker compose up -d krx-rule-embeddings
-docker run --rm --network krx-rule-mcp_default \
-  --entrypoint /usr/local/bin/krx-rule-index \
-  --user "$(id -u):$(id -g)" \
-  -v "$KRX_RULE_DATA_DIR:/app/data:ro" \
-  -v "$KRX_RULE_INDEX_DIR:/app/index" \
-  -e OPENAI_API_KEY=local \
-  -e KRX_EMBEDDING_BASE_URL=http://krx-rule-embeddings:80/v1 \
-  -e KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small \
-  -e KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
-  -e KRX_EMBEDDING_DIMENSIONS=384 \
-  -e KRX_EMBEDDING_INPUT_FORMAT=text-v1 \
-  krx-rule-mcp:local \
-  --data-dir /app/data \
-  --index-dir /app/index \
-  --vector
-
-docker run --rm \
-  --entrypoint /usr/local/bin/krx-rule-index \
-  -v "$KRX_RULE_DATA_DIR:/app/data:ro" \
-  -v "$KRX_RULE_INDEX_DIR:/app/index:ro" \
-  -e KRX_EMBEDDING_MODEL_REVISION=614241f622f53c4eeff9890bdc4f31cfecc418b3 \
-  krx-rule-mcp:local \
-  --data-dir /app/data --index-dir /app/index --vector --check --require-full-vector
-```
-
-The vector command builds the full corpus by default. For a cheap smoke test, add `--vector-sample-query "상장 심사" --vector-sample-per-query 16`.
-`--vector` publishes BM25, vector, metadata, and `generation.json` together below `generations/<id>/`. The checked-in reference artifact uses `intfloat/multilingual-e5-small` revision `614241f622f53c4eeff9890bdc4f31cfecc418b3`, 384 dimensions, `query: ` / `passage: ` prefixes, and `text-v1` document input. Other OpenAI-compatible embedding profiles are valid release candidates when rebuilt with their own explicit settings, complete coverage, matching runtime provenance, and the same Korean-primary quality gate.
-
-## Images
-
-`deploy/docker/Dockerfile` has one runtime target:
-
-- `server`: distroless Go image containing `krx-rule-mcp`, `krx-rule-index`, `config/domain-lexicon.yaml`, the matching corpus, and the current BM25/full-vector index generation.
-
-The image is non-root and can run with a read-only filesystem. Data/index volumes
-are optional overrides for serving; index generation requires a separate writable
-volume. The Docker build fetches the corpus archive at `CORPUS_REVISION` and checks
-`CORPUS_ARCHIVE_SHA256`, then validates corpus/index identity, artifact hashes and
-full vector coverage without network access. Only the generation selected by
-`index/current` is copied into the runtime image. Validation runs on the build
-platform, including when cross-compiling an arm64 image.
-
-When updating the default snapshot, commit the matching `index/current` and
-generation artifacts, and update the Dockerfile's `CORPUS_REVISION` and
-`CORPUS_ARCHIVE_SHA256` together. Obtain the archive checksum with:
-
-```bash
-CORPUS_REVISION=4f3a111f7184737f6e959b50af62f9cc87db412f
-curl --fail --location \
-  "https://codeload.github.com/chromato99/krx-rule-markdown/tar.gz/$CORPUS_REVISION" \
-  --output /tmp/krx-rule-corpus.tar.gz
-sha256sum /tmp/krx-rule-corpus.tar.gz
-```
-
-Rebuild and publish the server image to distribute an updated bundled snapshot;
-updating Git alone does not change existing images. A deployment using external
-mounts can still update its matched data/index pair without rebuilding the image.
+When updating bundled data, commit `index/current` and its generation together. In the Dockerfile, update `CORPUS_REVISION` and `CORPUS_ARCHIVE_SHA256` with the matching producer commit and its archive checksum. The build verifies the archive and the complete index before packaging the selected generation. CI tests the bundled image, and the publish workflow builds amd64/arm64 images for `v*` tags or manual dispatch. [Dockerfile](../deploy/docker/Dockerfile) · [CI](../.github/workflows/ci.yml) · [Image publication](../.github/workflows/publish-image.yml)
 
 ## Kubernetes
 
-Manifests are in `deploy/kubernetes`.
+The example runs the MCP server and embeddings sidecar in each Pod. Before applying the [manifests](../deploy/kubernetes), configure the following.
 
-The example manifest runs the Go MCP server and an operator-selected embedding TEI
-sidecar in the same Pod. It expects a PVC named `krx-rule-data` mounted at
-`/app/data` with a validated schema-v2 corpus and a separate PVC named
-`krx-rule-index` mounted at `/app/index` with `current` plus immutable
-generation directories.
-These explicit PVC mounts override the image's bundled data. To use the bundled
-snapshot instead, remove both data/index volume mounts and their corresponding
-volumes from the Deployment; the authentication Secret mount remains required
-in the default mode.
-The Kubernetes ConfigMap and Compose runtime use
-`KRX_VECTOR_SEARCH_POLICY=required`, so a missing, malformed, partial, stale,
-or incompatible vector release prevents the replica from becoming a BM25-only
-surprise. The operator-selected TEI image must support the deployment's target
-architecture and sidecar contract. In required mode, runtime embedding errors,
-timeouts, count/dimension mismatches, and non-finite vectors return a tool error
-instead of BM25 results. Optional mode remains available when running the
-binary directly for deployments that explicitly accept BM25 fallback. Re-measure the TEI sidecar resources on the target CPU architecture before rollout. The checked-in Kubernetes example does not add the optional reranker sidecar. A deployment that enables it must add a separately resourced TEI container, set the reranker environment contract and image digest, extend readiness timeouts, and recalculate `release_generation`.
-The ConfigMap also uses `RULE_MCP_AUTH_MODE=required`. The Secret key
-`bearer-tokens.yaml` is mounted as a file under
-`/run/secrets/krx-rule-mcp`; the server rejects a missing or invalid registry
-before listening. The Secret volume itself is optional only so an operator can
-set authentication mode to `disabled` without creating a dummy Secret.
-
-Before applying, update:
-
-- the immutable server image digest in both the `image:` reference and `RULE_MCP_SERVER_IMAGE_DIGEST`
-- the operator-selected immutable TEI image and matching
-  `RULE_MCP_TEI_IMAGE_DIGEST`; it must support the selected embedding profile
-  shared by TEI, the `KRX_EMBEDDING_*` settings, and the vector build metadata
-- the rejected bearer-registry placeholder in `krx-rule-mcp-secret`
-- `RULE_MCP_EXPECTED_RELEASE_GENERATION`
-- ingress host and TLS secret
-- allowed origins
-- PVC/storage strategy for `krx-rule-data` and `krx-rule-index`
-
-The checked-in all-zero server/TEI image digests and placeholder bearer registry are intentionally non-deployable. This prevents an example manifest from silently becoming a production deployment. Compose may use a mutable tag for local development; any reproducible or required-vector rollout must pin its TEI image digest and retain the model commit too.
-
-Calculate the release generation with the exact published image, mounted artifacts, vector settings, and server and TEI image digests that the Pod will use. The command does not call the embeddings endpoint; it only verifies that the configured runtime can adopt the loaded vector snapshot.
-
-```bash
-IMAGE='ghcr.io/chromato99/krx-rule-mcp@sha256:<published-image-digest>'
-IMAGE_DIGEST='sha256:<published-image-digest>'
-TEI_IMAGE_DIGEST='sha256:<tei-runtime-image-digest>'
-
-docker run --rm \
-  -v "$KRX_RULE_DATA_DIR:/app/data:ro" \
-  -v "$KRX_RULE_INDEX_DIR:/app/index:ro" \
-  -e RULE_MCP_SERVER_IMAGE_DIGEST="$IMAGE_DIGEST" \
-  -e RULE_MCP_TEI_IMAGE_DIGEST="$TEI_IMAGE_DIGEST" \
-  -e KRX_VECTOR_SEARCH_ENABLED=true \
-  -e KRX_VECTOR_SEARCH_POLICY=required \
-  -e OPENAI_API_KEY=local \
-  -e KRX_EMBEDDING_BASE_URL=http://127.0.0.1:80/v1 \
-  -e KRX_EMBEDDING_MODEL=intfloat/multilingual-e5-small \
-  -e KRX_EMBEDDING_DIMENSIONS=384 \
-  "$IMAGE" --print-release-generation
-```
-
-Copy the printed `release_generation` into the ConfigMap, then apply:
-
-```bash
-kubectl apply -f deploy/kubernetes/
-kubectl rollout status deployment/krx-rule-mcp
-```
-
-`/readyz` returns 503 when the loaded descriptor differs from the configured generation. In required-vector mode it also performs a bounded canary embedding (five-second default) and validates the returned count, configured dimensions, finite values, and an exact match with the loaded vector index; a TEI outage therefore removes the replica from service and readiness automatically recovers with TEI. A successful response includes `auth_mode`, `auth_registry_generation`, and `active_bearer_tokens`; these values do not include individual token IDs or hashes. The public Ingress routes only `/mcp`; `/healthz`, `/readyz`, and `/metrics` remain available through the cluster-internal Service for probes and monitoring. For strict no-mixed-generation cutovers, deploy a second labeled Service/Deployment and switch the public route only after every new Pod is ready.
-
-After changing `bearer-tokens.yaml`, update the Secret and restart all server
-Pods. The process intentionally does not watch mounted Secret updates:
-
-```bash
-kubectl apply -f deploy/kubernetes/secret.yaml
-kubectl rollout restart deployment/krx-rule-mcp
-kubectl rollout status deployment/krx-rule-mcp
-```
-
-Wait for rollout completion before considering an old token revoked. During
-the default RollingUpdate, an old Pod may continue accepting the previous
-startup snapshot. Follow the same add–restart–move clients–disable–restart
-sequence used by Compose.
-
-After rollout, query each Pod directly through the Kubernetes API proxy instead of sampling the load-balanced Service. Every line must report the same release and authentication registry generations:
+| Setting | What to supply |
+| --- | --- |
+| Images and identity | Replace placeholder server and TEI image references and matching digest variables. Match the sidecar model and revision to the vector index. Calculate the expected release generation using this configuration. |
+| Corpus and index | Populate the `krx-rule-data` and `krx-rule-index` PVCs. To use the image snapshot, remove both PVC mounts and their volumes from the Deployment. |
+| Network and credentials | Replace the placeholder bearer registry, set the allowed origins, ingress host and TLS secret. Expose `/mcp` publicly and keep probes and metrics cluster-internal. |
+| Resources | The server requests 1536 MiB and has a 2 GiB limit, separate from TEI. Size index jobs separately (historical CPU full build peaked at about 1.7 GiB RSS). Measure on the target hardware. A reranker needs its own container, resources and probe deadlines. |
 
 ```bash
 NAMESPACE=default
+kubectl -n "$NAMESPACE" apply -f deploy/kubernetes/
+kubectl -n "$NAMESPACE" rollout status deployment/krx-rule-mcp
 for pod in $(kubectl -n "$NAMESPACE" get pods -l app=krx-rule-mcp -o jsonpath='{.items[*].metadata.name}'); do
   printf '%s ' "$pod"
   kubectl get --raw "/api/v1/namespaces/$NAMESPACE/pods/$pod:8080/proxy/readyz"
 done
 ```
 
-This is a post-deploy assertion only; the application does not add peer discovery or a distributed generation store.
-
-### Memory profile behind the manifest
-
-The server container request/limit is `1536Mi`/`2Gi`. Re-measure startup memory whenever the corpus, index format, or embedding dimensions change; the separate TEI sidecar is not included in the server figure.
-
-The full BM25+vector build took 48m36s and peaked at `1,756,900KiB` RSS with local CPU TEI. Run index publication as a separate release job with at least a `2Gi` request and a `3Gi` limit; do not assume the lower server startup figure applies to builds. The local TEI reported no immutable model SHA, so a production rollout must rebuild with a pinned model revision even when the model ID and dimensions match.
-
-This is a corpus-specific baseline, not a permanent sizing guarantee. Re-run startup RSS plus representative concurrent `search_rules`, `get_context`, and long-page calls whenever corpus/chunk count, vector dimensions, index representation, Go version, or concurrency defaults change. Record p50/p95/p99 latency, allocation rate, peak RSS, and OOM/throttle events before lowering the request or limit.
-
-## GitHub Actions
-
-CI covers Go tests, Docker build, sample-corpus smoke checks, and verification of the bundled full-vector index as non-root with no mounts or network. It also checks vector adoption and runs MCP search → `get_context` against the image's bundled corpus in BM25 mode. `.github/workflows/publish-image.yml` publishes a single GHCR manifest for `linux/amd64` and `linux/arm64` on `v*` tags or manual dispatch; record its reported manifest digest in the deployment release manifest and deploy by digest. Scheduled sync workflows belong in the separate `krx-rule-markdown` repository.
-
-## Index publication permissions
-
-The indexer keeps incomplete staging directories private, then publishes a
-complete generation with directory mode 0755 and artifact mode 0644. This lets
-the default non-root container read a host-generated index through its read-only
-mount. Parent directories and the mounted corpus must also be readable by the
-configured runtime user.
+Verify that **every Pod** reports the expected release and authentication registry generations. If every public request must see the same release during cutover, bring up a second Deployment and Service and switch the route after all new Pods are ready. [Token rotation](security.md#token-rotation)
