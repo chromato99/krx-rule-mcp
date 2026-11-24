@@ -1,75 +1,39 @@
 # Retrieval and caller-answer quality
 
-The MCP server retrieves source material. The calling LLM judges applicability,
-conditions, contradictions and whether to answer, search again or clarify.
-Retrieval checks do not certify the calling model's final answers.
+Use the retrieval evaluator to check whether a caller can reach the required passages through `search_rules` and `get_context`. Evaluate the model's eventual answer in the client where it will be used.
 
-## Maintained evaluation inputs
+## Run the regression check
 
-- `eval/fixtures/retrieval.json`: current schema-v2 regression questions and
-  document/article/attachment targets. The source metadata records attribution;
-  the fixture is self-contained and requires no historical intake file.
-- `eval/baselines/retrieval.json`: fixed language-specific retrieval floors and
-  corpus/index/embedding/lexicon/candidate-budget identities.
-- `eval/schema/retrieval.schema.json`: the current fixture schema. Deprecated
-  server-answerability controls are not part of this format.
+Run the evaluator from the repository root with the matching corpus, index and a healthy E5 embeddings endpoint.
 
-The 210 regression/development/validation cases are maintained checks, not
-independent evidence of generalization. Retain question, filter and target
-contracts when comparing implementations. Removing obsolete fixture fields
-changes its contract hash, but does not justify changing retrieval floors.
+```bash
+KRX_EMBEDDING_BASE_URL=http://127.0.0.1:18081/v1 \
+go run ./cmd/krx-rule-eval \
+  --data-dir ../krx-rule-markdown/data --index-dir ./index \
+  --vector --require-vector --fail-on-gate \
+  --output eval/results/retrieval.json
+```
 
-## Retrieval measures
+The [fixture](../eval/fixtures/retrieval.json) contains 210 maintained cases in [schema v2](../eval/schema/retrieval.schema.json). The [baseline](../eval/baselines/retrieval.json) records per-language floors, eligible counts and artifact identities. Twelve cases are marked `unavailable-source` because the requested source is absent from this corpus snapshot.
 
-`rag-retrieval-evaluator-v4` uses the public `search_rules → get_context` path.
+**Known English limitation.** For generation `7d9c7144…`, English document Hit@5 was 21/21 and evidence bundle Hit@5 was 20/21. In `audit-d-english-margin-repurpose`, the right document ranked first but its returned passages omitted §139. The release accepted this miss. The 21/21 evidence floor remains in force, so the full-vector gate reported a failure. [Index release evaluation](https://github.com/chromato99/krx-rule-mcp/pull/10)
 
-- Document Hit@5 checks the labelled document target policy within the first
-  five returned documents.
-- Evidence bundle Hit@5 checks required text and reviewed contradiction phrases
-  in contexts from those first five documents. Fragments combine only within
-  their document/article/attachment target. `any`/`all`/`at_least` remain explicit.
-- Every returned chunk ID must be nonempty, unique and retrievable without
-  truncation, with matching source/document/article/attachment ownership.
-- The version/status/count/result-limit contract and explicit filters must hold.
+## What the gate checks
 
-A document candidate without chunks can be inspected with `get_rule`; its ID
-alone is not substantive evidence. Manual/document-only expectations do not
-count as substantive evidence successes. Within-document depth and internal
-candidate recall remain diagnostics. A target in the internal pool is not a
-candidate already available to the LLM.
+| Measure | Passing condition |
+| --- | --- |
+| Document Hit@5 | The first five documents meet the labelled target policy (`any`, `all` or `at_least`) often enough to reach each language's floor. |
+| Evidence bundle Hit@5 | Contexts reachable from those documents contain the required text or reviewed contradiction phrases for the labelled document, article or attachment. Manual and document-only targets are excluded from substantive evidence hits. |
+| Returned evidence | Every returned chunk has a unique, nonempty ID, is readable in full, and belongs to the expected document, article and attachment. Status, result counts, limits and explicit filters must agree with the response. |
+| Reproducibility | Full vector coverage and valid metadata. The case/target contract, corpus, index, embedding artifact, lexicon, evaluator version and first-stage candidate limit match the baseline. |
 
-The fixture's `supported`/`insufficient`/`ambiguous` labels describe the answer
-task. Related candidates for negative/ambiguous queries are not false acceptance.
-`automatic_passed` describes retrieval checks only.
+The evaluator is `rag-retrieval-evaluator-v4`. Internal candidate recall is diagnostic. A passage counts as available to the model when it is accessible through the returned results. Labels such as `insufficient` and `ambiguous` describe the caller's answer task. A related search match is a valid outcome for those queries.
 
-## Regression gate and workflow
-
-`--fail-on-gate` requires full-vector integrity, no filter leaks, valid returned
-contracts and consistent contexts. Document/evidence Hit@5 counts per language
-must not regress against the same question and target contract. Artifact and
-configuration identities must match. Returning nothing cannot pass.
-
-`--split` and `--case-prefix` are diagnostic filters and cannot be used with the
-gate. `--fixture` accepts another current-schema fixture. For a sealed holdout,
-`--holdout-reservation` must name an external reservation file containing
-`schema_version: 1` and `canonical_source_ids`; every reserved source must be
-covered and every target must belong to a reserved source.
-
-The manual `retrieval-eval.yml` workflow checks retrieval regression using a
-pinned corpus commit. It does not deploy or approve a model-backed product.
-Generated reports belong in ignored `eval/results/`. Experiment histories,
-publication notes, sampling scripts and archived run output are not maintained
-project files.
+- For BM25 diagnostics omit `--vector --require-vector --fail-on-gate`. Use `--split` or `--case-prefix` only for diagnostics. Use `--fixture` for a different schema-v2 set.
+- Compare two reports from the same inputs with `python3 eval/compare.py before.json after.json`. Reports go in the ignored `eval/results/` directory. The [manual evaluation workflow](../.github/workflows/retrieval-eval.yml) takes the exact producer commit and runs the release gate.
 
 ## Caller LLM evaluation
 
-Fix the host, model/version, prompt, tool budget, corpus release and retrieval
-configuration. Record tool calls, inspected contexts, final answers and citations.
-Assess claim correctness, evidence, unsupported assertions, clarification/refusal,
-coverage, latency and token cost. See [the client guide](llm-client.md).
+Fix the client, model/version, prompt, tool budget, corpus release and retrieval settings. Record tool calls, contexts read, final claims and citations. Review correctness, unsupported claims, clarification or refusal, latency and token cost. Include ambiguous scopes, false premises, cross-document questions and cases that require more context. [Client workflow](llm-client.md)
 
-Before final evaluation, reserve canonical source groups with English variants
-and attachments in the same group. Freeze implementation and prompt before
-inspecting results. A set used to select changes becomes validation data.
-Do not add question-specific aliases or lower failed objectives to make a run
-pass. Product answer targets must be assessed in the actual caller workflow.
+For an independent test, reserve unseen canonical sources, grouping translations and attachments with their Korean parent. Freeze the implementation and prompt before examining results. A sealed fixture requires `--holdout-reservation` pointing to an external JSON file with `schema_version: 1` and `canonical_source_ids`. Every target must be reserved and every reserved source represented. Keep previously inspected cases for regression and preserve their thresholds.
